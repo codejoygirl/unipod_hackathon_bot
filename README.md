@@ -48,8 +48,8 @@ Rules (locked):
 
 ## Requirements
 
+- Node.js 20+ (22 recommended) and npm (root `npm install` enables Husky hooks)
 - PHP 8.3+ and Composer
-- Node.js 20+ (22 recommended) and npm
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - Docker Desktop (or Engine + Compose)
 
