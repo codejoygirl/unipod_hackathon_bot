@@ -1,0 +1,31 @@
+[project]
+name = "ai-service"
+version = "0.1.0"
+description = "Private FastAPI AI/RAG service for Community Assistant"
+authors = [
+    { name = "Balogun Abdulsamad", email = "abdulsamadbalogun25@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.0",
+    "fastapi[standard]>=0.141.1",
+    "httpx>=0.28.1",
+    "psycopg[binary]>=3.3.5",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.0.54",
+]
+
+[project.scripts]
+ai-service = "ai_service:main"
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.8",
+    "types-requests>=2.33.0.20260906",
+]
