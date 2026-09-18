@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: community_ai_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: community_ai
+      POSTGRES_USER: community
+      POSTGRES_PASSWORD: community_secure_production_password_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U community -d community_ai"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - internal_network
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: community_ai_service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      SERVICE_NAME: ai-service
+      DEBUG: "false"
+      INTERNAL_HMAC_SECRET: "prod_secure_hmac_secret_key_minimum_32_bytes_entropy"
+      DATABASE_URL: "postgresql+psycopg://community:community_secure_production_password_2026@postgres:5432/community_ai"
+      DB_POOL_SIZE: 20
+      DB_MAX_OVERFLOW: 10
+      DB_POOL_TIMEOUT: 30.0
+      # AI Provider configuration
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      EMBEDDING_MODEL_NAME: "text-embedding-3-small"
+      CHAT_MODEL_NAME: "gpt-4o-mini"
+    ports:
+      - "8000:8000"
+    networks:
+      - internal_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  internal_network:
+    driver: bridge

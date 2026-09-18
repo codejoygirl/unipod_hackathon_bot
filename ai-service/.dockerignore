@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Virtual Environments
+.venv/
+env/
+venv/
+
+# Environment files with local secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Local Data & Test Artifacts
+tests/.pytest_cache/
+storage/
+*.log
