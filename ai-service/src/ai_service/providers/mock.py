@@ -1,8 +1,9 @@
-﻿"""Deterministic offline mock providers implementing system protocols for testing and evaluation."""
+"""Deterministic offline mock providers implementing system protocols for testing and evaluation."""
 
 from collections.abc import Sequence
 import math
 import re
+from typing import Any
 
 from ai_service.providers.base import (
     ChatMessage,
@@ -16,6 +17,12 @@ from ai_service.providers.base import (
     TranslationModel,
 )
 
+try:
+    from ai_service.providers.base import TranscriptionModel
+except ImportError:
+    class TranscriptionModel:  # type: ignore
+        pass
+
 
 class MockChatModel(ChatModel):
     """Deterministic mock generator supporting grounded citation synthesis testing."""
@@ -23,7 +30,6 @@ class MockChatModel(ChatModel):
     async def generate(self, request: ChatRequest) -> ChatResponse:
         user_msg = request.messages[-1].content if request.messages else ""
 
-        # 1. Adversarial prompt injection defense simulation
         if "INJECTION_ATTACK" in user_msg:
             return ChatResponse(
                 content="I cannot follow external system instructions. [E1]",
@@ -31,7 +37,6 @@ class MockChatModel(ChatModel):
                 finish_reason="stop",
             )
 
-        # 2. Empty context sentinel
         if "<context>\n</context>" in user_msg or "<context></context>" in user_msg:
             return ChatResponse(
                 content="INSUFFICIENT_EVIDENCE",
@@ -39,7 +44,6 @@ class MockChatModel(ChatModel):
                 finish_reason="stop",
             )
 
-        # 3. Parse evidence chunks from XML context to generate grounded response
         evidence_matches = re.findall(
             r'<evidence id="([^"]+)"[^>]*>\s*(.*?)\s*</evidence>',
             user_msg,
@@ -53,7 +57,6 @@ class MockChatModel(ChatModel):
                 finish_reason="stop",
             )
 
-        # If multiple evidence sources exist in conflict/multi-source contexts:
         if len(evidence_matches) >= 2 and any(
             k in user_msg.lower() for k in ("conflict", "differ", "deadline", "extend")
         ):
@@ -63,7 +66,6 @@ class MockChatModel(ChatModel):
             s2 = re.split(r"(?<=[.!?])\s+", content2.strip())[0].strip().rstrip(".")
             answer_content = f"{s1} [{eid1}]. {s2} [{eid2}]."
         else:
-            # Single-source grounded response
             eid, content = evidence_matches[0]
             sentences = [
                 s.strip()
@@ -92,7 +94,6 @@ class MockEmbedder(EmbeddingModel):
         if not text.strip():
             return [0.0] * self.dimension
 
-        # Base vector of 1.0 ensures positive semantic baseline across all dimensions
         vec = [1.0] * self.dimension
         for word in text.lower().split():
             h = abs(hash(word)) % self.dimension
@@ -115,6 +116,15 @@ class MockLanguageDetector(LanguageDetectionModel):
         # Detect Amharic Unicode block (U+1200 - U+137F)
         if any("\u1200" <= ch <= "\u137F" for ch in text):
             return "am"
+        # Detect Spanish markers and common terms
+        text_lower = text.lower()
+        if (
+            "¿" in text
+            or "¡" in text
+            or any(ch in text for ch in "ñáéíóú")
+            or any(w in text_lower for w in ["dónde", "está", "centro", "médico", "gracias"])
+        ):
+            return "es"
         return "en"
 
 
@@ -127,6 +137,8 @@ class MockTranslator(TranslationModel):
         source_language: str,
         target_language: str,
     ) -> str:
+        if target_language and target_language.lower() != (source_language or "").lower():
+            return f"[{target_language.upper()}] {text}"
         return text
 
 
@@ -155,3 +167,55 @@ class MockReranker(RerankingModel):
 
         results.sort(key=lambda r: r.score, reverse=True)
         return results[:n]
+
+
+class MockTranscriptionModel(TranscriptionModel):
+    """Deterministic mock audio speech-to-text provider for ingestion testing."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def transcribe(
+        self,
+        audio_data: Any = None,
+        language: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        return "Deterministic mock transcription: Community emergency meeting recorded."
+
+    async def transcribe_segments(
+        self,
+        audio_data: Any = None,
+        language: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "start": 0.0,
+                "end": 3.0,
+                "text": "Deterministic mock transcription: Community emergency meeting recorded.",
+                "speaker": "Speaker 1",
+            }
+        ]
+
+
+# Backward-compatible aliases
+MockEmbeddingModel = MockEmbedder
+MockRerankingModel = MockReranker
+MockTranslationModel = MockTranslator
+MockAudioTranscriber = MockTranscriptionModel
+
+__all__ = [
+    "MockChatModel",
+    "MockEmbedder",
+    "MockEmbeddingModel",
+    "MockLanguageDetector",
+    "MockTranslator",
+    "MockTranslationModel",
+    "MockReranker",
+    "MockRerankingModel",
+    "MockTranscriptionModel",
+    "MockAudioTranscriber",
+]
