@@ -23,11 +23,15 @@ See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md
 
 ## Setup
 
+**Linux / macOS**
+
 ```bash
 cp .env.example .env.local
 npm install
 npm run dev
 ```
+
+**Windows (PowerShell)**
 
 ```powershell
 Copy-Item .env.example .env.local

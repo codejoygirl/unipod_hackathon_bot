@@ -12,7 +12,8 @@ See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md
 | Language | PHP 8.3+ |
 | Local Docker | Laravel Sail (`compose.yaml`) |
 | Auth | Laravel Sanctum (Phase 1) |
-| API docs | Scramble / OpenAPI (Phase 1) |
+| API docs | Scramble OpenAPI at `/docs/api` (+ `/docs/api.json`) |
+
 | Database | PostgreSQL + pgvector |
 | Queue / cache | Redis; `php artisan queue:work` |
 
@@ -23,6 +24,10 @@ See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md
 
 ## Setup with Sail (recommended locally)
 
+Same steps twice only because shells differ: `cp` / `./vendor/bin/sail` on Linux/macOS, `Copy-Item` / `.\vendor\bin\sail` on Windows PowerShell.
+
+**Linux / macOS**
+
 ```bash
 cp .env.example .env
 composer install
@@ -30,6 +35,8 @@ php artisan key:generate
 ./vendor/bin/sail up -d
 ./vendor/bin/sail artisan migrate
 ```
+
+**Windows (PowerShell)**
 
 ```powershell
 Copy-Item .env.example .env

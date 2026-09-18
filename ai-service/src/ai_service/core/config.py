@@ -4,7 +4,7 @@
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "community-assistant-ai"
+    app_name: str = "zak-ai"
     app_env: str = "local"
     log_level: str = "info"
     database_url: str = "postgresql+psycopg://community:community@127.0.0.1:5432/community_assistant"

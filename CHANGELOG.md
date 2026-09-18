@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenAPI docs scaffold: Laravel Scramble (`/docs/api`) and FastAPI (`/docs`, `/openapi.json`)
 - Husky + commitlint (Conventional Commits) and GitHub PR title workflow
 - Pull request template and contributing guide for commit/PR formats
 - Monorepo scaffold: `backend/` (Laravel 13 + Sail), `frontend/` (Next.js), `ai-service/` (FastAPI + uv)

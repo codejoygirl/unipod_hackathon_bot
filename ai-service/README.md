@@ -10,7 +10,7 @@ See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md
 
 | Piece | Choice |
 | --- | --- |
-| Framework | FastAPI |
+| Framework | FastAPI (OpenAPI UI at `/docs`, JSON at `/openapi.json`) |
 | Packaging | uv + committed `uv.lock` |
 | Validation | Pydantic / pydantic-settings |
 | ORM / migrations | SQLAlchemy + Alembic |
@@ -24,11 +24,15 @@ See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md
 
 ## Setup
 
+**Linux / macOS**
+
 ```bash
 cp .env.example .env
 uv sync
 uv run fastapi dev src/ai_service/main.py --port 8001
 ```
+
+**Windows (PowerShell)**
 
 ```powershell
 Copy-Item .env.example .env

@@ -57,6 +57,8 @@ Rules (locked):
 
 ### Option A — Sail (Laravel local DX)
 
+**Linux / macOS**
+
 ```bash
 cd backend
 cp .env.example .env
@@ -65,6 +67,8 @@ php artisan key:generate
 ./vendor/bin/sail up -d
 ./vendor/bin/sail artisan migrate
 ```
+
+**Windows (PowerShell)**
 
 ```powershell
 cd backend
@@ -77,14 +81,23 @@ php artisan key:generate
 
 ### Option B — Root Compose infra + host processes
 
+**Linux / macOS**
+
 ```bash
 cp .env.example .env
 docker compose -f compose.yaml up -d
 ```
 
+**Windows (PowerShell)**
+
+```powershell
+Copy-Item .env.example .env
+docker compose -f compose.yaml up -d
+```
+
 Do not run Option A and Option B databases on the same ports at once.
 
-Then:
+Then (same idea on both shells — use `Copy-Item` instead of `cp` on PowerShell):
 
 ```bash
 # frontend
@@ -106,6 +119,7 @@ uv run fastapi dev src/ai_service/main.py --port 8001
 
 | Doc | Purpose |
 | --- | --- |
+| [docs/api/README.md](docs/api/README.md) | OpenAPI / Scramble / FastAPI docs |
 | [docs/prd.md](docs/prd.md) | Working product requirements |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | Phased build plan (maps to PRD §40) |
 | [CHANGELOG.md](CHANGELOG.md) | Notable changes |
