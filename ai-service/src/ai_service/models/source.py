@@ -4,14 +4,14 @@ from sqlalchemy import Enum, Index, String, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from ai_service.db.base import Base, TenantScopedMixin, TimestampMixin
+from ai_service.db.base import Base, CommunityScopedMixin, TenantScopedMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from ai_service.models.chunk import KnowledgeChunk
     from ai_service.models.version import KnowledgeSourceVersion
 
 
-class KnowledgeSource(Base, TenantScopedMixin, TimestampMixin):
+class KnowledgeSource(Base, TenantScopedMixin, CommunityScopedMixin, TimestampMixin):
     __tablename__ = "knowledge_sources"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -45,4 +45,5 @@ class KnowledgeSource(Base, TenantScopedMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_sources_tenant_uri", "tenant_id", "uri", unique=True),
         Index("ix_sources_tenant_status", "tenant_id", "status"),
+        Index("ix_sources_tenant_community", "tenant_id", "community_id"),
     )

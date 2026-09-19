@@ -6,8 +6,8 @@ from ai_service.retrieval.predicates import build_retrieval_predicates
 
 def test_hard_tenant_isolation_in_predicates():
     """Verify that tenant and community boundaries are hardcoded into SQL expressions."""
-    tenant_a = uuid.uuid4()
-    community_1 = uuid.uuid4()
+    tenant_a = str(uuid.uuid4())
+    community_1 = str(uuid.uuid4())
 
     predicate = build_retrieval_predicates(
         tenant_id=tenant_a,
@@ -22,8 +22,7 @@ def test_hard_tenant_isolation_in_predicates():
         )
     )
 
-    # Predicate MUST assert chunk tenant and source tenant matches tenant_a
     assert f"knowledge_chunks.tenant_id = '{tenant_a}'" in compiled
     assert f"knowledge_sources.tenant_id = '{tenant_a}'" in compiled
-    # Predicate MUST filter by community_1
-    assert str(community_1) in compiled
+    assert community_1 in compiled
+    assert "knowledge_chunks.community_id" in compiled

@@ -43,8 +43,8 @@ class Settings(BaseSettings):
 
     # Database Configuration
     DATABASE_URL: str = Field(
-        default="postgresql+psycopg://community:community_pass@127.0.0.1:5432/community_ai",
-        description="PostgreSQL async connection string (using psycopg or asyncpg).",
+        default="postgresql+psycopg://sail:password@127.0.0.1:5432/zak",
+        description="PostgreSQL connection string (same Sail DB as Laravel locally).",
     )
     DB_POOL_SIZE: int = Field(default=20, ge=5, le=100)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0, le=50)

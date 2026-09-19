@@ -120,6 +120,7 @@ class IngestionPipeline:
             source = KnowledgeSource(
                 id=uuid.uuid4(),
                 tenant_id=request.tenant_id,
+                community_id=request.community_id,
                 uri=request.uri,
                 name=request.name,
                 source_type=request.source_type,
@@ -170,6 +171,7 @@ class IngestionPipeline:
             k_chunk = KnowledgeChunk(
                 id=uuid.uuid4(),
                 tenant_id=request.tenant_id,
+                community_id=request.community_id,
                 source_id=source.id,
                 version_id=new_version.id,
                 chunk_index=idx,

@@ -110,8 +110,9 @@ uv run fastapi dev src/ai_service/main.py --port 8001
 
 | URL | Service |
 | --- | --- |
+| http://localhost | Laravel API (Sail, default `APP_PORT=80`) |
+| http://localhost/docs/api | Scramble OpenAPI |
 | http://localhost:3000 | Frontend |
-| http://localhost:8000 or Sail `:80` | Laravel API |
 | http://localhost:8001/docs | AI service OpenAPI (local only) |
 | http://localhost:8001/health/live | AI liveness |
 

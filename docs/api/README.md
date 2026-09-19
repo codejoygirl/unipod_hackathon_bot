@@ -7,29 +7,42 @@ Zak uses **OpenAPI** (the specification). “Swagger” usually means the UI/too
 | Backend (Laravel) | `/docs/api` | `/docs/api.json` | [Scramble](https://scramble.dedoc.co/) |
 | AI service (FastAPI, internal) | `/docs` | `/openapi.json` | FastAPI native |
 
-## Local URLs
+## Local URLs (Laravel Sail)
 
 ```text
-Backend:     http://localhost:8000/docs/api
-Backend JSON: http://localhost:8000/docs/api.json
+Backend:      http://localhost/docs/api
+Backend JSON: http://localhost/docs/api.json
+API:          http://localhost/api/v1/...
 
-AI service:  http://localhost:8001/docs
-AI JSON:     http://localhost:8001/openapi.json
+AI service:   http://localhost:8001/docs
+AI JSON:      http://localhost:8001/openapi.json
 ```
 
 Laravel docs are limited to the `local` environment by default (`RestrictedDocsAccess`).  
 Do **not** expose AI-service docs on the public internet in production.
 
-## Backend setup
+## Backend setup (Sail)
 
 - Package: `dedoc/scramble`
 - Config: `backend/config/scramble.php` (`api_path` = `api/v1`)
 - Routes under `backend/routes/api.php` are documented automatically
 
+**Linux / macOS**
+
 ```bash
 cd backend
-php artisan serve
-# open /docs/api
+./vendor/bin/sail up -d
+./vendor/bin/sail artisan migrate
+# open http://localhost/docs/api
+```
+
+**Windows (PowerShell)**
+
+```powershell
+cd backend
+.\vendor\bin\sail up -d
+.\vendor\bin\sail artisan migrate
+# open http://localhost/docs/api
 ```
 
 ## AI service setup

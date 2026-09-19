@@ -19,7 +19,7 @@ See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md
 ## Prerequisites
 
 - Node.js 20+ (22 recommended)
-- Backend reachable (Sail or `php artisan serve`) after Phase 1 auth
+- Backend reachable via **Laravel Sail** (`http://localhost`) after Phase 1 auth
 
 ## Setup
 

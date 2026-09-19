@@ -2,7 +2,7 @@
 
 **Source of truth for product scope:** [prd.md](prd.md) (§8 scope, §39 acceptance, §40 priorities, §41 team).  
 **Engineering invariants:** [../AGENTS.md](../AGENTS.md).  
-**Now:** Repository scaffold only. No product features yet.
+**Now:** Phase 2 knowledge/RAG foundation complete. Next: Phase 3 member experience.
 
 Phases below map 1:1 to PRD §40 delivery priorities.
 
@@ -27,16 +27,16 @@ Maps to: PRD §25–§28 structure, §32 Sail/Compose split.
 
 Maps to: PRD §40 Priority 1. Owners: Member 1 (+ shared review).
 
-1. Sanctum cookie auth for SPA; CSRF; CORS allowlist
-2. Tenancy: tenants, communities, groups, memberships
-3. Roles, policies, gates; tenant/community/`group_id` scopes
-4. Core models from PRD §34 (as needed for foundation)
-5. Audit logging foundation
-6. Private local storage abstraction (PRD §33)
-7. `/api/v1` versioning + Scramble OpenAPI (`/docs/api`)
-8. Named queues + Redis (`high`, `channels`, `ai`, `ingestion`, `meetings`, `notifications`, `default`)
-9. `app` / `rag` schema ownership plan (PRD §25.3); restricted DB roles when ready
-10. Tenant-isolation feature tests (PRD §37.4)
+- [x] Sanctum cookie auth for SPA; CSRF; CORS allowlist (`FRONTEND_URL`)
+- [x] Tenancy: tenants, communities, groups, memberships
+- [x] Roles, policies, gates; tenant/community scopes (`BelongsToTenant`)
+- [x] Core foundation models (Tenant, Community, Group, Membership, AuditLog)
+- [x] Audit logging foundation (`AuditLogger`)
+- [x] Private local storage abstraction (`PrivateStorage` / `LocalPrivateStorage`)
+- [x] `/api/v1` versioning + Scramble OpenAPI (`/docs/api`)
+- [x] Named queues config (`config/zak.php`)
+- [x] `app` / `rag` schema ownership decision (`docs/decisions/001-database-schemas.md`)
+- [x] Tenant-isolation feature tests (`tests/Feature/Api/V1/*`)
 
 **Exit criteria:** Authenticated users cannot read another tenant’s data in API tests. OpenAPI generates successfully.
 
@@ -46,17 +46,18 @@ Maps to: PRD §40 Priority 1. Owners: Member 1 (+ shared review).
 
 Maps to: PRD §40 Priority 2. Owners: Members 1–2.
 
-1. Source upload + metadata (PRD §15)
-2. Ingestion pipeline: parse → source-aware chunk → embed → review gate (PRD §18)
-3. Knowledge lifecycle: Draft → PendingReview → Published → Superseded/Archived (PRD §16)
-4. Authority ranking (PRD §17)
-5. Hybrid FTS + pgvector; rank fusion; rerank
-6. Answer statuses: `verified`, `possible`, `conflict`, `unknown`, `blocked` (PRD §18.4)
-7. Citations + Laravel citation revalidation
-8. Provider abstractions: chat, embedding, rerank, transcription, translation (PRD §29)
-9. HMAC Laravel → AI; internal `/v1/answers`, `/v1/ingestions` (PRD §30.2)
-10. WhatsApp export path into review workflow
-11. Evaluation dataset skeleton (PRD §37)
+- [x] Source upload + metadata (Laravel `knowledge_sources`)
+- [x] Ingestion pipeline via AI `/ingestion/sync` on publish
+- [x] Knowledge lifecycle: Draft → PendingReview → Published / Rejected (+ superseded/archived enums)
+- [x] Authority ranking tiers (shared enum with AI)
+- [x] Hybrid FTS + pgvector; rank fusion; rerank (AI service)
+- [x] Answer statuses: VERIFIED / POSSIBLE / CONFLICT / INSUFFICIENT_EVIDENCE / UNKNOWN / BLOCKED
+- [x] Citations + Laravel citation revalidation (`CitationRevalidator`)
+- [x] Provider abstractions + HMAC Laravel → AI (`AiServiceClient`)
+- [x] WhatsApp export path → draft review workflow
+- [x] Evaluation dataset skeleton (`tests/evaluation/`)
+- [x] Multilingual query expansion wired into hybrid retrieval
+- [x] Community isolation on ask + AI predicate tests
 
 **Exit criteria:** Upload a document; ask via API; cited answer; Community A cannot retrieve Community B chunks; unknown answers escalate cleanly.
 
@@ -166,4 +167,4 @@ Maps to: PRD §40 Priority 7 + §39 remaining criteria. Owners: All.
 
 ## Immediate next step
 
-Start **Phase 1 (Foundation)**: Sanctum, tenancy, policies, audit, Scramble, storage abstraction, tenant-isolation tests.
+Start **Phase 3 (Member experience)**: chat UI, citations drawer, community selector, TanStack Query client from OpenAPI.

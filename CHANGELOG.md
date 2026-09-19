@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 2 knowledge/RAG: Laravel knowledge lifecycle (draft → review → publish), WhatsApp export drafts, assistant ask with citation revalidation, AI community_id columns + multilingual query expansion, HMAC restored
+- Phase 1 backend foundation: Sanctum SPA auth, tenancy models, policies, audit log, private storage, `/api/v1` routes, tenant isolation tests
 - OpenAPI docs scaffold: Laravel Scramble (`/docs/api`) and FastAPI (`/docs`, `/openapi.json`)
 - Husky + commitlint (Conventional Commits) and GitHub PR title workflow
 - Pull request template and contributing guide for commit/PR formats

@@ -5,7 +5,7 @@ from sqlalchemy import Computed, ForeignKey, Index, Integer, String, Text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from ai_service.db.base import Base, TenantScopedMixin, TimestampMixin
+from ai_service.db.base import Base, CommunityScopedMixin, TenantScopedMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from ai_service.models.source import KnowledgeSource
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 # Vector dimension is dynamically determined by the active EmbeddingProvider.
 
 
-class KnowledgeChunk(Base, TenantScopedMixin, TimestampMixin):
+class KnowledgeChunk(Base, TenantScopedMixin, CommunityScopedMixin, TimestampMixin):
     __tablename__ = "knowledge_chunks"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -65,11 +65,8 @@ class KnowledgeChunk(Base, TenantScopedMixin, TimestampMixin):
     )
 
     __table_args__ = (
-        # Dedup Index
         Index("ix_chunks_tenant_hash", "tenant_id", "content_sha256"),
-        # Tenant isolation scan index
         Index("ix_chunks_tenant_version", "tenant_id", "version_id"),
-        # Full-text Lexical Search GIN Index
+        Index("ix_chunks_tenant_community", "tenant_id", "community_id"),
         Index("ix_chunks_tsv", "tsv", postgresql_using="gin"),
-
     )

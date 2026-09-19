@@ -28,12 +28,14 @@ Do not rename these to `laravel-api`, `web`, or `rag-service`.
 
 | Mode | Use |
 | --- | --- |
-| Laravel Sail | `backend/compose.yaml` via `./vendor/bin/sail up` — local Laravel DX |
-| Root Compose | `compose.yaml` — monorepo infra (Postgres+pgvector, Redis) and later full stack |
+| Laravel Sail | `backend/compose.yaml` via `./vendor/bin/sail up` — **required** local Laravel DX |
+| Root Compose | `compose.yaml` — optional monorepo infra only when not using Sail’s Postgres/Redis |
 
 Do **not** run Sail Postgres/Redis and root Compose Postgres/Redis on the same host ports at the same time.
 
 Sail is **not** production. Production uses dedicated Dockerfiles + production compose (Phase 7).
+
+Local backend commands run through Sail, e.g. `sail artisan migrate`, `sail artisan test`, `sail artisan queue:work`.
 
 ## Laravel
 

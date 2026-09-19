@@ -1,24 +1,20 @@
 from collections.abc import Sequence
-import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from ai_service.schemas.retrieval import AuthorityTier, CandidateChunk
 
 async def execute_hybrid_search(
     session: AsyncSession,
-    tenant_id: uuid.UUID,
-    community_ids: Sequence[uuid.UUID],
+    tenant_id: str,
+    community_ids: Sequence[str],
     ts_query_string: str,
     query_vector: list[float],
     limit: int = 25,
     k: int = 60,
-    allowed_roles: list[str] = None
+    allowed_roles: list[str] | None = None,
 ) -> list[CandidateChunk]:
     """Execute hybrid search using a single raw SQL query with CTEs for RRF."""
-    
-    # We must format the community_ids as an array literal for PostgreSQL ANY()
-    # or pass it as a parameter that asyncpg can adapt to uuid[]
-    
+
     sql = """
     WITH lexical_search AS (
         SELECT 
@@ -30,7 +26,8 @@ async def execute_hybrid_search(
         WHERE kc.tenant_id = :tenant_id
           AND ks.tenant_id = :tenant_id
           AND ks.status = 'active'
-          AND kc.metadata->>'community_id' = ANY(:community_ids)
+          AND kc.community_id = ANY(CAST(:community_ids AS text[]))
+          AND ks.community_id = ANY(CAST(:community_ids AS text[]))
           AND kc.tsv @@ plainto_tsquery('simple', :ts_query)
         ORDER BY lexical_score DESC
         LIMIT :limit
@@ -45,7 +42,8 @@ async def execute_hybrid_search(
         WHERE kc.tenant_id = :tenant_id
           AND ks.tenant_id = :tenant_id
           AND ks.status = 'active'
-          AND kc.metadata->>'community_id' = ANY(:community_ids)
+          AND kc.community_id = ANY(CAST(:community_ids AS text[]))
+          AND ks.community_id = ANY(CAST(:community_ids AS text[]))
         ORDER BY vector_distance ASC
         LIMIT :limit
     ),
@@ -73,6 +71,7 @@ async def execute_hybrid_search(
         kc.token_count,
         kc.breadcrumbs,
         kc.metadata AS metadata_,
+        kc.community_id,
         ks.source_type
     FROM fused_results f
     JOIN knowledge_chunks kc ON kc.id = f.chunk_id
@@ -80,31 +79,27 @@ async def execute_hybrid_search(
     ORDER BY f.rrf_score DESC
     LIMIT :limit;
     """
-    
+
     community_ids_str = [str(cid) for cid in community_ids]
-    
+
     result = await session.execute(
         text(sql),
         {
-            "tenant_id": tenant_id,
+            "tenant_id": str(tenant_id),
             "community_ids": community_ids_str,
             "ts_query": ts_query_string,
-            "query_vector": str(query_vector), 
+            "query_vector": str(query_vector),
             "limit": limit,
             "k": k,
-        }
+        },
     )
-    
+
     candidates: list[CandidateChunk] = []
     for row in result.all():
         meta = row.metadata_ or {}
-        raw_community_id = meta.get("community_id")
-        cid = uuid.UUID(str(raw_community_id)) if raw_community_id else community_ids[0]
         authority_tier_raw = meta.get("authority_tier", AuthorityTier.COMMUNITY_DISCUSSION.value)
-        
-        # Extract locator metadata
         locator = meta.get("locator", {})
-        
+
         candidates.append(
             CandidateChunk(
                 chunk_id=row.chunk_id,
@@ -115,7 +110,7 @@ async def execute_hybrid_search(
                 breadcrumbs=row.breadcrumbs,
                 authority_tier=AuthorityTier(authority_tier_raw),
                 source_type=row.source_type,
-                community_id=cid,
+                community_id=str(row.community_id),
                 lexical_rank=row.lexical_rank,
                 lexical_score=float(row.lexical_score) if row.lexical_score is not None else None,
                 vector_rank=row.vector_rank,
@@ -126,8 +121,8 @@ async def execute_hybrid_search(
                 media_type=meta.get("media_type"),
                 media_url=locator.get("media_url"),
                 timestamp_seconds=locator.get("timestamp_seconds"),
-                bounding_box=locator.get("bounding_box")
+                bounding_box=locator.get("bounding_box"),
             )
         )
-        
+
     return candidates

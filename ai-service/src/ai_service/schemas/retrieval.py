@@ -32,11 +32,13 @@ class QueryRequest(BaseModel):
         max_length=2000,
         description="Raw search query input by the user.",
     )
-    tenant_id: uuid.UUID = Field(
+    tenant_id: str = Field(
         ...,
-        description="Tenant identifier for strict data isolation.",
+        min_length=1,
+        max_length=36,
+        description="Tenant identifier (Laravel ULID or UUID string).",
     )
-    community_ids: list[uuid.UUID] = Field(
+    community_ids: list[str] = Field(
         ...,
         min_length=1,
         description="Authorized community IDs for row-level permission filtering.",
@@ -86,7 +88,7 @@ class CandidateChunk(BaseModel):
     breadcrumbs: list[str] = Field(default_factory=list)
     authority_tier: AuthorityTier
     source_type: str
-    community_id: uuid.UUID
+    community_id: str
 
     # Media Locators
     media_type: str | None = Field(default=None, description="'text', 'image', 'audio', or 'video'")
@@ -123,8 +125,8 @@ class GroundedAnswerRequest(BaseModel):
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
     query: str = Field(..., min_length=1, max_length=2000)
-    tenant_id: uuid.UUID
-    community_ids: list[uuid.UUID] = Field(..., min_length=1)
+    tenant_id: str = Field(..., min_length=1, max_length=36)
+    community_ids: list[str] = Field(..., min_length=1)
     target_language: str | None = Field(default=None, max_length=10)
     enable_conflict_detection: bool = Field(
         default=True,

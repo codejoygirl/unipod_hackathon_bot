@@ -75,8 +75,8 @@ async def ingest_multimodal_file(
         b64_content = base64.b64encode(content).decode('utf-8')
         
         request = IngestionRequest(
-            tenant_id=uuid.UUID(tenant_id),
-            community_id=uuid.UUID(community_id),
+            tenant_id=tenant_id,
+            community_id=community_id,
             name=name,
             uri=uri,
             source_type=source_type,

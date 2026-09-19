@@ -2,9 +2,8 @@
 
 from collections.abc import AsyncGenerator
 from datetime import datetime
-import uuid
 
-from sqlalchemy import DateTime, UUID, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -44,9 +43,18 @@ class Base(DeclarativeBase):
 
 
 class TenantScopedMixin:
-    """Enforces multi-tenant data isolation."""
-    tenant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    """Enforces multi-tenant data isolation (Laravel ULID or UUID string)."""
+    tenant_id: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True,
+    )
+
+
+class CommunityScopedMixin:
+    """Enforces community-level isolation on knowledge-bearing records."""
+    community_id: Mapped[str] = mapped_column(
+        String(36),
         nullable=False,
         index=True,
     )

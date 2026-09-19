@@ -20,9 +20,8 @@ class IngestionRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
-    tenant_id: uuid.UUID
-    community_id: uuid.UUID
-    uri: str = Field(..., min_length=1, max_length=1024)
+    tenant_id: str = Field(..., min_length=1, max_length=36)
+    community_id: str = Field(..., min_length=1, max_length=36)    uri: str = Field(..., min_length=1, max_length=1024)
     name: str = Field(..., min_length=1, max_length=255)
     source_type: str = Field(..., min_length=1, max_length=50)  # 'pdf', 'docx', 'markdown', 'transcript', 'whatsapp'
     content: str = Field(..., min_length=1, description="Raw text or parsed body of the document.")

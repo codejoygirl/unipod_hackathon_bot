@@ -67,7 +67,6 @@ def get_retrieval_service() -> HybridRetrievalService:
 
 
 async def verify_hmac(request: Request) -> None:
-    return
     """Validate constant-time HMAC-SHA256 signature and prevent replay attacks."""
     signature = request.headers.get("X-Signature")
     timestamp = request.headers.get("X-Timestamp")
@@ -87,10 +86,10 @@ async def verify_hmac(request: Request) -> None:
         )
 
     current_time = int(time.time())
-    if abs(current_time - req_time) > 300:
+    if abs(current_time - req_time) > settings.HMAC_TIMESTAMP_TOLERANCE_SECONDS:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Request timestamp outside acceptable window (±300s). Check system clock.",
+            detail="Request timestamp outside acceptable window. Check system clock.",
         )
 
     content_type = request.headers.get("content-type", "")

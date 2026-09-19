@@ -28,6 +28,7 @@ def upgrade() -> None:
         "knowledge_sources",
         sa.Column("id", sa.Uuid(), nullable=False, default=sa.text("uuid_generate_v4()")),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
+        sa.Column("community_id", sa.Uuid(), nullable=False),
         sa.Column("uri", sa.String(length=1024), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("source_type", sa.String(length=50), nullable=False),
@@ -38,8 +39,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_knowledge_sources")),
     )
     op.create_index(op.f("ix_knowledge_sources_tenant_id"), "knowledge_sources", ["tenant_id"])
+    op.create_index(op.f("ix_knowledge_sources_community_id"), "knowledge_sources", ["community_id"])
     op.create_index("ix_sources_tenant_uri", "knowledge_sources", ["tenant_id", "uri"], unique=True)
     op.create_index("ix_sources_tenant_status", "knowledge_sources", ["tenant_id", "status"])
+    op.create_index("ix_sources_tenant_community", "knowledge_sources", ["tenant_id", "community_id"])
 
     # 3. knowledge_source_versions
     op.create_table(
@@ -65,6 +68,7 @@ def upgrade() -> None:
         "knowledge_chunks",
         sa.Column("id", sa.Uuid(), nullable=False, default=sa.text("uuid_generate_v4()")),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
+        sa.Column("community_id", sa.Uuid(), nullable=False),
         sa.Column("source_id", sa.Uuid(), nullable=False),
         sa.Column("version_id", sa.Uuid(), nullable=False),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
@@ -82,8 +86,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_knowledge_chunks")),
     )
     op.create_index(op.f("ix_knowledge_chunks_tenant_id"), "knowledge_chunks", ["tenant_id"])
+    op.create_index(op.f("ix_knowledge_chunks_community_id"), "knowledge_chunks", ["community_id"])
     op.create_index("ix_chunks_tenant_hash", "knowledge_chunks", ["tenant_id", "content_sha256"])
     op.create_index("ix_chunks_tenant_version", "knowledge_chunks", ["tenant_id", "version_id"])
+    op.create_index("ix_chunks_tenant_community", "knowledge_chunks", ["tenant_id", "community_id"])
     op.create_index("ix_chunks_tsv", "knowledge_chunks", ["tsv"], postgresql_using="gin")
 
 

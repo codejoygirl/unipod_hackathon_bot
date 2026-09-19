@@ -80,6 +80,7 @@ Request flow: Route → Form Request → Policy/tenant scope → Action/Service 
 
 ## Conventions
 
+- Use **Laravel Sail** for local backend work: `./vendor/bin/sail …` (PowerShell: `.\vendor\bin\sail …`)
 - Thin controllers; no fat repositories that only wrap Eloquent
 - UUID/ULID public IDs; tenant + community scopes on relevant queries
 - Frontend and channels call this API only
