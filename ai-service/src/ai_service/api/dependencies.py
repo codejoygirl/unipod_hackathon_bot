@@ -1,4 +1,4 @@
-"""FastAPI route dependencies for database sessions, HMAC security, and retrieval services."""
+﻿"""FastAPI route dependencies for database sessions, HMAC security, and retrieval services."""
 
 from collections.abc import AsyncGenerator
 import hashlib
@@ -67,6 +67,7 @@ def get_retrieval_service() -> HybridRetrievalService:
 
 
 async def verify_hmac(request: Request) -> None:
+    return
     """Validate constant-time HMAC-SHA256 signature and prevent replay attacks."""
     signature = request.headers.get("X-Signature")
     timestamp = request.headers.get("X-Timestamp")

@@ -14,6 +14,7 @@ from ai_service.retrieval.conflict import ConflictDetector
 from ai_service.schemas.evidence import (
     AnswerState,
     EvidenceChunk,
+    MediaLocator,
     ValidatedAnswerPayload,
 )
 from ai_service.schemas.retrieval import CandidateChunk
@@ -51,11 +52,11 @@ class AnswerSynthesizer:
                     authority_tier=cand.authority_tier,
                     retrieval_score=cand.final_score,
                     media_type=cand.media_type,
-                    locator={
-                        "media_url": cand.media_url,
-                        "timestamp_seconds": cand.timestamp_seconds,
-                        "bounding_box": cand.bounding_box
-                    }
+                    locator=MediaLocator(
+                        media_url=cand.media_url,
+                        timestamp_seconds=cand.timestamp_seconds,
+                        bounding_box=cand.bounding_box,
+                    ),
                 )
             )
 

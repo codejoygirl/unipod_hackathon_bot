@@ -122,7 +122,7 @@ async def execute_hybrid_search(
                 vector_distance=float(row.vector_distance) if row.vector_distance is not None else None,
                 rrf_score=float(row.rrf_score),
                 rerank_score=None,
-                final_score=0.0,
+                final_score=float(row.rrf_score),
                 media_type=meta.get("media_type"),
                 media_url=locator.get("media_url"),
                 timestamp_seconds=locator.get("timestamp_seconds"),
