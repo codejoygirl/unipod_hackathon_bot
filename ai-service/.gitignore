@@ -8,3 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
+ai-service/ffmpeg-7.0.2-amd64-static/
+
