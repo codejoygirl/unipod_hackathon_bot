@@ -1,10 +1,12 @@
-# AI Service (FastAPI)
+# AI Service Microservice
 
-Private FastAPI service for Community Assistant: answering, ingestion helpers, embeddings, translation, transcription, summarisation, and evaluation.
+Enterprise Multimodal Grounded RAG with strict tenant isolation, hybrid retrieval, and interactive deep-linked citations.
 
-Laravel is the only caller. This service must not be reachable from the public internet in production.
+## Features
 
-See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md), and [implementation plan](../docs/implementation-plan.md).
+- **Dual Providers**: Google Gemini and OpenAI integration.
+- **Multimodal Support**: Audio, Video, Image, and Text parsing.
+- **Enterprise Security**: PII Redaction, RBAC, and strict HMAC Auth.
 
 ## Stack
 
@@ -20,7 +22,7 @@ See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- Postgres available (Sail or root Compose)
+- Postgres available via **Laravel Sail** (`DB_HOST=pgsql`) or root Compose
 
 ## Setup
 
@@ -28,6 +30,7 @@ See [root README](../README.md), [AGENTS.md](../AGENTS.md), [PRD](../docs/prd.md
 
 ```bash
 cp .env.example .env
+# populate OPENAI_API_KEY and GEMINI_API_KEY
 uv sync
 uv run fastapi dev src/ai_service/main.py --port 8001
 ```
@@ -38,6 +41,12 @@ uv run fastapi dev src/ai_service/main.py --port 8001
 Copy-Item .env.example .env
 uv sync
 uv run fastapi dev src/ai_service/main.py --port 8001
+```
+
+**Docker**
+
+```bash
+docker compose up -d --build
 ```
 
 | URL | What |
@@ -52,8 +61,9 @@ uv run fastapi dev src/ai_service/main.py --port 8001
 | --- | --- |
 | `uv sync` | Install deps from lockfile |
 | `uv run fastapi dev src/ai_service/main.py --port 8001` | Dev server |
-| `uv run alembic upgrade head` | Apply migrations (when revisions exist) |
+| `uv run alembic upgrade head` | Apply migrations |
 | `uv run pytest` | Tests |
+| `uv run tests/test_live_all_modalities.py` | Live multimodal verification |
 | `uv run ruff check .` | Lint |
 
 ## Layout

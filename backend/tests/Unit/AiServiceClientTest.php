@@ -1,0 +1,77 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit;
+
+use App\DTOs\GroundedAnswerDTO;
+use App\Enums\AnswerState;
+use App\Services\AI\AiServiceClient;
+use Illuminate\Http\Client\Factory as HttpFactory;
+use PHPUnit\Framework\TestCase;
+
+class AiServiceClientTest extends TestCase
+{
+    public function test_hmac_header_signature_matches_python_contract(): void
+    {
+        $secret = 'test_secret_key_12345';
+        $http = new HttpFactory();
+        $client = new class($http, 'http://127.0.0.1:8000', $secret) extends AiServiceClient {
+            public function exposeHeaders(string $body): array
+            {
+                return $this->generateAuthHeaders($body);
+            }
+        };
+
+        $body = '{"query":"water status"}';
+        $headers = $client->exposeHeaders($body);
+
+        $this->assertArrayHasKey('X-Signature', $headers);
+        $this->assertArrayHasKey('X-Timestamp', $headers);
+
+        $expected = hash_hmac('sha256', "{$headers['X-Timestamp']}.{$body}", $secret);
+        $this->assertSame($expected, $headers['X-Signature']);
+    }
+
+    public function test_maps_verified_api_response_to_dto(): void
+    {
+        $rawResponse = [
+            'query' => 'Where is the clinic?',
+            'detected_language' => 'en',
+            'execution_time_ms' => 45.2,
+            'total_chunks_retrieved' => 4,
+            'validated_payload' => [
+                'state' => 'VERIFIED',
+                'answer' => 'The clinic is on 4th street [E1].',
+                'confidence_score' => 0.94,
+                'needs_escalation' => false,
+                'escalation_reason' => null,
+                'citations' => [
+                    [
+                        'evidence_id' => 'E1',
+                        'chunk_id' => '72b079bc-25c2-4a0b-800f-8ee57de015c9',
+                        'source_name' => 'Health Directory.pdf',
+                        'source_uri' => 'https://city.gov/health.pdf',
+                        'authority_tier' => 'official_announcement',
+                        'exact_quote' => 'The clinic is on 4th street',
+                        'context_snippet' => 'The clinic is on 4th street next to the station.',
+                        'page_number' => 2,
+                        'timestamp_seconds' => null,
+                        'is_verified' => true,
+                    ]
+                ],
+                'conflicts' => [],
+            ],
+        ];
+
+        $dto = GroundedAnswerDTO::fromApiResponse($rawResponse);
+
+        $this->assertSame(AnswerState::VERIFIED, $dto->state);
+        $this->assertSame('The clinic is on 4th street [E1].', $dto->answer);
+        $this->assertSame(0.94, $dto->confidenceScore);
+        $this->assertFalse($dto->needsEscalation);
+        $this->assertCount(1, $dto->citations);
+        $this->assertSame('E1', $dto->citations[0]->evidenceId);
+        $this->assertSame(2, $dto->citations[0]->pageNumber);
+    }
+}

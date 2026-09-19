@@ -1,10 +1,9 @@
 ﻿from fastapi import FastAPI
-
 from ai_service.api.routes import api_router
 from ai_service.core.config import settings
-from ai_service.core.logging import configure_logging
+from ai_service.core.logging import setup_logging
 
-configure_logging()
+setup_logging()
 
 app = FastAPI(
     title="Zak AI Service",
@@ -24,7 +23,7 @@ app.include_router(api_router)
 @app.get("/", include_in_schema=False)
 def root() -> dict[str, str]:
     return {
-        "service": settings.app_name,
+        "service": settings.SERVICE_NAME,
         "docs": "/docs",
         "openapi": "/openapi.json",
     }
