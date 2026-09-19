@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from ai_service.ingestion.pipeline import IngestionPipeline
 from ai_service.providers.mock import MockEmbedder
-from ai_service.schemas.ingestion import IngestionRequest, IngestionStatus
+from ai_service.schemas.ingestion import IngestionRequest, IngestionStatus, RawDocument
 from ai_service.schemas.retrieval import AuthorityTier
 
 
@@ -18,12 +18,12 @@ def test_normalization_and_hashing():
     assert "\x00" not in normalized
     assert normalized == "Water\nPolicy Update"
 
-    hash_val = pipeline.compute_sha256(normalized)
+    from ai_service.ingestion.lifecycle import DocumentLifecycleManager
+    hash_val = DocumentLifecycleManager.generate_content_hash(normalized)
     assert len(hash_val) == 64
 
-
 def test_semantic_chunking_with_breadcrumbs():
-    pipeline = IngestionPipeline(embedder=MockEmbedder(), chunk_size_chars=100, chunk_overlap_chars=20)
+    from ai_service.ingestion.chunking import ContextualChunker
 
     markdown_doc = """# Department of Water
 
@@ -33,11 +33,12 @@ General guidelines for municipal supply.
 
 Samples taken from Zone 3 show clear drinkable water."""
 
-    chunks = pipeline.chunk_content(markdown_doc)
+    chunks = ContextualChunker.chunk(markdown_doc, max_tokens=20)
 
     assert len(chunks) >= 2
     # Verify breadcrumb propagation
-    first_chunk_text, first_crumbs = chunks[0]
+    first_chunk_text = chunks[0]["content"]
+    first_crumbs = chunks[0]["breadcrumbs"]
     assert "Department of Water" in first_crumbs or "Department of Water" in first_chunk_text
 
 

@@ -1,6 +1,7 @@
 """Retrieval and grounded generation endpoints for the Community Assistant platform."""
 
 import logging
+import os
 import time
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +12,8 @@ from ai_service.api.dependencies import (
     verify_hmac,
 )
 from ai_service.generation.synthesizer import AnswerSynthesizer
-from ai_service.providers.mock import MockChatModel
-from ai_service.retrieval.hybrid import HybridRetrievalService
+from ai_service.providers.gemini import GeminiProvider
+from ai_service.retrieval.service import HybridRetrievalService
 from ai_service.schemas.retrieval import (
     GroundedAnswerRequest,
     GroundedAnswerResponse,
@@ -24,8 +25,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/retrieval", tags=["retrieval"])
 
-# Global singleton for the grounded synthesizer
-_synthesizer = AnswerSynthesizer(chat_model=MockChatModel())
+# Global singleton for the grounded synthesizer using Gemini
+gemini_model = GeminiProvider(
+    api_key=os.getenv("GEMINI_API_KEY"),
+)
+_synthesizer = AnswerSynthesizer(chat_model=gemini_model)
 
 
 def get_synthesizer() -> AnswerSynthesizer:

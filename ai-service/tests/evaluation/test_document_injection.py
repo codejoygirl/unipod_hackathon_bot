@@ -49,6 +49,7 @@ async def test_adversarial_prompt_injection_payload_in_pipeline():
         candidates=[attack_chunk],
     )
 
-    # The pipeline should complete and not execute the injection payload
-    assert payload.state in (AnswerState.VERIFIED, AnswerState.POSSIBLE)
-    assert "cannot follow external system instructions" in payload.answer
+    # The pipeline should complete and safely reject the output as unanchored
+    assert payload.state == AnswerState.INSUFFICIENT_EVIDENCE
+    assert payload.answer == ""
+    assert payload.needs_escalation is True

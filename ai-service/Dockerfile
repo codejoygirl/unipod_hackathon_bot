@@ -20,6 +20,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy source tree and install application
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY src/ ./src/
 COPY README.md ./
 RUN uv sync --frozen --no-dev
@@ -31,6 +32,9 @@ FROM python:3.12-slim-bookworm AS runner
 
 WORKDIR /app
 
+# Install runtime system dependencies (ffmpeg for video parsing)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Ensure security invariants: non-root service user
 RUN groupadd -g 10001 appgroup && \
     useradd -u 10001 -g appgroup -s /sbin/nologin -M appuser
@@ -39,7 +43,8 @@ RUN groupadd -g 10001 appgroup && \
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    ENVIRONMENT=production
+    ENVIRONMENT=production \
+    PYTHONPATH=/app/src
 
 # Copy virtual environment and application code from builder
 COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv

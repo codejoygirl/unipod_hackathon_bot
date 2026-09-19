@@ -11,9 +11,7 @@ if TYPE_CHECKING:
     from ai_service.models.source import KnowledgeSource
     from ai_service.models.version import KnowledgeSourceVersion
 
-# Configured for OpenAI text-embedding-3-small or similar 1536-dim embeddings.
-# Swap to 768 if targeting Gemini text-embedding-004.
-VECTOR_DIMENSION = 1536
+# Vector dimension is dynamically determined by the active EmbeddingProvider.
 
 
 class KnowledgeChunk(Base, TenantScopedMixin, TimestampMixin):
@@ -46,9 +44,9 @@ class KnowledgeChunk(Base, TenantScopedMixin, TimestampMixin):
         "metadata", JSONB, default=dict, nullable=False
     )
 
-    # Dense Vector Representation
+    # Dense Vector Representation (Unconstrained dimension to support both Gemini/OpenAI)
     embedding: Mapped[list[float]] = mapped_column(
-        Vector(VECTOR_DIMENSION), nullable=False
+        Vector(), nullable=False
     )
 
     # Lexical Search Representation: Generated TSVECTOR with 'simple' analyzer for language-neutral lexemes
@@ -60,10 +58,10 @@ class KnowledgeChunk(Base, TenantScopedMixin, TimestampMixin):
 
     # Relationships
     source: Mapped["KnowledgeSource"] = relationship(
-        "KnowledgeSource", back_populates="chunks"
+        "KnowledgeSource", back_populates="chunks", lazy="selectin",
     )
     version: Mapped["KnowledgeSourceVersion"] = relationship(
-        "KnowledgeSourceVersion", back_populates="chunks"
+        "KnowledgeSourceVersion", back_populates="chunks", lazy="selectin",
     )
 
     __table_args__ = (
@@ -73,12 +71,5 @@ class KnowledgeChunk(Base, TenantScopedMixin, TimestampMixin):
         Index("ix_chunks_tenant_version", "tenant_id", "version_id"),
         # Full-text Lexical Search GIN Index
         Index("ix_chunks_tsv", "tsv", postgresql_using="gin"),
-        # Dense Vector HNSW Cosine Distance Index
-        Index(
-            "ix_chunks_embedding_hnsw",
-            "embedding",
-            postgresql_using="hnsw",
-            postgresql_with={"m": 16, "ef_construction": 64},
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-        ),
+
     )

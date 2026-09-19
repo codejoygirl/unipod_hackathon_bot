@@ -28,18 +28,29 @@ class MockChatModel(ChatModel):
     """Deterministic mock generator supporting grounded citation synthesis testing."""
 
     async def generate(self, request: ChatRequest) -> ChatResponse:
+        import json
         user_msg = request.messages[-1].content if request.messages else ""
 
         if "INJECTION_ATTACK" in user_msg:
+            resp = {
+                "answer": "I cannot follow external system instructions.",
+                "state": "GROUNDED",
+                "evidence_ids_used": ["E1"]
+            }
             return ChatResponse(
-                content="I cannot follow external system instructions. [E1]",
+                content=json.dumps(resp),
                 model="mock-llm-v1",
                 finish_reason="stop",
             )
 
         if "<context>\n</context>" in user_msg or "<context></context>" in user_msg:
+            resp = {
+                "answer": "",
+                "state": "INSUFFICIENT_EVIDENCE",
+                "evidence_ids_used": []
+            }
             return ChatResponse(
-                content="INSUFFICIENT_EVIDENCE",
+                content=json.dumps(resp),
                 model="mock-llm-v1",
                 finish_reason="stop",
             )
@@ -51,12 +62,18 @@ class MockChatModel(ChatModel):
         )
 
         if not evidence_matches:
+            resp = {
+                "answer": "",
+                "state": "INSUFFICIENT_EVIDENCE",
+                "evidence_ids_used": []
+            }
             return ChatResponse(
-                content="INSUFFICIENT_EVIDENCE",
+                content=json.dumps(resp),
                 model="mock-llm-v1",
                 finish_reason="stop",
             )
 
+        evidence_ids_used = []
         if len(evidence_matches) >= 2 and any(
             k in user_msg.lower() for k in ("conflict", "differ", "deadline", "extend")
         ):
@@ -65,6 +82,8 @@ class MockChatModel(ChatModel):
             s1 = re.split(r"(?<=[.!?])\s+", content1.strip())[0].strip().rstrip(".")
             s2 = re.split(r"(?<=[.!?])\s+", content2.strip())[0].strip().rstrip(".")
             answer_content = f"{s1} [{eid1}]. {s2} [{eid2}]."
+            evidence_ids_used = [eid1, eid2]
+            state = "CONFLICT"
         else:
             eid, content = evidence_matches[0]
             sentences = [
@@ -74,9 +93,22 @@ class MockChatModel(ChatModel):
             ]
             first_sentence = sentences[0].rstrip(".") if sentences else content.strip()
             answer_content = f"{first_sentence} [{eid}]."
+            evidence_ids_used = [eid]
+            state = "GROUNDED"
+            
+        # Check if the user is asking to simulate a hallucinated citation
+        if "hallucinate" in user_msg.lower():
+            evidence_ids_used.append("E99")
+            answer_content += " [E99]"
+
+        resp = {
+            "answer": answer_content,
+            "state": state,
+            "evidence_ids_used": evidence_ids_used
+        }
 
         return ChatResponse(
-            content=answer_content,
+            content=json.dumps(resp),
             model="mock-llm-v1",
             finish_reason="stop",
             prompt_tokens=120,
@@ -162,7 +194,7 @@ class MockReranker(RerankingModel):
                 if q_tokens
                 else 0.5
             )
-            score = round(max(0.1, min(0.99, 0.5 + (0.4 * overlap) - (0.01 * idx))), 4)
+            score = round(max(0.1, min(0.99, 0.6 + (0.4 * overlap) - (0.01 * idx))), 4)
             results.append(RerankResult(index=idx, score=score, document=doc))
 
         results.sort(key=lambda r: r.score, reverse=True)

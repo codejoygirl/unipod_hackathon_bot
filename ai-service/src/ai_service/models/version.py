@@ -31,12 +31,12 @@ class KnowledgeSourceVersion(Base, TenantScopedMixin, TimestampMixin):
 
     # Relationships
     source: Mapped["KnowledgeSource"] = relationship(
-        "KnowledgeSource", back_populates="versions"
+        "KnowledgeSource", back_populates="versions", lazy="selectin",
     )
     chunks: Mapped[list["KnowledgeChunk"]] = relationship(
         "KnowledgeChunk",
         back_populates="version",
-        cascade="all, delete-orphan",
+        cascade="all, delete-orphan",lazy="selectin",
     )
 
     __table_args__ = (

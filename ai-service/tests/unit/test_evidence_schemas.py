@@ -4,7 +4,7 @@ from pydantic import ValidationError
 
 from ai_service.schemas.evidence import (
     AnswerState,
-    CitationDetail,
+    EnrichedCitation,
     EvidenceChunk,
     ValidatedAnswerPayload,
 )
@@ -52,13 +52,12 @@ def test_validated_answer_payload_state_rules():
         answer="The deadline is Friday at 5:00 PM [E1].",
         confidence_score=0.92,
         citations=[
-            CitationDetail(
+            EnrichedCitation(
                 evidence_id="E1",
-                chunk_id=valid_uuid,
                 source_name="Policy.pdf",
                 source_uri="https://city.gov/policy.pdf",
-                authority_tier=AuthorityTier.OFFICIAL_ANNOUNCEMENT,
-                exact_quote="Friday at 5:00 PM",
+                media_type="text",
+                evidence_snippet="Friday at 5:00 PM",
             )
         ],
         needs_escalation=False,

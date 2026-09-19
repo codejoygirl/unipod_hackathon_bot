@@ -33,13 +33,13 @@ class KnowledgeSource(Base, TenantScopedMixin, TimestampMixin):
     versions: Mapped[list["KnowledgeSourceVersion"]] = relationship(
         "KnowledgeSourceVersion",
         back_populates="source",
-        cascade="all, delete-orphan",
+        cascade="all, delete-orphan",lazy="selectin",
         order_by="desc(KnowledgeSourceVersion.version_number)",
     )
     chunks: Mapped[list["KnowledgeChunk"]] = relationship(
         "KnowledgeChunk",
         back_populates="source",
-        cascade="all, delete-orphan",
+        cascade="all, delete-orphan",lazy="selectin",
     )
 
     __table_args__ = (

@@ -72,7 +72,16 @@ class BenchmarkRunner:
                         start=1,
                     )
                 }
-                validation = CitationValidator.validate_answer(payload.answer, evidence_map)
+                from ai_service.citations.extractor import parse_claims_with_citations
+                claims = parse_claims_with_citations(payload.answer)
+                evidence_ids_used = []
+                for claim in claims:
+                    evidence_ids_used.extend(claim.evidence_ids)
+                validation = CitationValidator.validate_answer(
+                    answer=payload.answer,
+                    evidence_ids_used=list(set(evidence_ids_used)),
+                    evidence_map=evidence_map
+                )
                 score = RagMetricsCalculator.evaluate_answer(
                     answer=payload.answer,
                     validation_result=validation,

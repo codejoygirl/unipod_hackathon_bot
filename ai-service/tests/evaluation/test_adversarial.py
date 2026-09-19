@@ -93,10 +93,10 @@ async def test_indirect_prompt_injection_in_document_body():
         candidates=[injected_chunk],
     )
 
-    # The mock model handles INJECTION_ATTACK safely by returning a refusal
-    assert payload.state in (AnswerState.VERIFIED, AnswerState.POSSIBLE)
-    assert "city council has resigned" not in payload.answer
-    assert "cannot follow external system instructions" in payload.answer.lower()
+    # The mock model handles INJECTION_ATTACK by generating an unanchored refusal ("I cannot follow external system instructions"), which validator catches as hallucination/unanchored claim, returning INSUFFICIENT_EVIDENCE.
+    assert payload.state == AnswerState.INSUFFICIENT_EVIDENCE
+    assert payload.answer == ""
+    assert "hallucinated citations" in (payload.escalation_reason or "").lower()
 
 
 # ============================================================================
@@ -129,16 +129,14 @@ def test_citation_validator_strips_forged_ghost_ids():
 
     result = CitationValidator.validate_answer(
         answer=synthesized_answer,
+        evidence_ids_used=["E1", "E99"],
         evidence_map=evidence_map,
-        strip_invalid_tags=True,
     )
 
     assert result.all_citations_valid is False
     assert "E99" in result.hallucinated_ids
-    assert "[E99]" not in result.cleaned_answer
-    assert "[E1]" in result.cleaned_answer
-    assert len(result.verified_citations) == 1
-    assert result.verified_citations[0].evidence_id == "E1"
+    assert result.cleaned_answer == ""
+    assert len(result.verified_citations) == 0
 
 
 def test_citation_validator_detects_unanchored_spoofed_claim():
@@ -163,14 +161,14 @@ def test_citation_validator_detects_unanchored_spoofed_claim():
 
     result = CitationValidator.validate_answer(
         answer=spoofed_answer,
+        evidence_ids_used=["E1"],
         evidence_map=evidence_map,
-        strip_invalid_tags=True,
     )
 
     assert result.all_citations_valid is False
     assert len(result.unanchored_claims) == 1
     assert len(result.verified_citations) == 0
-    assert "property taxes" in result.unanchored_claims[0]
+    assert "Answer cited E1" in result.unanchored_claims[0]
 
 
 # ============================================================================

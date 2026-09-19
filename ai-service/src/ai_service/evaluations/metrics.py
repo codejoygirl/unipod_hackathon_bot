@@ -115,15 +115,22 @@ class RagTriadEvaluator:
         evidence_chunks: Sequence[Any],
     ) -> tuple[float, int, int, int, int]:
         """Compute sentence-level grounding and citation validity."""
+        from ai_service.citations.extractor import parse_claims_with_citations
+        
         evidence_map: dict[str, Any] = {}
         for idx, chunk in enumerate(evidence_chunks, start=1):
             eid = getattr(chunk, "evidence_id", None) or f"E{idx}"
             evidence_map[eid] = chunk
 
+        claims = parse_claims_with_citations(answer)
+        evidence_ids_used = []
+        for claim in claims:
+            evidence_ids_used.extend(claim.evidence_ids)
+
         validation = CitationValidator.validate_answer(
             answer=answer,
+            evidence_ids_used=list(set(evidence_ids_used)),
             evidence_map=evidence_map,
-            strip_invalid_tags=False,
         )
 
         verified = len(validation.verified_citations)

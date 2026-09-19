@@ -73,7 +73,7 @@ def upgrade() -> None:
         sa.Column("token_count", sa.Integer(), nullable=False),
         sa.Column("breadcrumbs", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default="[]"),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default="{}"),
-        sa.Column("embedding", pgvector.sqlalchemy.Vector(1536), nullable=False),
+        sa.Column("embedding", pgvector.sqlalchemy.Vector(), nullable=False),
         sa.Column("tsv", postgresql.TSVECTOR(), sa.Computed("to_tsvector('simple', content)", persisted=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -85,14 +85,7 @@ def upgrade() -> None:
     op.create_index("ix_chunks_tenant_hash", "knowledge_chunks", ["tenant_id", "content_sha256"])
     op.create_index("ix_chunks_tenant_version", "knowledge_chunks", ["tenant_id", "version_id"])
     op.create_index("ix_chunks_tsv", "knowledge_chunks", ["tsv"], postgresql_using="gin")
-    op.create_index(
-        "ix_chunks_embedding_hnsw",
-        "knowledge_chunks",
-        ["embedding"],
-        postgresql_using="hnsw",
-        postgresql_with={"m": 16, "ef_construction": 64},
-        postgresql_ops={"embedding": "vector_cosine_ops"},
-    )
+
 
     # 5. glossary_entries
     op.create_table(

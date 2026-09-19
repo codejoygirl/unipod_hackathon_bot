@@ -1,4 +1,4 @@
-﻿"""Production Google Gemini provider implementing ChatModel and EmbeddingModel protocols."""
+"""Production Google Gemini provider implementing ChatModel and EmbeddingModel protocols."""
 
 import asyncio
 from collections.abc import Sequence
@@ -27,8 +27,8 @@ class GeminiProvider(ChatModel, EmbeddingModel):
     def __init__(
         self,
         api_key: str | None = None,
-        chat_model: str = "gemini-2.5-flash",
-        embedding_model: str = "text-embedding-004",
+        chat_model: str = "gemini-1.5-flash",
+        embedding_model: str = "gemini-embedding-001",
         max_retries: int = 4,
         base_backoff_seconds: float = 0.5,
         max_backoff_seconds: float = 8.0,
@@ -94,10 +94,23 @@ class GeminiProvider(ChatModel, EmbeddingModel):
 
         for msg in request.messages:
             if msg.role == "system":
-                system_instruction = msg.content
+                if isinstance(msg.content, str):
+                    system_instruction = msg.content
+                elif msg.content:
+                    system_instruction = " ".join([p.text for p in msg.content if p.text])
             else:
                 role = "user" if msg.role == "user" else "model"
-                contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
+                if isinstance(msg.content, str):
+                    contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
+                elif msg.content:
+                    parts = []
+                    for p in msg.content:
+                        if p.type == "text" and p.text:
+                            parts.append(types.Part.from_text(text=p.text))
+                        elif p.type == "media" and p.media_data and p.media_mime_type:
+                            parts.append(types.Part.from_bytes(data=p.media_data, mime_type=p.media_mime_type))
+                    if parts:
+                        contents.append(types.Content(role=role, parts=parts))
 
         config = types.GenerateContentConfig(
             temperature=request.temperature,
@@ -152,3 +165,51 @@ class GeminiProvider(ChatModel, EmbeddingModel):
         cleaned = text.strip() or " "
         res = await self.embed([cleaned])
         return res[0]
+
+
+    # ========================================================================
+    # TranscriptionModel Protocol Implementation
+    # ========================================================================
+
+    async def transcribe(
+        self,
+        source: str | bytes,
+        language: str | None = None,
+    ) -> Any:
+        """Transcribe an audio source using Gemini's audio understanding."""
+        from pathlib import Path
+        from ai_service.providers.base import TranscriptionResult, TranscriptSegment
+        
+        if isinstance(source, (str, Path)):
+            with open(source, "rb") as f:
+                audio_data = f.read()
+        else:
+            audio_data = source
+
+        prompt = "Transcribe the following audio exactly as spoken."
+        
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=prompt),
+                    types.Part.from_bytes(data=audio_data, mime_type="audio/mp3") # Assuming MP3 for now
+                ]
+            )
+        ]
+        
+        async def _call():
+            return await self.client.aio.models.generate_content(
+                model=self.chat_model,
+                contents=contents,
+            )
+
+        resp = await self._execute_with_backoff("transcribe", _call)
+        content_text = resp.text or ""
+        
+        return TranscriptionResult(
+            text=content_text.strip(),
+            language=language or "en",
+            duration_seconds=0.0,
+            segments=[TranscriptSegment(start_seconds=0.0, end_seconds=0.0, text=content_text.strip())]
+        )

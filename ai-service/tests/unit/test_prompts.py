@@ -7,7 +7,7 @@ from ai_service.generation.prompts import (
     build_user_prompt,
     sanitize_untrusted_content,
 )
-from ai_service.schemas.evidence import EvidenceChunk
+from ai_service.schemas.evidence import EvidenceChunk, MediaLocator
 from ai_service.schemas.retrieval import AuthorityTier
 
 
@@ -35,7 +35,7 @@ def test_build_evidence_context_xml_formatting():
             content="Water service is shut off at 10 PM tonight.",
             authority_tier=AuthorityTier.OFFICIAL_ANNOUNCEMENT,
             retrieval_score=0.95,
-            page_number=3,
+            locator=MediaLocator(page_number=3),
             breadcrumbs=["Water Dept", "Notices"],
         ),
         EvidenceChunk(
@@ -48,7 +48,7 @@ def test_build_evidence_context_xml_formatting():
             content="Boil water before drinking <urgent>!",
             authority_tier=AuthorityTier.COMMUNITY_DISCUSSION,
             retrieval_score=0.81,
-            timestamp_seconds=45.5,
+            locator=MediaLocator(timestamp_seconds=45.5),
         ),
     ]
 

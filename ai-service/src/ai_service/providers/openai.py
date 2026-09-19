@@ -1,4 +1,4 @@
-﻿"""Production OpenAI provider for embeddings and chat generation with exponential backoff and jitter."""
+"""Production OpenAI provider for embeddings and chat generation with exponential backoff and jitter."""
 
 import asyncio
 from collections.abc import Sequence
@@ -22,6 +22,9 @@ from ai_service.providers.base import (
     ChatRequest,
     ChatResponse,
     EmbeddingModel,
+    TranscriptionModel,
+    TranscriptionResult,
+    TranscriptSegment,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,14 +32,15 @@ logger = logging.getLogger(__name__)
 
 # In src/ai_service/providers/openai.py
 
-class OpenAIProvider(ChatModel, EmbeddingModel):
-    """Integrated OpenAI client implementing ChatModel and EmbeddingModel protocols."""
+class OpenAIProvider(ChatModel, EmbeddingModel, TranscriptionModel):
+    """Integrated OpenAI client implementing ChatModel, EmbeddingModel, and TranscriptionModel protocols."""
 
     def __init__(
         self,
         api_key: str | None = None,
         chat_model: str = "gpt-4o-mini",
         embedding_model: str = "text-embedding-3-small",
+        transcription_model: str = "whisper-1",
         embedding_dimension: int = 1536,
         max_retries: int = 4,
         base_backoff_seconds: float = 0.5,
@@ -48,6 +52,7 @@ class OpenAIProvider(ChatModel, EmbeddingModel):
         self.api_key = api_key or settings.OPENAI_API_KEY
         self.chat_model = chat_model
         self.embedding_model = embedding_model
+        self.transcription_model = transcription_model
         self.embedding_dimension = embedding_dimension
         self.max_retries = max_retries
         self.base_backoff = base_backoff_seconds
@@ -128,9 +133,26 @@ class OpenAIProvider(ChatModel, EmbeddingModel):
         """Synthesize answer using OpenAI Chat Completions endpoint."""
         formatted_messages = []
         for msg in request.messages:
-            msg_dict: dict[str, str] = {"role": msg.role, "content": msg.content}
+            msg_dict: dict[str, Any] = {"role": msg.role}
             if msg.name:
                 msg_dict["name"] = msg.name
+            
+            if isinstance(msg.content, str):
+                msg_dict["content"] = msg.content
+            elif msg.content:
+                parts = []
+                for p in msg.content:
+                    if p.type == "text" and p.text:
+                        parts.append({"type": "text", "text": p.text})
+                    elif p.type == "image_url" and p.media_url:
+                        parts.append({"type": "image_url", "image_url": {"url": p.media_url}})
+                    elif p.type == "media" and p.media_data and p.media_mime_type:
+                        import base64
+                        b64_data = base64.b64encode(p.media_data).decode("utf-8")
+                        data_uri = f"data:{p.media_mime_type};base64,{b64_data}"
+                        parts.append({"type": "image_url", "image_url": {"url": data_uri}})
+                msg_dict["content"] = parts
+            
             formatted_messages.append(msg_dict)
 
         async def _call():
@@ -197,3 +219,61 @@ class OpenAIProvider(ChatModel, EmbeddingModel):
         cleaned = text.strip() or " "
         embeddings = await self.embed([cleaned])
         return embeddings[0]
+
+    # ========================================================================
+    # TranscriptionModel Protocol Implementation
+    # ========================================================================
+
+    async def transcribe(
+        self,
+        source: str | bytes,
+        language: str | None = None,
+    ) -> TranscriptionResult:
+        """Transcribe an audio source using OpenAI Whisper."""
+        try:
+            import io
+            from pathlib import Path
+            
+            if isinstance(source, (str, Path)):
+                with open(source, "rb") as f:
+                    file_obj = io.BytesIO(f.read())
+                    file_obj.name = Path(source).name
+            else:
+                file_obj = io.BytesIO(source)
+                file_obj.name = "audio.mp3"  # Fallback name
+                
+            kwargs = {}
+            if language:
+                kwargs["language"] = language
+
+            async def _call():
+                return await self.client.audio.transcriptions.create(
+                    model=self.transcription_model,
+                    file=file_obj,
+                    response_format="verbose_json",
+                    timestamp_granularities=["segment"],
+                    **kwargs
+                )
+
+            resp = await self._execute_with_backoff("audio.transcriptions", _call)
+            
+            segments = []
+            if hasattr(resp, "segments") and resp.segments:
+                for seg in resp.segments:
+                    segments.append(
+                        TranscriptSegment(
+                            start_seconds=seg["start"] if isinstance(seg, dict) else seg.start,
+                            end_seconds=seg["end"] if isinstance(seg, dict) else seg.end,
+                            text=seg["text"].strip() if isinstance(seg, dict) else seg.text.strip(),
+                        )
+                    )
+            
+            return TranscriptionResult(
+                text=resp.text,
+                language=resp.language if hasattr(resp, "language") else (language or "en"),
+                duration_seconds=resp.duration if hasattr(resp, "duration") else 0.0,
+                segments=segments
+            )
+        except Exception as e:
+            logger.error("OpenAI transcription failed: %s", str(e))
+            raise

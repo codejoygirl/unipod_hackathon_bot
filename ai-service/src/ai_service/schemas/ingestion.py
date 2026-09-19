@@ -40,6 +40,39 @@ class IngestionRequest(BaseModel):
         return v
 
 
+class DocumentUnit(BaseModel):
+    """A single coherent structural unit of a document (e.g., a message, a paragraph, a slide)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    content: str = Field(..., description="Text content of the unit.")
+    locator: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Deterministic location markers (e.g., page_number, timestamp).",
+    )
+    breadcrumbs: list[str] = Field(
+        default_factory=list,
+        description="Structural hierarchy (e.g., ['Chapter 1', 'Section 1.2']).",
+    )
+
+
+class IngestionDocument(BaseModel):
+    """Unified document representation after format-specific parsing."""
+
+    model_config = ConfigDict(frozen=True)
+
+    units: list[DocumentUnit] = Field(..., description="Sequential structural units.")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RawDocument(BaseModel):
+    """Raw document structure before pipeline processing."""
+    model_config = ConfigDict(frozen=True)
+    
+    id: str
+    uri: str | None = None
+    source_type: str
+    content: str
 class IngestionResponse(BaseModel):
     """Response returned upon document ingestion processing."""
 

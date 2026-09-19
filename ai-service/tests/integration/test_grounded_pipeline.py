@@ -69,7 +69,6 @@ async def test_pipeline_successful_verified_answer():
     assert "[E1]" in payload.answer
     assert len(payload.citations) == 1
     assert payload.citations[0].evidence_id == "E1"
-    assert payload.citations[0].is_verified is True
     assert payload.needs_escalation is False
 
 

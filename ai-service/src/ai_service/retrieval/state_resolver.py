@@ -40,16 +40,15 @@ class AnswerStateResolver:
                 escalation_reason="Conflicting official guidance detected across retrieved sources.",
             )
 
-        # 2. Check Insufficient Evidence
-        is_sentinel = INSUFFICIENT_EVIDENCE_SENTINEL in raw_answer.strip()
+        # 2. Check Insufficient Evidence & Hard Failure
         has_no_evidence = len(evidence_chunks) == 0
         top_chunk_score = evidence_chunks[0].retrieval_score if evidence_chunks else 0.0
         is_below_floor = top_chunk_score < cls.POSSIBLE_CONFIDENCE_THRESHOLD
 
-        if is_sentinel or has_no_evidence or is_below_floor:
+        if has_no_evidence or is_below_floor or not validation_result.all_citations_valid:
             reason = "No authorized evidence found meeting confidence threshold 0.75."
-            if is_sentinel:
-                reason = "LLM indicated evidence is insufficient to answer reliably."
+            if not validation_result.all_citations_valid:
+                reason = "Generation failed due to hallucinated citations or unanchored claims."
 
             return ValidatedAnswerPayload(
                 state=AnswerState.INSUFFICIENT_EVIDENCE,

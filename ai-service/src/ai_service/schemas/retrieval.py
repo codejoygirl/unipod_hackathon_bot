@@ -88,6 +88,12 @@ class CandidateChunk(BaseModel):
     source_type: str
     community_id: uuid.UUID
 
+    # Media Locators
+    media_type: str | None = Field(default=None, description="'text', 'image', 'audio', or 'video'")
+    media_url: str | None = None
+    timestamp_seconds: float | None = None
+    bounding_box: list[float] | None = None
+
     # Intermediate scores for telemetry and auditability
     lexical_rank: int | None = None
     lexical_score: float | None = None

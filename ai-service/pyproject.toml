@@ -11,11 +11,15 @@ dependencies = [
     "anthropic>=1.6.0",
     "fastapi[standard]>=0.141.1",
     "google-genai>=2.24.0",
+    "gtts>=2.5.4",
     "httpx>=0.28.1",
     "openai>=3.15.0",
     "pgvector>=0.5.0",
+    "pillow>=12.3.0",
     "psycopg[binary]>=3.3.5",
     "pydantic-settings>=2.15.0",
+    "python-dotenv>=1.2.3",
+    "python-telegram-bot>=22.8",
     "sqlalchemy>=2.0.54",
 ]
 

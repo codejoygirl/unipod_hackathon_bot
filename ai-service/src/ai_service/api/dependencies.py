@@ -4,28 +4,41 @@ from collections.abc import AsyncGenerator
 import hashlib
 import hmac
 import time
-from typing import Any
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_service.core.config import settings
 from ai_service.db.base import async_session_factory
+from ai_service.providers.mock import (
+    MockLanguageDetector,
+    MockReranker,
+    MockTranslator,
+)
+from ai_service.reranking.service import RerankingService
+from ai_service.retrieval.service import HybridRetrievalService
+from ai_service.translation.detector import LanguageDetector
+from ai_service.translation.expander import QueryExpander
+from ai_service.translation.translator import ProtectedTranslator
 
-# Dynamically resolve RetrievalService across service modules
-RetrievalServiceClass: Any = None
-for _mod_path in [
-    "ai_service.retrieval.service",
-    "ai_service.retrieval.hybrid",
-    "ai_service.retrieval.pipeline",
-]:
-    try:
-        _mod = __import__(_mod_path, fromlist=["RetrievalService"])
-        if hasattr(_mod, "RetrievalService"):
-            RetrievalServiceClass = getattr(_mod, "RetrievalService")
-            break
-    except ImportError:
-        continue
+from ai_service.providers.factory import ModelFactory
+
+# 1. Base providers & adapters
+_embedder = ModelFactory.get_embedding_model()
+_detector = LanguageDetector(MockLanguageDetector())
+_translator = ProtectedTranslator(MockTranslator())
+_reranker_provider = MockReranker()
+
+# 2. Pipeline components
+_expander = QueryExpander(detector=_detector, translator=_translator)
+_reranker_service = RerankingService(provider=_reranker_provider)
+
+# 3. Hybrid Retrieval Service Singleton
+_retrieval_service = HybridRetrievalService(
+    embedder=_embedder,
+    expander=_expander,
+    reranker_service=_reranker_service,
+)
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -40,33 +53,17 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-# Compatibility aliases
 get_db = get_db_session
 get_session = get_db_session
 
 
 def get_settings():
-    """Dependency for application settings."""
     return settings
 
 
-async def get_retrieval_service(
-    session: AsyncSession = Depends(get_db_session),
-) -> Any:
-    """Dependency providing a configured RetrievalService bound to the active session."""
-    if RetrievalServiceClass is None:
-        return None
-
-    try:
-        return RetrievalServiceClass(session=session)
-    except TypeError:
-        try:
-            return RetrievalServiceClass(db=session)
-        except TypeError:
-            try:
-                return RetrievalServiceClass(session)
-            except TypeError:
-                return RetrievalServiceClass()
+def get_retrieval_service() -> HybridRetrievalService:
+    """Dependency providing the active HybridRetrievalService."""
+    return _retrieval_service
 
 
 async def verify_hmac(request: Request) -> None:
@@ -80,7 +77,6 @@ async def verify_hmac(request: Request) -> None:
             detail="Missing required authentication headers: X-Signature and X-Timestamp.",
         )
 
-    # 1. Verify clock skew within ±300 seconds
     try:
         req_time = int(timestamp)
     except ValueError:
@@ -96,9 +92,12 @@ async def verify_hmac(request: Request) -> None:
             detail="Request timestamp outside acceptable window (±300s). Check system clock.",
         )
 
-    # 2. Recompute and verify signature
-    body_bytes = await request.body()
-    body_str = body_bytes.decode("utf-8")
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("multipart/form-data"):
+        body_str = ""
+    else:
+        body_bytes = await request.body()
+        body_str = body_bytes.decode("utf-8")
     message = f"{timestamp}.{body_str}"
 
     secret_key = settings.INTERNAL_HMAC_SECRET.encode("utf-8")

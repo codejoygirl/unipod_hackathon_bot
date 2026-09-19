@@ -1,4 +1,4 @@
-﻿"""Vendor-agnostic typing.Protocol definitions for all AI/ML model providers.
+"""Vendor-agnostic typing.Protocol definitions for all AI/ML model providers.
 
 Defines explicit input and output contracts for chat generation, embeddings,
 reranking, transcription, translation, and language detection.
@@ -16,11 +16,22 @@ from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
+class MessagePart:
+    """A part of a multimodal message (text, image, audio, or video)."""
+
+    type: str  # "text" | "image_url" | "media"
+    text: str | None = None
+    media_url: str | None = None
+    media_mime_type: str | None = None
+    media_data: bytes | None = None
+
+
+@dataclass(frozen=True)
 class ChatMessage:
     """Standardized chat message payload."""
 
     role: str  # "system" | "user" | "assistant"
-    content: str
+    content: str | Sequence[MessagePart] | None = None
     name: str | None = None
 
 

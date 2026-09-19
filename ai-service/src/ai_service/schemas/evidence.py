@@ -1,6 +1,7 @@
 """Pydantic v2 schemas defining evidence structures, citation metadata, authority tiers, and the 4-state answer contract."""
 
 from enum import StrEnum
+from typing import Any
 import uuid
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -31,6 +32,17 @@ class AnswerState(StrEnum):
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 
 
+class MediaLocator(BaseModel):
+    """Encapsulates spatial and temporal media metadata for deep linking."""
+    model_config = ConfigDict(frozen=True)
+
+    timestamp_seconds: float | None = None
+    timecode: str | None = None
+    media_url: str | None = None
+    bounding_box: list[float] | None = None
+    page_number: int | None = None
+
+
 class EvidenceChunk(BaseModel):
     """A normalized knowledge chunk formatted for XML prompt fencing and citation tracking."""
 
@@ -50,37 +62,27 @@ class EvidenceChunk(BaseModel):
     breadcrumbs: list[str] = Field(default_factory=list, description="Document section hierarchy.")
     authority_tier: AuthorityTier = Field(..., description="Authority level of the source.")
     retrieval_score: float = Field(..., ge=0.0, le=1.0, description="Final hybrid/reranked score.")
-    page_number: int | None = Field(default=None, description="Page number for paged media.")
-    timestamp_seconds: float | None = Field(
-        default=None, description="Audio/video offset for recorded transcripts."
-    )
+    
+    media_type: str | None = Field(default=None, description="'text', 'image', 'audio', or 'video'")
+    locator: MediaLocator = Field(default_factory=MediaLocator)
 
 
-class CitationDetail(BaseModel):
+class EnrichedCitation(BaseModel):
     """Rich citation metadata supporting Web PWA Evidence Drawers and messaging platforms."""
 
     model_config = ConfigDict(frozen=True)
 
     evidence_id: str = Field(..., pattern=r"^E\d+$")
-    chunk_id: uuid.UUID
     source_name: str
     source_uri: str
-    authority_tier: AuthorityTier
-    exact_quote: str = Field(
+    media_type: str | None = Field(default=None, description="'text', 'image', 'audio', or 'video'")
+    evidence_snippet: str = Field(
         ...,
         min_length=1,
-        description="The exact substring from the source chunk supporting the generated claim.",
+        description="The exact text/transcription chunk used to ground the claim.",
     )
-    context_snippet: str | None = Field(
-        default=None,
-        description="Surrounding sentence or window for contextual display in the UI drawer.",
-    )
-    page_number: int | None = None
-    timestamp_seconds: float | None = None
-    is_verified: bool = Field(
-        default=True,
-        description="True if exact quote or high-confidence fuzzy alignment matches source chunk.",
-    )
+    locator: dict[str, Any] = Field(default_factory=dict)
+    relevance_score: float | None = None
 
 
 class ConflictDetail(BaseModel):
@@ -122,7 +124,7 @@ class ValidatedAnswerPayload(BaseModel):
         le=1.0,
         description="Aggregated confidence based on retrieval scores and source authority.",
     )
-    citations: list[CitationDetail] = Field(
+    citations: list[EnrichedCitation] = Field(
         default_factory=list,
         description="Verified citation references linked to specific sentences.",
     )

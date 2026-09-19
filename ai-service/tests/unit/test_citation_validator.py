@@ -49,12 +49,16 @@ def test_citation_validator_verified_match():
     }
 
     answer = "Water points will open at 8:00 AM on Friday [E1]."
-    result = CitationValidator.validate_answer(answer, evidence)
+    result = CitationValidator.validate_answer(
+        answer=answer,
+        evidence_ids_used=["E1"],
+        evidence_map=evidence
+    )
 
     assert result.all_citations_valid is True
     assert len(result.verified_citations) == 1
     assert result.verified_citations[0].evidence_id == "E1"
-    assert "8:00 AM on Friday" in result.verified_citations[0].exact_quote
+    assert "8:00 AM on Friday" in result.verified_citations[0].evidence_snippet
 
 
 def test_citation_validator_detects_hallucinated_id():
@@ -64,12 +68,16 @@ def test_citation_validator_detects_hallucinated_id():
 
     # Model hallucinates [E99]
     answer = "Water points open at 8:00 AM [E1]. School starts Monday [E99]."
-    result = CitationValidator.validate_answer(answer, evidence, strip_invalid_tags=True)
+    result = CitationValidator.validate_answer(
+        answer=answer,
+        evidence_ids_used=["E1", "E99"],
+        evidence_map=evidence
+    )
 
     assert result.all_citations_valid is False
     assert result.hallucinated_ids == ["E99"]
-    assert "[E99]" not in result.cleaned_answer
-    assert "[E1]" in result.cleaned_answer
+    # With hard failure, the cleaned_answer should be empty
+    assert result.cleaned_answer == ""
 
 
 def test_citation_validator_detects_unanchored_claim():
@@ -79,7 +87,11 @@ def test_citation_validator_detects_unanchored_claim():
 
     # Answer asserts dental clinics are open, but cites the road repair document
     answer = "Free dental cleanings are available tomorrow at the clinic [E1]."
-    result = CitationValidator.validate_answer(answer, evidence)
+    result = CitationValidator.validate_answer(
+        answer=answer,
+        evidence_ids_used=["E1"],
+        evidence_map=evidence
+    )
 
     assert result.all_citations_valid is False
     assert len(result.unanchored_claims) == 1

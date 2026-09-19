@@ -49,9 +49,9 @@ def test_faithfulness_calculation_penalizes_hallucinated_citation():
         RagTriadEvaluator.calculate_faithfulness(answer, chunks)
     )
 
-    assert score == 0.5  # 1 out of 2 claims verified
-    assert total == 2
-    assert verified == 1
+    assert score == 0.0
+    assert total == 1
+    assert verified == 0
     assert hallucinated == 1
 
 

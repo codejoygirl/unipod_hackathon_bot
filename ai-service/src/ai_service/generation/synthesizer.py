@@ -2,7 +2,8 @@
 
 from collections.abc import Sequence
 import logging
-from ai_service.citations.validator import CitationValidator
+import json
+from ai_service.generation.verifier import AnswerVerifier
 from ai_service.generation.prompts import (
     build_evidence_context_xml,
     build_grounded_system_prompt,
@@ -10,7 +11,6 @@ from ai_service.generation.prompts import (
 )
 from ai_service.providers.base import ChatMessage, ChatModel, ChatRequest
 from ai_service.retrieval.conflict import ConflictDetector
-from ai_service.retrieval.state_resolver import AnswerStateResolver
 from ai_service.schemas.evidence import (
     AnswerState,
     EvidenceChunk,
@@ -50,6 +50,12 @@ class AnswerSynthesizer:
                     breadcrumbs=cand.breadcrumbs,
                     authority_tier=cand.authority_tier,
                     retrieval_score=cand.final_score,
+                    media_type=cand.media_type,
+                    locator={
+                        "media_url": cand.media_url,
+                        "timestamp_seconds": cand.timestamp_seconds,
+                        "bounding_box": cand.bounding_box
+                    }
                 )
             )
 
@@ -63,16 +69,8 @@ class AnswerSynthesizer:
         enable_conflict_detection: bool = True,
         temperature: float = 0.0,
     ) -> ValidatedAnswerPayload:
-        """Execute end-to-end evidence synthesis and validation.
-
-        1. Fast-path check: If no candidates exceed the confidence floor (0.75),
-           bypass LLM generation and immediately return INSUFFICIENT_EVIDENCE.
-        2. Normalize candidates to ordered [E1, E2, ...] EvidenceChunks.
-        3. Run cross-document conflict detection if enabled.
-        4. Assemble XML-fenced prompts and invoke the ChatModel.
-        5. Verify all citations against source chunks.
-        6. Determine final state (VERIFIED, POSSIBLE, CONFLICT, INSUFFICIENT_EVIDENCE).
-        """
+        """Execute end-to-end evidence synthesis and validation."""
+        
         # 1. Fast-Path Pre-Check
         if not candidates or candidates[0].final_score < self.MIN_CONFIDENCE_FLOOR:
             top_score = candidates[0].final_score if candidates else 0.0
@@ -111,22 +109,35 @@ class AnswerSynthesizer:
             ],
             temperature=temperature,
             max_tokens=1024,
+            extra_params={"response_format": {"type": "json_object"}},
         )
 
         chat_response = await self._chat_model.generate(chat_request)
-        raw_answer = chat_response.content
+        raw_answer_text = chat_response.content
+        
+        try:
+            if raw_answer_text.startswith("```json"):
+                raw_answer_text = raw_answer_text[7:-3]
+            parsed_response = json.loads(raw_answer_text.strip())
+            answer_text = parsed_response.get("answer", "")
+            evidence_ids_used = parsed_response.get("evidence_ids_used", [])
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse structured JSON output from LLM: {raw_answer_text}")
+            answer_text = ""
+            evidence_ids_used = []
 
-        # 5. Citation Audit & Claim Extraction
-        validation_result = CitationValidator.validate_answer(
-            answer=raw_answer,
+        # 5. Citation Audit & Claim Extraction via Verifier
+        cleaned_answer, verified_citations, all_valid = AnswerVerifier.verify_citations(
+            answer=answer_text,
+            evidence_ids_used=evidence_ids_used,
             evidence_map=evidence_map,
-            strip_invalid_tags=True,
         )
 
         # 6. Deterministic 4-State Resolution
-        return AnswerStateResolver.resolve_state(
-            raw_answer=raw_answer,
+        return AnswerVerifier.resolve_state(
+            raw_answer=cleaned_answer,
             evidence_chunks=evidence_chunks,
-            validation_result=validation_result,
+            verified_citations=verified_citations,
+            all_citations_valid=all_valid,
             detected_conflicts=detected_conflicts,
         )
