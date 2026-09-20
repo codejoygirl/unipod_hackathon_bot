@@ -1,9 +1,14 @@
-﻿"""Centralized application settings validated via pydantic-settings."""
+"""Centralized application settings validated via pydantic-settings."""
 
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# ai-service/.env regardless of process cwd (src/ai_service/core/config.py → ../../..)
+_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 class EnvironmentType(StrEnum):
@@ -17,7 +22,7 @@ class Settings(BaseSettings):
     """Application configuration loaded from environment variables and .env."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=True,
@@ -55,6 +60,12 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     COHERE_API_KEY: str | None = None
+
+    # Vendor selection (openai | gemini). Read via Settings so .env is applied.
+    LLM_PROVIDER: str = "openai"
+    EMBEDDING_PROVIDER: str = "openai"
+    TRANSCRIPTION_PROVIDER: str = "openai"
+    VISION_PROVIDER: str = "openai"
 
     # Model Defaults
     EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"

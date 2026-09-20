@@ -1,0 +1,17 @@
+{
+  "name": "zak-whatsapp-web-spike",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DEV-ONLY unofficial WhatsApp Web session bridge for Zak (whatsapp-web.js). Not for production.",
+  "scripts": {
+    "start": "node src/index.js",
+    "qr": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.2"
+  }
+}

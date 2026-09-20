@@ -44,10 +44,20 @@ class AnswerStateResolver:
         has_no_evidence = len(evidence_chunks) == 0
         top_chunk_score = evidence_chunks[0].retrieval_score if evidence_chunks else 0.0
         is_below_floor = top_chunk_score < cls.POSSIBLE_CONFIDENCE_THRESHOLD
+        cleaned = (validation_result.cleaned_answer or "").strip()
+        no_usable_answer = (
+            not cleaned
+            or not validation_result.verified_citations
+            or not validation_result.all_citations_valid
+        )
 
-        if has_no_evidence or is_below_floor or not validation_result.all_citations_valid:
+        if has_no_evidence or is_below_floor or no_usable_answer:
             reason = "No authorized evidence found meeting confidence threshold 0.75."
-            if not validation_result.all_citations_valid:
+            if not cleaned and evidence_chunks and not is_below_floor:
+                reason = (
+                    "Retrieved sources did not contain enough information to answer the question."
+                )
+            elif not validation_result.all_citations_valid:
                 reason = "Generation failed due to hallucinated citations or unanchored claims."
 
             return ValidatedAnswerPayload(

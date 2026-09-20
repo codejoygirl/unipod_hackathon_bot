@@ -14,7 +14,7 @@ Top-level names follow the same pattern as the local Gravity reference (`backend
 backend/       Laravel API and product backend (Sail for local DX)
 frontend/      Next.js TypeScript PWA
 ai-service/    FastAPI — RAG, transcription, translation, evaluation, …
-infrastructure/  Docker, nginx, and deploy scripts (stubs)
+infrastructure/  Docker, nginx, deploy stubs; DEV-ONLY WhatsApp Web spike sidecar
 docs/          PRD, plan, architecture/api/decisions/operations
 ```
 
@@ -103,8 +103,10 @@ Then (same idea on both shells — use `Copy-Item` instead of `cp` on PowerShell
 # frontend
 cd frontend && cp .env.example .env.local && npm install && npm run dev
 
-# ai-service
+# ai-service (after Sail is up so Postgres is on 5432)
 cd ai-service && cp .env.example .env && uv sync
+# edit .env: OPENAI_API_KEY, providers, INTERNAL_HMAC_SECRET (match backend)
+uv run alembic upgrade head
 uv run fastapi dev src/ai_service/main.py --port 8001
 ```
 
@@ -115,6 +117,24 @@ uv run fastapi dev src/ai_service/main.py --port 8001
 | http://localhost:3000 | Frontend |
 | http://localhost:8001/docs | AI service OpenAPI (local only) |
 | http://localhost:8001/health/live | AI liveness |
+
+### Test assistant ask (team)
+
+```bash
+# terminal 1 — Sail (if not already up)
+cd backend && ./vendor/bin/sail up -d && ./vendor/bin/sail artisan migrate
+
+# terminal 2 — AI service
+cd ai-service && uv run alembic upgrade head
+uv run fastapi dev src/ai_service/main.py --port 8001
+
+# terminal 1 — seed + ask
+cd backend
+./vendor/bin/sail artisan zak:seed-assistant-demo
+./scripts/seed-and-ask.sh
+```
+
+Demo user: `demo@zak.test` / `password123`. Full steps: [backend/README.md](backend/README.md#test-apiv1assistantask-team).
 
 ## Documentation
 
@@ -131,10 +151,11 @@ uv run fastapi dev src/ai_service/main.py --port 8001
 
 ## Current status
 
-Scaffold + locked directory structure. No product features yet. Next: Phase 1 (Sanctum, tenancy, Scramble).
+Phase 0–2 foundation on `develop`: Sanctum tenancy, knowledge lifecycle, RAG AI service, assistant ask with citation revalidation. Next: Phase 3 member experience.
 
 ## Security notes
 
 - Keep `.env` files out of Git. Only `.env.example` templates are tracked.
 - Never put server secrets in `NEXT_PUBLIC_*` variables.
 - Tenant and community isolation must be enforced in Laravel (and repeated in AI retrieval), not only in prompts.
+- WhatsApp Web automation under `infrastructure/whatsapp-web-spike/` is a **dev spike only** (`WHATSAPP_WEB_SPIKE=false` by default). Production channel path is WhatsApp Cloud API (Phase 4).

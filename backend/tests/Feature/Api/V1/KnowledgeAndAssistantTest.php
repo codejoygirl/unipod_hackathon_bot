@@ -54,21 +54,60 @@ class KnowledgeAndAssistantTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ingestion/sync'));
     }
 
-    public function test_whatsapp_export_creates_draft_for_review(): void
+    public function test_knowledge_import_text_creates_draft(): void
     {
         [$user, $tenant, $community] = $this->seedMember(MembershipRole::Member);
 
         $this->actingAs($user);
 
-        $this->postJson('/api/v1/knowledge-sources/import/whatsapp', [
+        $this->postJson('/api/v1/knowledge-sources/import', [
             'tenant_id' => $tenant->id,
             'community_id' => $community->id,
             'content' => 'Forwarded: water will be off tomorrow.',
             'name' => 'WA forward',
+            'source_type' => 'whatsapp',
         ])
             ->assertCreated()
             ->assertJsonPath('data.source_type', 'whatsapp')
             ->assertJsonPath('data.lifecycle_status', 'draft');
+    }
+
+    public function test_knowledge_import_file_calls_multimodal_ai(): void
+    {
+        Http::fake([
+            '*/ingestion/multimodal' => Http::response([
+                'source_id' => '11111111-1111-1111-1111-111111111111',
+                'version_id' => '22222222-2222-2222-2222-222222222222',
+                'status' => 'completed',
+                'content_sha256' => 'abc',
+                'chunks_created' => 1,
+                'message' => 'ok',
+                'execution_time_ms' => 1.0,
+            ], 200),
+        ]);
+
+        [$user, $tenant, $community] = $this->seedMember(MembershipRole::CommunityAdmin);
+
+        $this->actingAs($user);
+
+        $file = \Illuminate\Http\UploadedFile::fake()->create('flyer.png', 100, 'image/png');
+
+        $this->post('/api/v1/knowledge-sources/import', [
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'name' => 'Clinic flyer',
+            'uri' => 'doc://clinic-flyer',
+            'source_type' => 'image',
+            'file' => $file,
+        ], [
+            'Accept' => 'application/json',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.source_type', 'image')
+            ->assertJsonPath('data.lifecycle_status', 'draft')
+            ->assertJsonPath('data.ai_source_id', '11111111-1111-1111-1111-111111111111');
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/ingestion/multimodal'));
     }
 
     public function test_assistant_ask_rejects_foreign_community_and_revalidates(): void

@@ -56,11 +56,22 @@ class HybridRetrievalService:
                     merged[key] = candidate
 
         fused = sorted(merged.values(), key=lambda c: c.rrf_score, reverse=True)  # type: ignore[attr-defined]
-        reranked = await ReRankerPipeline.rerank(
-            request.query,
-            fused,  # type: ignore[arg-type]
-            top_n=request.rerank_top_n,
-        )
+
+        # Prefer injected reranker (sets final_score on a 0–1 scale). RRF alone is ~0.03
+        # and fails the synthesizer's 0.75 confidence floor.
+        if self.reranker_service is not None:
+            reranked = await self.reranker_service.rerank_candidates(
+                request.query,
+                fused,  # type: ignore[arg-type]
+                top_n=request.rerank_top_n,
+            )
+        else:
+            reranked = await ReRankerPipeline.rerank(
+                request.query,
+                fused,  # type: ignore[arg-type]
+                top_n=request.rerank_top_n,
+            )
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         return RetrievalResponse(

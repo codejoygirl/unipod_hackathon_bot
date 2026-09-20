@@ -72,7 +72,9 @@ async def execute_hybrid_search(
         kc.breadcrumbs,
         kc.metadata AS metadata_,
         kc.community_id,
-        ks.source_type
+        ks.source_type,
+        ks.uri AS source_uri,
+        ks.name AS source_name
     FROM fused_results f
     JOIN knowledge_chunks kc ON kc.id = f.chunk_id
     JOIN knowledge_sources ks ON kc.source_id = ks.id
@@ -110,6 +112,8 @@ async def execute_hybrid_search(
                 breadcrumbs=row.breadcrumbs,
                 authority_tier=AuthorityTier(authority_tier_raw),
                 source_type=row.source_type,
+                source_uri=str(row.source_uri or ""),
+                source_name=str(row.source_name or ""),
                 community_id=str(row.community_id),
                 lexical_rank=row.lexical_rank,
                 lexical_score=float(row.lexical_score) if row.lexical_score is not None else None,

@@ -18,7 +18,11 @@ return [
      * Multiple includes or wildcards → server defaults to / and paths stay full (/api/users).
      * Override with `servers`, or use Scramble::registerApi() for separate bases.
      */
-    'api_path' => 'api/v1',
+    // Public product API only — hide DEV-ONLY WhatsApp Web spike internals.
+    'api_path' => [
+        'include' => 'api/v1',
+        'exclude' => ['api/v1/internal*'],
+    ],
 
     /*
      * Your API domain. By default, app domain is used. This is also a part of the default API routes
@@ -177,6 +181,11 @@ return [
      *     ],
      * ],
      */
-    // 'security_strategy' => \Dedoc\Scramble\SecurityDocumentation\MiddlewareAuthSecurityStrategy::class,
-    'security_strategy' => null,
+    'security_strategy' => [
+        \Dedoc\Scramble\SecurityDocumentation\MiddlewareAuthSecurityStrategy::class,
+        [
+            'middleware' => ['auth', 'auth:*'],
+            'scheme' => \Dedoc\Scramble\Support\Generator\SecurityScheme::http('bearer'),
+        ],
+    ],
 ];

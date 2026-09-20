@@ -87,6 +87,10 @@ class AnswerVerifier:
                 )
             )
 
+        # Non-empty answers must cite at least one valid evidence ID.
+        if (answer or "").strip() and not verified_citations:
+            all_valid = False
+
         return (answer if all_valid else ""), verified_citations, all_valid
 
     @classmethod
@@ -114,10 +118,18 @@ class AnswerVerifier:
         has_no_evidence = len(evidence_chunks) == 0
         top_chunk_score = evidence_chunks[0].retrieval_score if evidence_chunks else 0.0
         is_below_floor = top_chunk_score < cls.POSSIBLE_CONFIDENCE_THRESHOLD
+        answer_empty = not (raw_answer or "").strip()
+        # Retrieved chunks can score high yet be irrelevant; an empty model answer means
+        # "no grounded reply", not POSSIBLE.
+        no_usable_answer = answer_empty or not verified_citations or not all_citations_valid
 
-        if has_no_evidence or is_below_floor or not all_citations_valid:
+        if has_no_evidence or is_below_floor or no_usable_answer:
             reason = "No authorized evidence found meeting confidence threshold 0.75."
-            if not all_citations_valid:
+            if answer_empty and evidence_chunks and not is_below_floor:
+                reason = (
+                    "Retrieved sources did not contain enough information to answer the question."
+                )
+            elif not all_citations_valid or (not answer_empty and not verified_citations):
                 reason = "Generation failed due to hallucinated citations or unanchored claims."
 
             return ValidatedAnswerPayload(

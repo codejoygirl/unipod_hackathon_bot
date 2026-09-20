@@ -1,0 +1,6 @@
+.wwebjs_auth/
+.wwebjs_cache/
+auth_info_baileys/
+.env
+node_modules/
+*.log

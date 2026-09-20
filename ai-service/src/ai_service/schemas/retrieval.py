@@ -88,6 +88,8 @@ class CandidateChunk(BaseModel):
     breadcrumbs: list[str] = Field(default_factory=list)
     authority_tier: AuthorityTier
     source_type: str
+    source_uri: str = ""
+    source_name: str = ""
     community_id: str
 
     # Media Locators

@@ -10,13 +10,13 @@ Every request must include:
 ## Core Endpoints
 
 ### 1. `POST /ingestion/multimodal`
-Ingests media formats.
+Ingests media or text.
 - **Content-Type**: `multipart/form-data`
 - **Fields**:
-  - `file`: The media file (image, audio, video)
-  - `tenant_id`: UUID
-  - `community_id`: UUID
-  - `source_type`: 'image' | 'audio' | 'video' | 'text'
+  - `file` (optional if `content` set): media or text file
+  - `content` (optional if `file` set): plain text body
+  - `tenant_id`, `community_id`, `name`, `uri`
+  - `source_type`: `image` | `audio` | `video` | `text` | `markdown` | `whatsapp` | …
 
 ### 2. `POST /retrieval/grounded-answer`
 Queries the vector DB and synthesizes an answer.

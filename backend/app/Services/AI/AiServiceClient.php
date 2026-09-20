@@ -92,7 +92,9 @@ class AiServiceClient
                 citations: [],
                 conflicts: [],
                 needsEscalation: true,
-                escalationReason: 'AI service unreachable or failed to respond. Escalated to human operator.',
+                escalationReason: str_contains($e->getMessage(), 'timed out')
+                    ? 'AI service timed out. Escalated to human operator.'
+                    : 'AI service unreachable or failed to respond. Escalated to human operator.',
                 executionTimeMs: 0.0,
                 totalChunksRetrieved: 0,
             );
@@ -132,6 +134,57 @@ class AiServiceClient
 
         if ($response->failed()) {
             throw new AiServiceException("Ingestion failed: " . $response->body());
+        }
+
+        return $response->json();
+    }
+
+    /**
+     * Multipart ingest (image/audio/video/text file) via AI /ingestion/multimodal.
+     * HMAC for multipart signs "{timestamp}." (empty body), matching the AI service.
+     *
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    public function ingestMultimodal(
+        string $tenantId,
+        string $communityId,
+        string $uri,
+        string $name,
+        string $sourceType,
+        string $absoluteFilePath,
+        string $originalFilename,
+        string $authorityTier = 'community_discussion',
+        ?string $mimeType = null,
+    ): array {
+        $timestamp = (string) time();
+        $signature = hash_hmac('sha256', "{$timestamp}.", $this->hmacSecret);
+
+        $response = $this->http
+            ->timeout(120.0)
+            ->connectTimeout($this->connectTimeout)
+            ->withHeaders([
+                'X-Signature' => $signature,
+                'X-Timestamp' => $timestamp,
+                'Accept' => 'application/json',
+            ])
+            ->attach(
+                'file',
+                (string) file_get_contents($absoluteFilePath),
+                $originalFilename,
+                $mimeType ? ['Content-Type' => $mimeType] : [],
+            )
+            ->post("{$this->baseUrl}/ingestion/multimodal", [
+                'tenant_id' => $tenantId,
+                'community_id' => $communityId,
+                'uri' => $uri,
+                'name' => $name,
+                'source_type' => $sourceType,
+                'authority_tier' => $authorityTier,
+            ]);
+
+        if ($response->failed()) {
+            throw new AiServiceException('Multimodal ingestion failed: '.$response->body());
         }
 
         return $response->json();
