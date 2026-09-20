@@ -1,26 +1,220 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-paper-sunk: var(--paper-sunk);
+  --color-paper-raised: var(--paper-raised);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-accent: var(--accent);
+  --color-accent-bright: var(--accent-bright);
+  --color-accent-wash: var(--accent-wash);
+  --color-amber: var(--amber);
+  --color-amber-wash: var(--amber-wash);
+  --color-clay: var(--clay);
+  --color-clay-wash: var(--clay-wash);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-newsreader);
+  --font-arabic: var(--font-noto-naskh);
+}
+
+/*
+ * Palette: warm paper and ink, with a verdigris accent borrowed from a library
+ * stamp. Deliberately not the blue-violet every assistant product reaches for.
+ * Neutrals carry a trace of chroma so the greys read as authored.
+ */
+:root {
+  color-scheme: light;
+
+  --paper: oklch(0.973 0.006 85);
+  --paper-sunk: oklch(0.945 0.008 84);
+  --paper-raised: oklch(0.996 0.003 90);
+
+  --ink: oklch(0.205 0.012 60);
+  --ink-soft: oklch(0.44 0.013 60);
+
+  --rule: oklch(0.878 0.008 82);
+  --rule-strong: oklch(0.79 0.010 80);
+
+  --accent: oklch(0.455 0.078 178);
+  --accent-bright: oklch(0.60 0.098 178);
+  --accent-wash: oklch(0.945 0.024 178);
+
+  --amber: oklch(0.50 0.105 62);
+  --amber-wash: oklch(0.955 0.032 76);
+
+  --clay: oklch(0.48 0.125 32);
+  --clay-wash: oklch(0.950 0.024 32);
+
+  --elevation-card:
+    0 0 0 1px var(--rule),
+    0 1px 2px oklch(0.2 0.01 60 / 0.05),
+    0 10px 28px -14px oklch(0.2 0.01 60 / 0.18);
+
+  --elevation-raised:
+    0 0 0 1px var(--rule),
+    0 2px 4px oklch(0.2 0.01 60 / 0.06),
+    0 18px 44px -18px oklch(0.2 0.01 60 / 0.22);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
+
+    --paper: oklch(0.185 0.010 62);
+    --paper-sunk: oklch(0.152 0.010 62);
+    --paper-raised: oklch(0.228 0.011 62);
+
+    --ink: oklch(0.945 0.006 85);
+    --ink-soft: oklch(0.760 0.010 82);
+
+    --rule: oklch(0.300 0.010 62);
+    --rule-strong: oklch(0.385 0.011 62);
+
+    --accent: oklch(0.755 0.092 178);
+    --accent-bright: oklch(0.670 0.100 178);
+    --accent-wash: oklch(0.272 0.032 178);
+
+    --amber: oklch(0.790 0.115 72);
+    --amber-wash: oklch(0.280 0.038 70);
+
+    --clay: oklch(0.735 0.120 32);
+    --clay-wash: oklch(0.282 0.038 30);
+
+    --elevation-card:
+      0 0 0 1px var(--rule),
+      0 1px 2px oklch(0 0 0 / 0.4),
+      0 10px 28px -14px oklch(0 0 0 / 0.6);
+
+    --elevation-raised:
+      0 0 0 1px var(--rule),
+      0 2px 4px oklch(0 0 0 / 0.45),
+      0 18px 44px -18px oklch(0 0 0 / 0.7);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--accent-wash);
+    color: var(--ink);
+  }
+
+  /* One focus treatment for the whole product, never overridden per component. */
+  :focus-visible {
+    outline: 2px dashed var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+}
+
+@utility zak-card {
+  background-color: var(--paper-raised);
+  box-shadow: var(--elevation-card);
+}
+
+@utility zak-card-raised {
+  background-color: var(--paper-raised);
+  box-shadow: var(--elevation-raised);
+}
+
+@utility zak-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+@utility zak-answer {
+  font-family: var(--font-newsreader), ui-serif, Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.62;
+  font-variation-settings: "opsz" 18;
+}
+
+@utility zak-question {
+  font-family: var(--font-newsreader), ui-serif, Georgia, serif;
+  font-size: 1.25rem;
+  line-height: 1.35;
+  font-variation-settings: "opsz" 28;
+}
+
+@keyframes zak-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes zak-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes zak-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.zak-rise {
+  animation: zak-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.zak-fade {
+  animation: zak-fade 0.4s ease-out both;
+}
+
+.zak-live {
+  animation: zak-pulse 2.6s ease-in-out infinite;
+}
+
+/* Light on dark reads optically thinner: give it room and a little air. */
+@media (prefers-color-scheme: dark) {
+  .zak-answer {
+    line-height: 1.7;
+    letter-spacing: 0.004em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zak-rise {
+    animation: zak-fade 0.1s linear both;
+  }
+
+  .zak-fade {
+    animation-duration: 0.1s;
+  }
+
+  .zak-live {
+    animation: none;
+  }
 }
