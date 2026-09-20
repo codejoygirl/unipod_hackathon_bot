@@ -66,15 +66,22 @@ class AnswerSynthesizer:
         self,
         query: str,
         candidates: Sequence[CandidateChunk],
+        total_candidates_scanned: int = 0,
         target_language: str | None = None,
         enable_conflict_detection: bool = True,
         temperature: float = 0.0,
-    ) -> ValidatedAnswerPayload:
-        """Execute end-to-end evidence synthesis and validation."""
+    ) -> tuple[ValidatedAnswerPayload, bool]:
+        """Execute end-to-end evidence synthesis and validation. Returns (payload, generation_invoked)."""
         
         # 1. Fast-Path Pre-Check
         if not candidates or candidates[0].final_score < self.MIN_CONFIDENCE_FLOOR:
             top_score = candidates[0].final_score if candidates else 0.0
+            
+            if total_candidates_scanned == 0:
+                reason = "No evidence found for the resolved query in the requested time window."
+            else:
+                reason = f"Scanned {total_candidates_scanned} candidates. {len(candidates)} passed authority filters, 0 passed confidence threshold of {self.MIN_CONFIDENCE_FLOOR}."
+                
             return ValidatedAnswerPayload(
                 state=AnswerState.INSUFFICIENT_EVIDENCE,
                 answer="",
@@ -82,11 +89,27 @@ class AnswerSynthesizer:
                 citations=[],
                 conflicts=[],
                 needs_escalation=True,
-                escalation_reason=f"No authorized evidence met the minimum confidence threshold ({self.MIN_CONFIDENCE_FLOOR}).",
-            )
+                escalation_reason=reason,
+            ), False
 
+        from ai_service.core.token_budget import SemanticCompressor
+        
         # 2. Normalize Candidates to Evidence Chunks
         evidence_chunks = self._normalize_candidates_to_evidence(candidates)
+        
+        # Enforce token budget and prune context dynamically
+        evidence_chunks = SemanticCompressor.prune_context(evidence_chunks)
+        if not evidence_chunks:
+             return ValidatedAnswerPayload(
+                state=AnswerState.INSUFFICIENT_EVIDENCE,
+                answer="",
+                confidence_score=0.0,
+                citations=[],
+                conflicts=[],
+                needs_escalation=True,
+                escalation_reason="All candidate evidence was pruned due to context window token limits.",
+            ), False
+            
         evidence_map = {chunk.evidence_id: chunk for chunk in evidence_chunks}
 
         # 3. Detect Conflicts Across Top-Tier Evidence
@@ -135,10 +158,11 @@ class AnswerSynthesizer:
         )
 
         # 6. Deterministic 4-State Resolution
-        return AnswerVerifier.resolve_state(
+        payload = AnswerVerifier.resolve_state(
             raw_answer=cleaned_answer,
             evidence_chunks=evidence_chunks,
             verified_citations=verified_citations,
             all_citations_valid=all_valid,
             detected_conflicts=detected_conflicts,
         )
+        return payload, True

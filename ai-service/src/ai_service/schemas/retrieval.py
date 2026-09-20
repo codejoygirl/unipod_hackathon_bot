@@ -32,6 +32,10 @@ class QueryRequest(BaseModel):
         max_length=2000,
         description="Raw search query input by the user.",
     )
+    chat_history: list[dict[str, str]] | None = Field(
+        default=None,
+        description="Conversation history for contextual resolution.",
+    )
     tenant_id: uuid.UUID = Field(
         ...,
         description="Tenant identifier for strict data isolation.",
@@ -104,17 +108,39 @@ class CandidateChunk(BaseModel):
     final_score: float = 0.0
 
 
+class StageTimings(BaseModel):
+    """Execution timings for each stage of the RAG pipeline."""
+    model_config = ConfigDict(frozen=True)
+    
+    context_resolution: float = 0.0
+    classification: float = 0.0
+    expansion: float = 0.0
+    embedding: float = 0.0
+    hybrid_search: float = 0.0
+    fusion_rerank: float = 0.0
+    generation: float = 0.0
+    external_fallback: float | None = None
+
+
 class RetrievalResponse(BaseModel):
     """Structured response returned by the hybrid retrieval service."""
 
     model_config = ConfigDict(frozen=True)
 
     original_query: str
-    expanded_queries: list[str]
+    resolved_query: str
+    query_type: str
+    expansion_queries: list[str]
+    expansion_validation_failures: int
     detected_language: str
     candidates: list[CandidateChunk]
-    execution_time_ms: float
+    retrieval_status: str
     total_candidates_scanned: int
+    knowledge_freshness_gap: bool
+    resolved_window: dict[str, str] | None = None
+    generation_invoked: bool = False
+    stage_timings_ms: StageTimings
+    total_execution_time_ms: float
 
 
 class GroundedAnswerRequest(BaseModel):
@@ -123,6 +149,7 @@ class GroundedAnswerRequest(BaseModel):
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
     query: str = Field(..., min_length=1, max_length=2000)
+    chat_history: list[dict[str, str]] | None = Field(default=None)
     tenant_id: uuid.UUID
     community_ids: list[uuid.UUID] = Field(..., min_length=1)
     target_language: str | None = Field(default=None, max_length=10)
@@ -148,3 +175,4 @@ class GroundedAnswerResponse(BaseModel):
     validated_payload: ValidatedAnswerPayload
     execution_time_ms: float
     total_chunks_retrieved: int
+    retrieval_diagnostics: RetrievalResponse

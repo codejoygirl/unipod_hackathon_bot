@@ -22,6 +22,12 @@ class KnowledgeSourceVersion(Base, TenantScopedMixin, TimestampMixin):
         ForeignKey("knowledge_sources.id", ondelete="CASCADE"),
         nullable=False,
     )
+    previous_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("knowledge_source_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    is_superseded: Mapped[bool] = mapped_column(default=False, nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)

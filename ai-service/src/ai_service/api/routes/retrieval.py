@@ -90,6 +90,7 @@ async def generate_grounded_answer(
     # Step 1: Hybrid candidate retrieval
     query_req = QueryRequest(
         query=request.query,
+        chat_history=request.chat_history,
         tenant_id=request.tenant_id,
         community_ids=request.community_ids,
         target_language=request.target_language,
@@ -100,13 +101,37 @@ async def generate_grounded_answer(
     retrieval_res = await retrieval_service.search(session=session, request=query_req)
 
     # Step 2: Synthesis and verification
-    validated_payload = await synthesizer.synthesize_grounded_answer(
-        query=request.query,
+    # Add generation time tracking to stage_timings
+    t0 = time.perf_counter()
+    validated_payload, generation_invoked = await synthesizer.synthesize_grounded_answer(
+        query=retrieval_res.resolved_query,
         candidates=retrieval_res.candidates,
+        total_candidates_scanned=retrieval_res.total_candidates_scanned,
         target_language=request.target_language,
         enable_conflict_detection=request.enable_conflict_detection,
         temperature=request.temperature,
     )
+    generation_time_ms = (time.perf_counter() - t0) * 1000.0
+    
+    if generation_invoked and generation_time_ms == 0.0:
+        raise RuntimeError("Invariant violation: generation_invoked is True, but generation time is 0.0 ms.")
+
+    # Create updated diagnostics with generation time
+    updated_timings = retrieval_res.stage_timings_ms.model_dump()
+    updated_timings['generation'] = generation_time_ms
+    from ai_service.schemas.retrieval import StageTimings
+    
+    final_diagnostics = retrieval_res.model_copy(update={
+        "stage_timings_ms": StageTimings(**updated_timings),
+        "total_execution_time_ms": retrieval_res.total_execution_time_ms + generation_time_ms,
+        "generation_invoked": generation_invoked
+    })
+    
+    # Enforce time ceiling invariant again for the full process
+    total_time = final_diagnostics.total_execution_time_ms
+    sum_timings = sum([v for v in final_diagnostics.stage_timings_ms.model_dump().values() if v])
+    if total_time > 2000.0 and sum_timings < (total_time * 0.5):
+        raise RuntimeError(f"Anomalous execution: total time {total_time}ms but only {sum_timings}ms accounted for.")
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
@@ -116,4 +141,5 @@ async def generate_grounded_answer(
         validated_payload=validated_payload,
         execution_time_ms=round(elapsed_ms, 2),
         total_chunks_retrieved=len(retrieval_res.candidates),
+        retrieval_diagnostics=final_diagnostics
     )

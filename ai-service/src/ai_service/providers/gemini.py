@@ -27,7 +27,7 @@ class GeminiProvider(ChatModel, EmbeddingModel):
     def __init__(
         self,
         api_key: str | None = None,
-        chat_model: str = "gemini-1.5-flash",
+        chat_model: str = "gemini-3.5-flash",
         embedding_model: str = "gemini-embedding-001",
         max_retries: int = 4,
         base_backoff_seconds: float = 0.5,
@@ -157,7 +157,7 @@ class GeminiProvider(ChatModel, EmbeddingModel):
                 model=self.embedding_model,
                 contents=cleaned_texts,
             )
-            return [e.values for e in resp.embeddings]
+            return [e.values[:1536] if len(e.values) >= 1536 else (list(e.values) + [0.0]*(1536 - len(e.values))) for e in resp.embeddings]
 
         return await self._execute_with_backoff("embed_content", _call)
 
@@ -179,8 +179,11 @@ class GeminiProvider(ChatModel, EmbeddingModel):
         """Transcribe an audio source using Gemini's audio understanding."""
         from pathlib import Path
         from ai_service.providers.base import TranscriptionResult, TranscriptSegment
+        import mimetypes
         
+        mime_type = "audio/mp3"
         if isinstance(source, (str, Path)):
+            mime_type = mimetypes.guess_type(str(source))[0] or "audio/mp3"
             with open(source, "rb") as f:
                 audio_data = f.read()
         else:
@@ -193,7 +196,7 @@ class GeminiProvider(ChatModel, EmbeddingModel):
                 role="user",
                 parts=[
                     types.Part.from_text(text=prompt),
-                    types.Part.from_bytes(data=audio_data, mime_type="audio/mp3") # Assuming MP3 for now
+                    types.Part.from_bytes(data=audio_data, mime_type=mime_type)
                 ]
             )
         ]

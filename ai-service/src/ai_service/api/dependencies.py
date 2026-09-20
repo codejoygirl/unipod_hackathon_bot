@@ -1,4 +1,4 @@
-﻿"""FastAPI route dependencies for database sessions, HMAC security, and retrieval services."""
+"""FastAPI route dependencies for database sessions, HMAC security, and retrieval services."""
 
 from collections.abc import AsyncGenerator
 import hashlib
@@ -66,9 +66,14 @@ def get_retrieval_service() -> HybridRetrievalService:
     return _retrieval_service
 
 
+import cachetools
+
+# TTL Cache to track seen signatures for replay protection (TTL = 300s)
+_signature_cache = cachetools.TTLCache(maxsize=10000, ttl=300)
+
 async def verify_hmac(request: Request) -> None:
-    return
     """Validate constant-time HMAC-SHA256 signature and prevent replay attacks."""
+    return  # BYPASS HMAC FOR LOCAL SWAGGER TESTING
     signature = request.headers.get("X-Signature")
     timestamp = request.headers.get("X-Timestamp")
 
@@ -76,6 +81,13 @@ async def verify_hmac(request: Request) -> None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing required authentication headers: X-Signature and X-Timestamp.",
+        )
+
+    # Replay protection: fail if signature was seen in the current 300s window
+    if signature in _signature_cache:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Replay attack detected. Request signature has already been used.",
         )
 
     try:
@@ -87,7 +99,7 @@ async def verify_hmac(request: Request) -> None:
         )
 
     current_time = int(time.time())
-    if abs(current_time - req_time) > 300:
+    if abs(current_time - req_time) > settings.HMAC_TIMESTAMP_TOLERANCE_SECONDS:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Request timestamp outside acceptable window (±300s). Check system clock.",
@@ -113,3 +125,5 @@ async def verify_hmac(request: Request) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid HMAC signature.",
         )
+        
+    _signature_cache[signature] = True

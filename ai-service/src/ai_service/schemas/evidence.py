@@ -81,7 +81,7 @@ class EnrichedCitation(BaseModel):
         min_length=1,
         description="The exact text/transcription chunk used to ground the claim.",
     )
-    locator: dict[str, Any] = Field(default_factory=dict)
+    locator: MediaLocator = Field(default_factory=MediaLocator)
     relevance_score: float | None = None
 
 

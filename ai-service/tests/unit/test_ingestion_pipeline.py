@@ -70,13 +70,22 @@ async def test_ingest_document_deduplication_skip():
     mock_version.id = uuid.uuid4()
 
     # Configure session.execute returns
+    mock_scalars = MagicMock()
+    mock_scalars.first.return_value = mock_source
+
     mock_result_source = MagicMock()
-    mock_result_source.scalar_one_or_none.return_value = mock_source
+    mock_result_source.scalars.return_value = mock_scalars
 
     mock_result_ver = MagicMock()
     mock_result_ver.scalar_one_or_none.return_value = mock_version
 
     mock_session.execute.side_effect = [mock_result_source, mock_result_ver]
+
+    # Support async context manager for begin_nested
+    ctx_mock = MagicMock()
+    ctx_mock.__aenter__.return_value = None
+    ctx_mock.__aexit__.return_value = None
+    mock_session.begin_nested = MagicMock(return_value=ctx_mock)
 
     response = await pipeline.ingest_document(mock_session, req)
 

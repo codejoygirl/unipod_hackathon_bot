@@ -23,6 +23,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "anthropic" },
+    { name = "cachetools" },
     { name = "fastapi", extra = ["standard"] },
     { name = "google-genai" },
     { name = "gtts" },
@@ -50,6 +51,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.20.0" },
     { name = "anthropic", specifier = ">=1.6.0" },
+    { name = "cachetools", specifier = ">=7.2.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
     { name = "google-genai", specifier = ">=2.24.0" },
     { name = "gtts", specifier = ">=2.5.4" },
@@ -143,6 +145,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz", hash = "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94", size = 276966, upload-time = "2026-09-05T10:42:39.44Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl", hash = "sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101", size = 132079, upload-time = "2026-09-05T10:42:37.923Z" },
+]
+
+[[package]]
+name = "cachetools"
+version = "7.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/2c/3f18755527b03ca9ff6be724bd5370cb777c76a87f17301377cf04a4729b/cachetools-7.2.0.tar.gz", hash = "sha256:bcac1a1b8da6909994a2957238a57b8140dab7c5c5c69a43669654fe87a33c1d", size = 41129, upload-time = "2026-09-16T20:48:27.209Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/bb/1c6e7a89b11da19f137e4ef5a5c5fe47a5bb686449ba343944ccf8fb34b2/cachetools-7.2.0-py3-none-any.whl", hash = "sha256:3045213f186b89fdd95d94441354c4bd87c570b7a38d8c3fd1d9dd37f6dc90d8", size = 16918, upload-time = "2026-09-16T20:48:25.575Z" },
 ]
 
 [[package]]

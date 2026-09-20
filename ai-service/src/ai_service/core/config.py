@@ -1,4 +1,4 @@
-﻿"""Centralized application settings validated via pydantic-settings."""
+"""Centralized application settings validated via pydantic-settings."""
 
 from enum import StrEnum
 from functools import lru_cache
@@ -42,6 +42,14 @@ class Settings(BaseSettings):
         description="Allowed clock skew window for incoming HTTP signatures.",
     )
 
+    # Resilience & Throttling
+    MAX_RETRIES: int = 4
+    BASE_BACKOFF_SECONDS: float = 0.5
+    MAX_BACKOFF_SECONDS: float = 8.0
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 5
+    RATE_LIMIT_RPM: int = 100
+    RATE_LIMIT_TPM: int = 150000
+
     # Database Configuration
     DATABASE_URL: str = Field(
         default="postgresql+psycopg://community:community_pass@127.0.0.1:5432/community_ai",
@@ -49,19 +57,37 @@ class Settings(BaseSettings):
     )
     DB_POOL_SIZE: int = Field(default=20, ge=5, le=100)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0, le=50)
-    DB_POOL_TIMEOUT: float = Field(default=30.0, ge=1.0)
+    DB_POOL_TIMEOUT: float = Field(default=5.0, ge=1.0)
     DB_POOL_RECYCLE: int = Field(default=1800, description="Recycle connections every 30 minutes.")
 
     # External AI Provider API Keys
     OPENAI_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     COHERE_API_KEY: str | None = None
+    ANTHROPIC_API_KEY: str | None = None
+    GROQ_API_KEY: str | None = None
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    VLLM_BASE_URL: str | None = None
 
     # Model Defaults
+    LLM_PROVIDER: str = "gemini"
+    EMBEDDING_PROVIDER: str = "openai"
+    TRANSCRIPTION_PROVIDER: str = "gemini"
+    VISION_PROVIDER: str = "gemini"
+    
     EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"
     EMBEDDING_DIMENSION: int = 1536
     CHAT_MODEL_NAME: str = "gpt-4o-mini"
     RERANKER_MODEL_NAME: str = "rerank-v3.5"
+
+    # Semantic Cache Settings
+    SEMANTIC_CACHE_TTL_SECONDS: int = 86400  # 24 hours
+    SEMANTIC_CACHE_SIMILARITY_THRESHOLD: float = 0.96
+
+    # Token Budget Settings
+    MAX_CONTEXT_TOKENS: int = 128000
+    MAX_COMPLETION_TOKENS: int = 4096
+    TOKEN_PADDING: int = 250
 
     @model_validator(mode="after")
     def validate_production_invariants(self) -> "Settings":

@@ -12,14 +12,17 @@ async def execute_hybrid_search(
     query_vector: list[float],
     limit: int = 25,
     k: int = 60,
-    allowed_roles: list[str] = None
+    allowed_roles: list[str] = None,
+    time_window_gte: str | None = None
 ) -> list[CandidateChunk]:
     """Execute hybrid search using a single raw SQL query with CTEs for RRF."""
     
     # We must format the community_ids as an array literal for PostgreSQL ANY()
     # or pass it as a parameter that asyncpg can adapt to uuid[]
     
-    sql = """
+    time_filter_sql = "AND ks.updated_at >= CAST(:time_window_gte AS TIMESTAMP WITH TIME ZONE)" if time_window_gte else ""
+    
+    sql = f"""
     WITH lexical_search AS (
         SELECT 
             kc.id,
@@ -32,6 +35,7 @@ async def execute_hybrid_search(
           AND ks.status = 'active'
           AND kc.metadata->>'community_id' = ANY(:community_ids)
           AND kc.tsv @@ plainto_tsquery('simple', :ts_query)
+          {time_filter_sql}
         ORDER BY lexical_score DESC
         LIMIT :limit
     ),
@@ -46,6 +50,7 @@ async def execute_hybrid_search(
           AND ks.tenant_id = :tenant_id
           AND ks.status = 'active'
           AND kc.metadata->>'community_id' = ANY(:community_ids)
+          {time_filter_sql}
         ORDER BY vector_distance ASC
         LIMIT :limit
     ),
@@ -83,16 +88,21 @@ async def execute_hybrid_search(
     
     community_ids_str = [str(cid) for cid in community_ids]
     
+    params = {
+        "tenant_id": tenant_id,
+        "community_ids": community_ids_str,
+        "ts_query": ts_query_string,
+        "query_vector": str(query_vector), 
+        "limit": limit,
+        "k": k,
+    }
+    
+    if time_window_gte:
+        params["time_window_gte"] = time_window_gte
+        
     result = await session.execute(
         text(sql),
-        {
-            "tenant_id": tenant_id,
-            "community_ids": community_ids_str,
-            "ts_query": ts_query_string,
-            "query_vector": str(query_vector), 
-            "limit": limit,
-            "k": k,
-        }
+        params
     )
     
     candidates: list[CandidateChunk] = []

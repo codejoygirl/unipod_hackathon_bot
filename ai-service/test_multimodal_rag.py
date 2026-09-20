@@ -43,8 +43,6 @@ async def run_test():
         return
 
     async with httpx.AsyncClient(base_url="http://127.0.0.1:8002", timeout=60.0) as client:
-        headers = get_auth_headers("")
-        
         # Test configurations
         tests = [
             ("image", "test_image.jpg", test_image, "image/jpeg"),
@@ -54,6 +52,7 @@ async def run_test():
 
         # 1. Ingest
         for src_type, filename, data, mime in tests:
+            headers = get_auth_headers("")
             print(f"\n1. Testing {src_type.capitalize()} Ingestion...")
             files = {'file': (filename, data, mime)}
             form_data = {
@@ -71,6 +70,8 @@ async def run_test():
                 print("Response:", resp.text)
             except Exception as e:
                 print(f"Ingestion failed for {src_type}: {e}")
+                
+            await asyncio.sleep(1.1)
 
         # 2. Retrieval
         print("\n2. Testing Multimodal Retrieval...")
