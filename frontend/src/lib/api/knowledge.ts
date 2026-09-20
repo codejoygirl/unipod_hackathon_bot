@@ -1,7 +1,7 @@
 import { apiFetch } from "./client";
 import type {
   ApiResource,
-  ImportWhatsAppPayload,
+  ImportKnowledgePayload,
   KnowledgeSource,
   Paginated,
   StoreKnowledgeSourcePayload,
@@ -50,11 +50,11 @@ export function rejectKnowledgeSource(
   );
 }
 
-export function importWhatsAppKnowledge(
-  payload: ImportWhatsAppPayload,
+export function importKnowledge(
+  payload: ImportKnowledgePayload,
 ): Promise<ApiResource<KnowledgeSource>> {
   return apiFetch<ApiResource<KnowledgeSource>>(
-    "/api/v1/knowledge-sources/import/whatsapp",
+    "/api/v1/knowledge-sources/import",
     { method: "POST", body: payload },
   );
 }

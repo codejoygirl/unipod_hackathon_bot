@@ -142,13 +142,19 @@ export type StoreKnowledgeSourcePayload = {
   metadata?: Record<string, unknown> | null;
 };
 
-export type ImportWhatsAppPayload = {
+/**
+ * `POST /knowledge-sources/import`. Text import: the endpoint also accepts a multipart
+ * `file`, which no surface uploads yet.
+ */
+export type ImportKnowledgePayload = {
   tenant_id: string;
   community_id: string;
   content: string;
   name?: string | null;
   uri?: string | null;
+  source_type?: string | null;
   language?: string | null;
+  authority_tier?: AuthorityTier | null;
   metadata?: Record<string, unknown> | null;
 };
 
