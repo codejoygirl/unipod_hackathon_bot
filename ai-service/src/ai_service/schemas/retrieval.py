@@ -60,6 +60,11 @@ class QueryRequest(BaseModel):
         max_length=10,
         description="Target ISO language code for cross-lingual expansion (e.g., 'en', 'es', 'am').",
     )
+    link_mode: str | None = Field(
+        default=None,
+        max_length=20,
+        description="Optional URL-list intent: none|recordings|meetings|assets.",
+    )
     min_authority_threshold: float = Field(
         default=0.0,
         ge=0.0,
@@ -88,6 +93,8 @@ class CandidateChunk(BaseModel):
     breadcrumbs: list[str] = Field(default_factory=list)
     authority_tier: AuthorityTier
     source_type: str
+    source_uri: str = ""
+    source_name: str = ""
     community_id: str
 
     # Media Locators
@@ -127,7 +134,15 @@ class GroundedAnswerRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     tenant_id: str = Field(..., min_length=1, max_length=36)
     community_ids: list[str] = Field(..., min_length=1)
-    target_language: str | None = Field(default=None, max_length=10)
+    target_language: str | None = Field(
+        default=None,
+        max_length=10,
+        description=(
+            "Optional ISO reply language override (e.g. 'fr'). "
+            "Omit or 'auto' to detect from the query and reply in that language. "
+            "Retrieval still expands toward English for the knowledge corpus."
+        ),
+    )
     enable_conflict_detection: bool = Field(
         default=True,
         description="Whether to run cross-document contradiction checks.",
@@ -137,6 +152,11 @@ class GroundedAnswerRequest(BaseModel):
         ge=0.0,
         le=0.2,
         description="Generation temperature. Defaults strictly to 0.0 for deterministic grounding.",
+    )
+    link_mode: str | None = Field(
+        default=None,
+        max_length=20,
+        description="Optional URL-list intent from classifier: none|recordings|meetings|assets.",
     )
 
 

@@ -90,9 +90,49 @@ Maps to: PRD §40 Priority 4. Owner: Member 3.
 4. Slack app: DM, mentions, threads, authorised ingestion (PRD §11)
 5. External identity linking
 6. Message normalisation + delivery retries
-7. No unofficial WhatsApp Web automation (PRD §8.2 / §10.3)
+7. No unofficial WhatsApp Web automation in **production** (PRD §8.2 / §10.3)
 
 **Exit criteria:** Same permission rules for web, WhatsApp, and Slack questions.
+
+---
+
+## Phase 4W — WhatsApp Web automation spike (DEV / hackathon ONLY)
+
+Parallel to Phase 4 Cloud API. **Never** the sole production channel. Unofficial WA Web session (whatsapp-web.js / Chromium). ToS / ban / session-break risk.
+
+| Slice | Deliverable | Exit check |
+| --- | --- | --- |
+| 4W.0 | Spike package + `WHATSAPP_WEB_SPIKE` (default off) | No boot / 404 when disabled |
+| 4W.1 | Session bridge (QR, persist, reconnect) | QR once → reconnect without QR |
+| 4W.2 | Inbound → `InboundMessage` + Laravel webhook | Message handled by spike adapter |
+| 4W.3 | `JOIN-{token}` → community link | Identity resolves to community |
+| 4W.4 | Ask → AI grounded answer + citation revalidation | Cited reply text returned |
+| 4W.5 | `EXPORT` → knowledge draft | Draft in review queue |
+| 4W.6 | Guardrails: flag, README banner, no Sail/prod compose | Risk explicit in docs/config |
+
+Layout: `infrastructure/whatsapp-web-spike/` (sidecar) → `POST /api/v1/internal/whatsapp-web-spike/*` → `WhatsAppWebSpikeAdapter`. See [spike README](../infrastructure/whatsapp-web-spike/README.md).
+
+**Exit criteria:** Linked session → private inbound → Laravel ask → cited reply → optional EXPORT draft, with flag off by default and no production compose wiring.
+
+---
+
+## Phase 4T — Telegram Bot spike (DEV / hackathon ONLY)
+
+Parallel to Phase 4. Official Telegram Bot API sidecar. Align with production channel adapters later (identity linking, signed webhooks, retries).
+
+| Slice | Deliverable | Exit check |
+| --- | --- | --- |
+| 4T.0 | Spike package + `TELEGRAM_SPIKE` (default off) | 404 when disabled |
+| 4T.1 | Bot polling worker (`infrastructure/telegram-spike/`) | Bot receives DM |
+| 4T.2 | Inbound → `InboundMessage` + Laravel webhook | Message handled by adapter |
+| 4T.3 | `JOIN-{token}` → community link | Identity resolves to community |
+| 4T.4 | Ask → grounded answer + citation revalidation | Cited reply in Telegram |
+| 4T.5 | `EXPORT` → knowledge draft | Draft in review queue |
+| 4T.6 | Guardrails: flag, README, no Sail/prod compose | Risk/scope explicit |
+
+Layout: `infrastructure/telegram-spike/bot.py` → `POST /api/v1/internal/telegram-spike/*` → `TelegramSpikeAdapter`. See [spike README](../infrastructure/telegram-spike/README.md).
+
+**Exit criteria:** Bot DM → Laravel ask → cited reply → optional EXPORT draft; flag off by default.
 
 ---
 

@@ -1,0 +1,269 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Console\Commands;
+
+use App\Enums\KnowledgeAuthorityTier;
+use App\Enums\KnowledgeLifecycleStatus;
+use App\Enums\MembershipRole;
+use App\Models\Community;
+use App\Models\KnowledgeSource;
+use App\Models\Membership;
+use App\Models\Tenant;
+use App\Models\User;
+use App\Services\AI\AiServiceClient;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Hash;
+use Throwable;
+
+class SeedAssistantDemoCommand extends Command
+{
+    protected $signature = 'zak:seed-assistant-demo
+                            {--email=demo@zak.test : Demo user email}
+                            {--password=password123 : Demo user password}
+                            {--skip-ai : Skip AI ingestion (Laravel-only seed)}';
+
+    protected $description = 'Seed tenant/community/user + Sanctum token and print curl for /api/v1/assistant/ask';
+
+    public function handle(AiServiceClient $ai): int
+    {
+        $email = (string) $this->option('email');
+        $password = (string) $this->option('password');
+        $aiIngested = false;
+        $aiError = null;
+
+        $this->components->info('Seeding Zak assistant demo data…');
+
+        $tenant = Tenant::query()->firstOrCreate(
+            ['slug' => 'demo-tenant'],
+            ['name' => 'Demo Tenant'],
+        );
+
+        $community = Community::query()->firstOrCreate(
+            ['tenant_id' => $tenant->id, 'slug' => 'demo-community'],
+            [
+                'name' => 'Demo Community',
+                'description' => 'UniPods / Wadhwani programme community: schedules, sessions, modules, '
+                    .'deadlines, announcements, meeting notes, coaching, and session recordings or links '
+                    .'shared in the group.',
+            ],
+        );
+
+        if ($community->description === null || trim((string) $community->description) === '') {
+            $community->description = 'UniPods / Wadhwani programme community: schedules, sessions, modules, '
+                .'deadlines, announcements, meeting notes, coaching, and session recordings or links '
+                .'shared in the group.';
+            $community->save();
+        }
+
+        $user = User::query()->updateOrCreate(
+            ['email' => $email],
+            [
+                'name' => 'Demo Ask User',
+                'password' => Hash::make($password),
+            ],
+        );
+
+        $membership = Membership::query()->firstOrCreate(
+            [
+                'tenant_id' => $tenant->id,
+                'community_id' => $community->id,
+                'user_id' => $user->id,
+                'role' => MembershipRole::CommunityAdmin,
+            ],
+        );
+
+        $uri = 'doc://demo-clinic-hours';
+        $content = 'The community clinic opens on Saturday at 9am and closes at 1pm.';
+
+        $source = KnowledgeSource::query()->updateOrCreate(
+            [
+                'tenant_id' => $tenant->id,
+                'uri' => $uri,
+            ],
+            [
+                'community_id' => $community->id,
+                'created_by' => $user->id,
+                'name' => 'Clinic hours',
+                'source_type' => 'markdown',
+                'authority_tier' => KnowledgeAuthorityTier::OfficialAnnouncement,
+                'lifecycle_status' => KnowledgeLifecycleStatus::Published,
+                'language' => 'en',
+                'content' => $content,
+                'content_sha256' => hash('sha256', $content),
+                'published_at' => now(),
+                'metadata' => ['seeded_by' => 'zak:seed-assistant-demo'],
+            ],
+        );
+
+        if (! $this->option('skip-ai')) {
+            try {
+                $response = $ai->syncDocument(
+                    tenantId: $tenant->id,
+                    communityId: $community->id,
+                    uri: $uri,
+                    name: 'Clinic hours',
+                    sourceType: 'markdown',
+                    content: $content,
+                    authorityTier: KnowledgeAuthorityTier::OfficialAnnouncement->value,
+                    metadata: ['seeded_by' => 'zak:seed-assistant-demo'],
+                );
+                $source->ai_source_id = $response['source_id'] ?? null;
+                $source->ai_version_id = $response['version_id'] ?? null;
+                $source->save();
+                $aiIngested = true;
+            } catch (Throwable $e) {
+                $aiError = $e->getMessage();
+            }
+        } else {
+            $aiError = 'skipped (--skip-ai)';
+        }
+
+        $user->tokens()->where('name', 'zak-demo')->delete();
+        $plainTextToken = $user->createToken('zak-demo')->plainTextToken;
+
+        $base = rtrim((string) config('app.url'), '/');
+        $askBody = json_encode([
+            'query' => 'When does the clinic open?',
+            'community_ids' => [$community->id],
+            'target_language' => 'en',
+        ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+
+        $summary = [
+            'what_was_seeded' => [
+                'tenant' => [
+                    'id' => $tenant->id,
+                    'name' => $tenant->name,
+                    'slug' => $tenant->slug,
+                ],
+                'community' => [
+                    'id' => $community->id,
+                    'name' => $community->name,
+                    'slug' => $community->slug,
+                    'tenant_id' => $community->tenant_id,
+                ],
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $email,
+                    'password' => $password,
+                ],
+                'membership' => [
+                    'id' => $membership->id,
+                    'role' => $membership->role->value,
+                    'user_id' => $user->id,
+                    'tenant_id' => $tenant->id,
+                    'community_id' => $community->id,
+                ],
+                'knowledge_document' => [
+                    'id' => $source->id,
+                    'table' => 'knowledge_documents',
+                    'name' => $source->name,
+                    'uri' => $source->uri,
+                    'lifecycle_status' => $source->lifecycle_status->value,
+                    'authority_tier' => $source->authority_tier->value,
+                    'source_type' => $source->source_type,
+                    'language' => $source->language,
+                    'content' => $source->content,
+                    'ai_source_id' => $source->ai_source_id,
+                    'ai_version_id' => $source->ai_version_id,
+                    'published_at' => $source->published_at?->toIso8601String(),
+                ],
+                'auth' => [
+                    'type' => 'Sanctum personal access token',
+                    'token_name' => 'zak-demo',
+                    'token' => $plainTextToken,
+                    'header' => 'Authorization: Bearer '.$plainTextToken,
+                ],
+                'ai_ingest' => [
+                    'attempted' => ! $this->option('skip-ai'),
+                    'success' => $aiIngested,
+                    'detail' => $aiIngested ? 'Document synced to AI /ingestion/sync' : $aiError,
+                ],
+            ],
+            'how_to_test_ask' => [
+                'method' => 'POST',
+                'url' => $base.'/api/v1/assistant/ask',
+                'headers' => [
+                    'Authorization' => 'Bearer '.$plainTextToken,
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json',
+                ],
+                'body' => json_decode($askBody, true, 512, JSON_THROW_ON_ERROR),
+            ],
+        ];
+
+        $this->newLine();
+        $this->components->twoColumnDetail('<fg=green;options=bold>Seeded tenant</>', $tenant->name.' ('.$tenant->id.')');
+        $this->components->twoColumnDetail('<fg=green;options=bold>Seeded community</>', $community->name.' ('.$community->id.')');
+        $this->components->twoColumnDetail('<fg=green;options=bold>Seeded user</>', $email.' / '.$password);
+        $this->components->twoColumnDetail('<fg=green;options=bold>Membership role</>', MembershipRole::CommunityAdmin->value);
+        $this->components->twoColumnDetail('<fg=green;options=bold>Knowledge doc</>', $source->name.' ['.$source->lifecycle_status->value.']');
+        $this->components->twoColumnDetail('<fg=green;options=bold>Knowledge URI</>', $uri);
+        $this->components->twoColumnDetail(
+            '<fg=green;options=bold>AI ingest</>',
+            $aiIngested ? '<fg=green>OK</>' : '<fg=yellow>'.($aiError ?? 'not run').'</>'
+        );
+        $this->components->twoColumnDetail('<fg=cyan;options=bold>Bearer token</>', $plainTextToken);
+
+        $this->newLine();
+        $this->components->info('Seeded data (pretty JSON)');
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        $this->newLine();
+        $this->components->info('PowerShell ask');
+        $this->line(<<<PS
+\$token = '{$plainTextToken}'
+\$communityId = '{$community->id}'
+\$body = @{
+  query = 'When does the clinic open?'
+  community_ids = @(\$communityId)
+  target_language = 'en'
+} | ConvertTo-Json
+Invoke-RestMethod -Method POST -Uri '{$base}/api/v1/assistant/ask' `
+  -Headers @{ Authorization = "Bearer \$token"; Accept = 'application/json' } `
+  -ContentType 'application/json' -Body \$body | ConvertTo-Json -Depth 8
+PS);
+
+        $this->newLine();
+        $this->components->info('curl ask');
+        $compactBody = json_encode([
+            'query' => 'When does the clinic open?',
+            'community_ids' => [$community->id],
+            'target_language' => 'en',
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $this->line(<<<BASH
+curl -sS -X POST '{$base}/api/v1/assistant/ask' \\
+  -H 'Authorization: Bearer {$plainTextToken}' \\
+  -H 'Accept: application/json' \\
+  -H 'Content-Type: application/json' \\
+  -d '{$compactBody}'
+BASH);
+
+        $jsonOut = base_path('storage/app/zak-demo-ask.json');
+        file_put_contents(
+            $jsonOut,
+            json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES).PHP_EOL
+        );
+
+        $envOut = base_path('storage/app/zak-demo-ask.env');
+        file_put_contents($envOut, implode(PHP_EOL, [
+            'ZAK_API_BASE='.$base,
+            'ZAK_DEMO_EMAIL='.$email,
+            'ZAK_DEMO_PASSWORD='.$password,
+            'ZAK_DEMO_TOKEN='.$plainTextToken,
+            'ZAK_TENANT_ID='.$tenant->id,
+            'ZAK_COMMUNITY_ID='.$community->id,
+            'ZAK_KNOWLEDGE_URI='.$uri,
+            'ZAK_KNOWLEDGE_ID='.$source->id,
+            '',
+        ]));
+
+        $this->newLine();
+        $this->components->twoColumnDetail('Saved JSON summary', 'storage/app/zak-demo-ask.json');
+        $this->components->twoColumnDetail('Saved env vars', 'storage/app/zak-demo-ask.env');
+
+        return self::SUCCESS;
+    }
+}

@@ -1,7 +1,6 @@
 """Retrieval and grounded generation endpoints for the Community Assistant platform."""
 
 import logging
-import os
 import time
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +11,7 @@ from ai_service.api.dependencies import (
     verify_hmac,
 )
 from ai_service.generation.synthesizer import AnswerSynthesizer
-from ai_service.providers.gemini import GeminiProvider
+from ai_service.providers.factory import ModelFactory
 from ai_service.retrieval.service import HybridRetrievalService
 from ai_service.schemas.retrieval import (
     GroundedAnswerRequest,
@@ -25,11 +24,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/retrieval", tags=["retrieval"])
 
-# Global singleton for the grounded synthesizer using Gemini
-gemini_model = GeminiProvider(
-    api_key=os.getenv("GEMINI_API_KEY"),
-)
-_synthesizer = AnswerSynthesizer(chat_model=gemini_model)
+_synthesizer = AnswerSynthesizer(chat_model=ModelFactory.get_chat_model())
 
 
 def get_synthesizer() -> AnswerSynthesizer:
@@ -87,25 +82,40 @@ async def generate_grounded_answer(
     """
     start_time = time.perf_counter()
 
-    # Step 1: Hybrid candidate retrieval
+    # Retrieval: expand non-English queries toward the English knowledge corpus.
+    # Reply language is separate: auto-detect from the question unless the client overrides.
+    explicit_reply_lang = (request.target_language or "").strip().lower()
+    if explicit_reply_lang in {"", "auto"}:
+        explicit_reply_lang = None
+
     query_req = QueryRequest(
         query=request.query,
         tenant_id=request.tenant_id,
         community_ids=request.community_ids,
-        target_language=request.target_language,
-        top_k=20,
-        rerank_top_n=5,
+        target_language="en",
+        link_mode=request.link_mode,
+        top_k=40,
+        rerank_top_n=20,
     )
 
     retrieval_res = await retrieval_service.search(session=session, request=query_req)
+
+    # Reply language: explicit client override only.
+    # Auto mode leaves target_language unset so the synthesizer instructs the model
+    # to match the User Question language (any language; no hardcoded catalog).
+    # Do NOT pass heuristic detected_language into generation: wrong/"en" defaults
+    # force English answers when evidence is English (common RAG failure mode).
+    reply_language = explicit_reply_lang
 
     # Step 2: Synthesis and verification
     validated_payload = await synthesizer.synthesize_grounded_answer(
         query=request.query,
         candidates=retrieval_res.candidates,
-        target_language=request.target_language,
+        target_language=reply_language,
         enable_conflict_detection=request.enable_conflict_detection,
         temperature=request.temperature,
+        link_mode=request.link_mode,
+        language_hint=retrieval_res.detected_language,
     )
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000.0

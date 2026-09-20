@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Api\V1\Knowledge\ImportWhatsAppKnowledgeRequest;
+use App\Http\Requests\Api\V1\Knowledge\ImportKnowledgeRequest;
 use App\Http\Requests\Api\V1\Knowledge\StoreKnowledgeSourceRequest;
 use App\Http\Resources\Api\V1\KnowledgeSourceResource;
 use App\Models\Community;
@@ -93,7 +93,19 @@ class KnowledgeSourceController extends Controller
         );
     }
 
-    public function importWhatsApp(ImportWhatsAppKnowledgeRequest $request): JsonResponse
+    /**
+     * Import knowledge as text and/or an uploaded file (draft for review).
+     *
+     * Send **either** `content` (plain text / WhatsApp export) **or** `file`
+     * (image, audio, video, or .txt). You do not need both.
+     *
+     * In Scramble / Stoplight: use **Send API Request**. For a file upload,
+     * keep Content-Type as multipart/form-data and attach `file`; for text,
+     * put the body in `content` and leave `file` empty / omitted.
+     *
+     * @requestMediaType multipart/form-data
+     */
+    public function import(ImportKnowledgeRequest $request): JsonResponse
     {
         $this->authorize('create', KnowledgeSource::class);
 
@@ -103,7 +115,11 @@ class KnowledgeSourceController extends Controller
         abort_unless($community->tenant_id === $data['tenant_id'], 422);
         abort_unless($request->user()->belongsToCommunity($community->id), 403);
 
-        $source = $this->lifecycle->importWhatsAppExport($request->user(), $data);
+        $source = $this->lifecycle->import(
+            $request->user(),
+            $data,
+            $request->file('file'),
+        );
 
         return KnowledgeSourceResource::make($source)
             ->response()

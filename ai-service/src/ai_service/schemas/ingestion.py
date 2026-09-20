@@ -21,7 +21,8 @@ class IngestionRequest(BaseModel):
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
     tenant_id: str = Field(..., min_length=1, max_length=36)
-    community_id: str = Field(..., min_length=1, max_length=36)    uri: str = Field(..., min_length=1, max_length=1024)
+    community_id: str = Field(..., min_length=1, max_length=36)
+    uri: str = Field(..., min_length=1, max_length=1024)
     name: str = Field(..., min_length=1, max_length=255)
     source_type: str = Field(..., min_length=1, max_length=50)  # 'pdf', 'docx', 'markdown', 'transcript', 'whatsapp'
     content: str = Field(..., min_length=1, description="Raw text or parsed body of the document.")
@@ -30,6 +31,10 @@ class IngestionRequest(BaseModel):
         description="Authority tier for ranking weighting.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
+    index_status: str = Field(
+        default="active",
+        description="AI index visibility: active (searchable) or pending (indexed, hidden until publish).",
+    )
 
     @field_validator("content")
     @classmethod
@@ -37,6 +42,14 @@ class IngestionRequest(BaseModel):
         if not v.strip():
             raise ValueError("Document content cannot be empty or whitespace only.")
         return v
+
+    @field_validator("index_status")
+    @classmethod
+    def validate_index_status(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if normalized not in {"active", "pending", "archived", "processing", "error"}:
+            raise ValueError("index_status must be active, pending, archived, processing, or error.")
+        return normalized
 
 
 class DocumentUnit(BaseModel):
@@ -72,6 +85,8 @@ class RawDocument(BaseModel):
     uri: str | None = None
     source_type: str
     content: str
+
+
 class IngestionResponse(BaseModel):
     """Response returned upon document ingestion processing."""
 

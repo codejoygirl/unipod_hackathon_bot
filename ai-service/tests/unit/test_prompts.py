@@ -1,5 +1,4 @@
 import uuid
-import pytest
 from ai_service.generation.prompts import (
     INSUFFICIENT_EVIDENCE_SENTINEL,
     build_evidence_context_xml,
@@ -72,15 +71,43 @@ def test_system_prompt_contains_critical_invariants():
     prompt = build_grounded_system_prompt()
     assert INSUFFICIENT_EVIDENCE_SENTINEL in prompt
     assert "[E1]" in prompt
-    assert "ZERO PARAMETRIC KNOWLEDGE" in prompt
-    assert "ADVERSARIAL DEFENSE" in prompt
+    assert "community assistant" in prompt.lower()
+    assert "ONLY use facts" in prompt or "only use facts" in prompt.lower()
+    assert "untrusted" in prompt.lower()
+    assert "ask the group" in prompt.lower()
+    assert "exact URL" in prompt or "plain full URLs" in prompt
+    assert "who is X" not in prompt
+    assert "formal biography" not in prompt
+    assert "\u2014" not in prompt
 
 
 def test_build_user_prompt_combines_context_and_query():
-    xml = "<context><evidence id=\"E1\">Content</evidence></context>"
+    xml = '<context><evidence id="E1">Content</evidence></context>'
     query = "When will water return?"
     user_prompt = build_user_prompt(query, xml, target_language="am")
 
     assert xml in user_prompt
     assert "User Question: When will water return?" in user_prompt
-    assert "language code: am" in user_prompt
+    assert "Amharic" in user_prompt or "ISO am" in user_prompt
+    assert "CRITICAL" in user_prompt
+
+
+def test_build_user_prompt_auto_matches_any_language_without_forcing_english():
+    xml = '<context><evidence id="E1">Content</evidence></context>'
+    prompt = build_user_prompt(
+        "Quand est-ce que le programme METI se termine ?",
+        xml,
+        target_language=None,
+    )
+    assert "same language" in prompt.lower() or "Detect the language" in prompt
+    assert "ISO en" not in prompt
+    assert "English (ISO" not in prompt
+    assert "CRITICAL" in prompt
+
+
+def test_build_user_prompt_no_query_type_hardcoding():
+    xml = '<context><evidence id="E1">Diane created this group</evidence></context>'
+    prompt = build_user_prompt("Who's Diane?", xml, target_language=None)
+    assert prompt.count("User Question: Who's Diane?") == 1
+    assert "formal biography" not in prompt
+    assert "INSUFFICIENT_EVIDENCE for lack" not in prompt

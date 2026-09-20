@@ -24,7 +24,7 @@ class KnowledgeSource(Base, TenantScopedMixin, CommunityScopedMixin, TimestampMi
     )  # 'pdf', 'docx', 'markdown', 'whatsapp', 'transcript'
     status: Mapped[str] = mapped_column(
         String(50), default="active", nullable=False
-    )  # 'active', 'archived', 'processing', 'error'
+    )  # 'active', 'pending', 'archived', 'processing', 'error'
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, default=dict, nullable=False
     )

@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('knowledge_sources', function (Blueprint $table) {
+        Schema::create('knowledge_documents', function (Blueprint $table) {
             $table->ulid('id')->primary();
             $table->foreignUlid('tenant_id')->constrained('tenants')->cascadeOnDelete();
             $table->foreignUlid('community_id')->constrained('communities')->cascadeOnDelete();
@@ -37,6 +37,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('knowledge_sources');
+        Schema::dropIfExists('knowledge_documents');
     }
 };

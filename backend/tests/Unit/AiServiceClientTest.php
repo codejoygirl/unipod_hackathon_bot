@@ -33,6 +33,55 @@ class AiServiceClientTest extends TestCase
         $this->assertSame($expected, $headers['X-Signature']);
     }
 
+    public function test_multipart_canonical_hmac_binds_form_fields_and_content_hash(): void
+    {
+        $secret = 'test_secret_key_12345';
+        $http = new HttpFactory();
+        $client = new class($http, 'http://127.0.0.1:8000', $secret) extends AiServiceClient {
+            public function exposeCanonical(
+                string $tenantId,
+                string $communityId,
+                string $uri,
+                string $name,
+                string $sourceType,
+                string $authorityTier,
+                string $contentSha256,
+                string $indexStatus = 'pending',
+            ): string {
+                return $this->multipartCanonicalPayload(
+                    $tenantId,
+                    $communityId,
+                    $uri,
+                    $name,
+                    $sourceType,
+                    $authorityTier,
+                    $contentSha256,
+                    $indexStatus,
+                );
+            }
+        };
+
+        $canonical = $client->exposeCanonical(
+            'tenant-1',
+            'community-1',
+            'doc://flyer',
+            'flyer.png',
+            'image',
+            'community_discussion',
+            'abc123',
+            'pending',
+        );
+
+        $this->assertSame(
+            "v1\ntenant_id=tenant-1\ncommunity_id=community-1\nuri=doc://flyer\nname=flyer.png\nsource_type=image\nauthority_tier=community_discussion\nindex_status=pending\ncontent_sha256=abc123",
+            $canonical,
+        );
+
+        $timestamp = '1700000000';
+        $expected = hash_hmac('sha256', "{$timestamp}.{$canonical}", $secret);
+        $this->assertSame(64, strlen($expected));
+    }
+
     public function test_maps_verified_api_response_to_dto(): void
     {
         $rawResponse = [

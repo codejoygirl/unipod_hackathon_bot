@@ -15,6 +15,8 @@ class KnowledgeSource extends Model
 {
     use BelongsToTenant, HasUlids;
 
+    protected $table = 'knowledge_documents';
+
     protected $fillable = [
         'tenant_id',
         'community_id',

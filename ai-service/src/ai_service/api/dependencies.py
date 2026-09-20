@@ -1,14 +1,12 @@
 ﻿"""FastAPI route dependencies for database sessions, HMAC security, and retrieval services."""
 
 from collections.abc import AsyncGenerator
-import hashlib
-import hmac
-import time
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_service.core.config import settings
+from ai_service.core.security import verify_hmac_message
 from ai_service.db.base import async_session_factory
 from ai_service.providers.mock import (
     MockLanguageDetector,
@@ -78,36 +76,56 @@ async def verify_hmac(request: Request) -> None:
         )
 
     try:
-        req_time = int(timestamp)
+        int(timestamp)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid X-Timestamp header format. Must be integer epoch seconds.",
         )
 
-    current_time = int(time.time())
-    if abs(current_time - req_time) > settings.HMAC_TIMESTAMP_TOLERANCE_SECONDS:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Request timestamp outside acceptable window. Check system clock.",
-        )
-
     content_type = request.headers.get("content-type", "")
     if content_type.startswith("multipart/form-data"):
-        body_str = ""
-    else:
-        body_bytes = await request.body()
-        body_str = body_bytes.decode("utf-8")
-    message = f"{timestamp}.{body_str}"
+        # Multipart routes verify a canonical field+content digest after parsing.
+        # Reject empty-body signatures here so ACL form fields cannot be swapped.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Multipart requests must use route-level canonical HMAC verification.",
+        )
 
-    secret_key = settings.INTERNAL_HMAC_SECRET.encode("utf-8")
-    expected_sig = hmac.new(
-        secret_key,
-        message.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    body_bytes = await request.body()
+    body_str = body_bytes.decode("utf-8")
+    if not verify_hmac_message(
+        secret=settings.INTERNAL_HMAC_SECRET,
+        signature=signature,
+        timestamp=timestamp,
+        payload=body_str,
+        tolerance_seconds=settings.HMAC_TIMESTAMP_TOLERANCE_SECONDS,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid HMAC signature.",
+        )
 
-    if not hmac.compare_digest(expected_sig, signature):
+
+def assert_multipart_hmac(
+    *,
+    signature: str | None,
+    timestamp: str | None,
+    canonical_payload: str,
+) -> None:
+    """Verify multipart HMAC over a canonical form+content digest string."""
+    if not signature or not timestamp:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing required authentication headers: X-Signature and X-Timestamp.",
+        )
+    if not verify_hmac_message(
+        secret=settings.INTERNAL_HMAC_SECRET,
+        signature=signature,
+        timestamp=timestamp,
+        payload=canonical_payload,
+        tolerance_seconds=settings.HMAC_TIMESTAMP_TOLERANCE_SECONDS,
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid HMAC signature.",

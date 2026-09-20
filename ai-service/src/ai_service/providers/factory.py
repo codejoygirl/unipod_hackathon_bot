@@ -1,8 +1,6 @@
-
 """Dynamic provider factory for instantiating AI models."""
 
-import os
-
+from ai_service.core.config import settings
 from ai_service.providers.base import (
     ChatModel,
     EmbeddingModel,
@@ -18,12 +16,16 @@ class ModelFactory:
     @staticmethod
     def _resolve_provider(
         provider: str | None = None,
-        env_var: str = "LLM_PROVIDER",
+        *,
+        setting_name: str,
     ) -> str:
-        """Resolve provider from an explicit argument or environment config."""
+        """Resolve provider from an explicit argument or Settings (.env)."""
 
-        provider_name = provider or os.getenv(env_var, "gemini")
-        return provider_name.strip().lower()
+        if provider:
+            return provider.strip().lower()
+
+        configured = getattr(settings, setting_name, None) or "openai"
+        return str(configured).strip().lower()
 
     @staticmethod
     def _create_provider(provider_name: str):
@@ -44,7 +46,7 @@ class ModelFactory:
     def get_chat_model(cls, provider: str | None = None) -> ChatModel:
         """Get the configured chat generation model."""
 
-        provider_name = cls._resolve_provider(provider, "LLM_PROVIDER")
+        provider_name = cls._resolve_provider(provider, setting_name="LLM_PROVIDER")
         return cls._create_provider(provider_name)
 
     @classmethod
@@ -54,7 +56,10 @@ class ModelFactory:
     ) -> EmbeddingModel:
         """Get the configured dense embedding model."""
 
-        provider_name = cls._resolve_provider(provider, "EMBEDDING_PROVIDER")
+        provider_name = cls._resolve_provider(
+            provider,
+            setting_name="EMBEDDING_PROVIDER",
+        )
         return cls._create_provider(provider_name)
 
     @classmethod
@@ -64,7 +69,10 @@ class ModelFactory:
     ) -> TranscriptionModel:
         """Get the configured audio transcription model."""
 
-        provider_name = cls._resolve_provider(provider, "TRANSCRIPTION_PROVIDER")
+        provider_name = cls._resolve_provider(
+            provider,
+            setting_name="TRANSCRIPTION_PROVIDER",
+        )
         return cls._create_provider(provider_name)
 
     @classmethod
@@ -74,5 +82,5 @@ class ModelFactory:
     ) -> ChatModel:
         """Get the configured vision-capable chat model."""
 
-        provider_name = cls._resolve_provider(provider, "VISION_PROVIDER")
+        provider_name = cls._resolve_provider(provider, setting_name="VISION_PROVIDER")
         return cls._create_provider(provider_name)

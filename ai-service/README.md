@@ -22,16 +22,30 @@ Enterprise Multimodal Grounded RAG with strict tenant isolation, hybrid retrieva
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- Postgres available via **Laravel Sail** (`DB_HOST=pgsql`) or root Compose
+- Sail Postgres running (Laravel backend Sail stack), reachable at `127.0.0.1:5432` from the host
 
 ## Setup
 
-**Linux / macOS**
+1. Copy env and fill keys (see `.env.example`):
 
 ```bash
 cp .env.example .env
-# populate OPENAI_API_KEY and GEMINI_API_KEY
+```
+
+Set at least:
+
+- `DATABASE_URL` — Sail Postgres on the host (`…@127.0.0.1:5432/zak`)
+- `INTERNAL_HMAC_SECRET` — same value as `backend/.env`
+- `OPENAI_API_KEY` (or `GEMINI_API_KEY` if using Gemini)
+- `LLM_PROVIDER` / `EMBEDDING_PROVIDER` — `openai` or `gemini` (match your key)
+
+2. Install, migrate, run:
+
+**Linux / macOS / WSL**
+
+```bash
 uv sync
+uv run alembic upgrade head
 uv run fastapi dev src/ai_service/main.py --port 8001
 ```
 
@@ -40,6 +54,7 @@ uv run fastapi dev src/ai_service/main.py --port 8001
 ```powershell
 Copy-Item .env.example .env
 uv sync
+uv run alembic upgrade head
 uv run fastapi dev src/ai_service/main.py --port 8001
 ```
 
@@ -52,16 +67,19 @@ docker compose up -d --build
 | URL | What |
 | --- | --- |
 | http://localhost:8001/docs | OpenAPI UI (local only) |
+| http://localhost:8001/openapi.json | OpenAPI JSON |
 | http://localhost:8001/health/live | Liveness |
 | http://localhost:8001/health/ready | Readiness |
+
+Laravel reaches this service via `AI_SERVICE_URL=http://host.docker.internal:8001` (see `backend/.env.example`).
 
 ## Scripts
 
 | Command | Purpose |
 | --- | --- |
 | `uv sync` | Install deps from lockfile |
+| `uv run alembic upgrade head` | Apply RAG schema migrations |
 | `uv run fastapi dev src/ai_service/main.py --port 8001` | Dev server |
-| `uv run alembic upgrade head` | Apply migrations |
 | `uv run pytest` | Tests |
 | `uv run tests/test_live_all_modalities.py` | Live multimodal verification |
 | `uv run ruff check .` | Lint |
@@ -110,21 +128,10 @@ uv run pytest tests/unit/test_security_hmac.py tests/integration/test_tenant_iso
 uv run pytest tests/evaluation -q
 ```
 
-**Run the service locally (against Sail Postgres on host port 5432):**
-
-```bash
-cp .env.example .env
-# set INTERNAL_HMAC_SECRET, DATABASE_URL, OPENAI_API_KEY / GEMINI_API_KEY as needed
-uv run alembic upgrade head
-uv run fastapi dev src/ai_service/main.py --port 8001
-```
-
-Then open http://localhost:8001/docs — try `GET /health/live` (no HMAC) and signed `POST /ingestion/sync` / retrieval routes.
-
 **HMAC header helper (PowerShell):**
 
 ```powershell
-$secret = "dev_insecure_secret_key_change_in_prod"
+$secret = "prod_secure_hmac_secret_key_minimum_32_bytes_entropy"
 $ts = [int][double]::Parse((Get-Date -UFormat %s))
 $body = '{"tenant_id":"...","community_id":"...","uri":"doc://1","name":"n","source_type":"markdown","content":"Hello"}'
 $msg = "$ts.$body"
@@ -139,5 +146,4 @@ Invoke-RestMethod -Method POST -Uri http://localhost:8001/ingestion/sync `
 
 ```bash
 uv run pytest tests/test_live_all_modalities.py -q
-# or: uv run python tests/test_live_all_modalities.py
 ```
