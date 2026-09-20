@@ -19,6 +19,7 @@ class Community extends Model
         'tenant_id',
         'name',
         'slug',
+        'description',
     ];
 
     public function tenant(): BelongsTo

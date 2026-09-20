@@ -109,7 +109,7 @@ class WhatsAppWebSpikeTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.channel', 'whatsapp_web_spike')
-            ->assertJsonPath('data.reply', 'Saturday 9am [E1].'."\n\n".'— Clinic (VERIFIED)');
+            ->assertJsonPath('data.reply', 'Saturday 9am [E1].'."\n\n".'(Clinic, VERIFIED)');
     }
 
     public function test_spike_export_creates_draft(): void

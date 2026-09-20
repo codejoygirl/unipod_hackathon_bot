@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 4T Telegram Bot spike (DEV ONLY): official Bot API sidecar under `infrastructure/telegram-spike/`, Laravel `TelegramSpikeAdapter` gated by `TELEGRAM_SPIKE`
 - Phase 4W WhatsApp Web automation spike (DEV ONLY): whatsapp-web.js sidecar under `infrastructure/whatsapp-web-spike/`, Laravel `WhatsAppWebSpikeAdapter` + internal webhook gated by `WHATSAPP_WEB_SPIKE`
 - Phase 2 knowledge/RAG: Laravel knowledge lifecycle (draft → review → publish), WhatsApp export drafts, assistant ask with citation revalidation, AI community_id columns + multilingual query expansion, HMAC restored
 - Phase 1 backend foundation: Sanctum SPA auth, tenancy models, policies, audit log, private storage, `/api/v1` routes, tenant isolation tests

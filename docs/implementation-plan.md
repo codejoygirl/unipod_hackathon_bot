@@ -116,6 +116,26 @@ Layout: `infrastructure/whatsapp-web-spike/` (sidecar) → `POST /api/v1/interna
 
 ---
 
+## Phase 4T — Telegram Bot spike (DEV / hackathon ONLY)
+
+Parallel to Phase 4. Official Telegram Bot API sidecar. Align with production channel adapters later (identity linking, signed webhooks, retries).
+
+| Slice | Deliverable | Exit check |
+| --- | --- | --- |
+| 4T.0 | Spike package + `TELEGRAM_SPIKE` (default off) | 404 when disabled |
+| 4T.1 | Bot polling worker (`infrastructure/telegram-spike/`) | Bot receives DM |
+| 4T.2 | Inbound → `InboundMessage` + Laravel webhook | Message handled by adapter |
+| 4T.3 | `JOIN-{token}` → community link | Identity resolves to community |
+| 4T.4 | Ask → grounded answer + citation revalidation | Cited reply in Telegram |
+| 4T.5 | `EXPORT` → knowledge draft | Draft in review queue |
+| 4T.6 | Guardrails: flag, README, no Sail/prod compose | Risk/scope explicit |
+
+Layout: `infrastructure/telegram-spike/bot.py` → `POST /api/v1/internal/telegram-spike/*` → `TelegramSpikeAdapter`. See [spike README](../infrastructure/telegram-spike/README.md).
+
+**Exit criteria:** Bot DM → Laravel ask → cited reply → optional EXPORT draft; flag off by default.
+
+---
+
 ## Phase 5 — Administration
 
 Maps to: PRD §40 Priority 5. Owners: Members 4 + 1 (+ 3 for delivery).

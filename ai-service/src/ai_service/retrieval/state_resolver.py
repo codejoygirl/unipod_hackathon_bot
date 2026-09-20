@@ -16,7 +16,7 @@ class AnswerStateResolver:
     """Classifies answer states based on retrieval confidence, authority, and verification."""
 
     VERIFIED_CONFIDENCE_THRESHOLD = 0.82
-    POSSIBLE_CONFIDENCE_THRESHOLD = 0.75
+    POSSIBLE_CONFIDENCE_THRESHOLD = 0.65
 
     @classmethod
     def resolve_state(
@@ -52,7 +52,10 @@ class AnswerStateResolver:
         )
 
         if has_no_evidence or is_below_floor or no_usable_answer:
-            reason = "No authorized evidence found meeting confidence threshold 0.75."
+            reason = (
+                f"No authorized evidence found meeting confidence threshold "
+                f"{cls.POSSIBLE_CONFIDENCE_THRESHOLD}."
+            )
             if not cleaned and evidence_chunks and not is_below_floor:
                 reason = (
                     "Retrieved sources did not contain enough information to answer the question."

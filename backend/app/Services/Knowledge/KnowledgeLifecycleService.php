@@ -76,8 +76,10 @@ final class KnowledgeLifecycleService
     public function publish(User $user, KnowledgeSource $source): KnowledgeSource
     {
         return DB::transaction(function () use ($user, $source): KnowledgeSource {
-            // File/multimodal imports may already be indexed in the AI service.
-            if ($source->ai_source_id === null) {
+            // File/multimodal imports may already be indexed in the AI service as pending.
+            if ($source->ai_source_id !== null) {
+                $this->aiClient->activateSource($source->ai_source_id);
+            } else {
                 $response = $this->aiClient->syncDocument(
                     tenantId: $source->tenant_id,
                     communityId: $source->community_id,

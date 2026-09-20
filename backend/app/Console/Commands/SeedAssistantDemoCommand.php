@@ -42,8 +42,20 @@ class SeedAssistantDemoCommand extends Command
 
         $community = Community::query()->firstOrCreate(
             ['tenant_id' => $tenant->id, 'slug' => 'demo-community'],
-            ['name' => 'Demo Community'],
+            [
+                'name' => 'Demo Community',
+                'description' => 'UniPods / Wadhwani programme community: schedules, sessions, modules, '
+                    .'deadlines, announcements, meeting notes, coaching, and session recordings or links '
+                    .'shared in the group.',
+            ],
         );
+
+        if ($community->description === null || trim((string) $community->description) === '') {
+            $community->description = 'UniPods / Wadhwani programme community: schedules, sessions, modules, '
+                .'deadlines, announcements, meeting notes, coaching, and session recordings or links '
+                .'shared in the group.';
+            $community->save();
+        }
 
         $user = User::query()->updateOrCreate(
             ['email' => $email],

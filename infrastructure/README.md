@@ -8,4 +8,10 @@ Unofficial WA Web session bridge (whatsapp-web.js). **Not for production.** Meta
 
 → [whatsapp-web-spike/README.md](whatsapp-web-spike/README.md)
 
-Do **not** add this worker to Sail or production Compose.
+## Telegram Bot spike (DEV ONLY)
+
+Official Telegram Bot API sidecar. Align with Phase 4 later.
+
+→ [telegram-spike/README.md](telegram-spike/README.md)
+
+Do **not** add these workers to Sail or production Compose.

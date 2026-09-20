@@ -17,10 +17,10 @@ final class InboundMessage
     /**
      * @param  array<string, mixed>  $payload
      */
-    public static function fromSpikePayload(array $payload): self
+    public static function fromSpikePayload(array $payload, string $channel = 'whatsapp_web_spike'): self
     {
         return new self(
-            channel: 'whatsapp_web_spike',
+            channel: $channel,
             externalUserId: (string) ($payload['from'] ?? ''),
             text: trim((string) ($payload['text'] ?? '')),
             messageId: isset($payload['message_id']) ? (string) $payload['message_id'] : null,

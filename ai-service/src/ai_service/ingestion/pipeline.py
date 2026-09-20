@@ -189,7 +189,7 @@ class IngestionPipeline:
         source_id = source.id
         version_id = new_version.id
 
-        source.status = "active"
+        source.status = request.index_status
         await session.commit()
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0

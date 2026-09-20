@@ -51,8 +51,8 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
     {
         // Strip "JOIN-" case-insensitively.
         $token = trim(substr($message->text, 5));
-        $communityId = Cache::pull('wa_web_spike_join:'.strtolower($token))
-            ?? (str_starts_with($token, '01') ? $token : null);
+        // Only accept admin-minted join codes from cache (no raw community ULID bypass).
+        $communityId = Cache::pull('wa_web_spike_join:'.strtolower($token));
 
         if ($communityId === null || ! Community::query()->whereKey($communityId)->exists()) {
             return 'JOIN failed: invalid or expired token. Ask an admin for a new JOIN link.';
@@ -84,7 +84,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         }
 
         if ($communityId === '') {
-            return 'No community linked. Send JOIN-{communityId} first (or set WHATSAPP_WEB_SPIKE_DEFAULT_COMMUNITY_ID).';
+            return 'No community linked. Send a minted JOIN token first (or set WHATSAPP_WEB_SPIKE_DEFAULT_COMMUNITY_ID).';
         }
 
         if (! $user->belongsToCommunity($communityId)) {
@@ -100,7 +100,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             query: $message->text,
             tenantId: $community->tenant_id,
             communityIds: [$communityId],
-            targetLanguage: 'en',
+            targetLanguage: null,
         );
 
         $result = $this->citationRevalidator->revalidate($user, $result);
@@ -113,7 +113,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         $footer = '';
         if ($result->citations !== []) {
             $c = $result->citations[0];
-            $footer = "\n\n— ".$c->sourceName.' ('.$result->state->value.')';
+            $footer = "\n\n(".$c->sourceName.', '.$result->state->value.')';
         }
 
         return $result->answer.$footer;
@@ -128,7 +128,11 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             : (string) config('whatsapp_web_spike.default_community_id');
 
         if ($user === null || $communityId === '') {
-            return 'Link a community with JOIN-… before EXPORT.';
+            return 'Link a community with a minted JOIN token before EXPORT.';
+        }
+
+        if (! $user->belongsToCommunity($communityId)) {
+            return 'You are not a member of that community in Zak.';
         }
 
         $community = Community::query()->findOrFail($communityId);

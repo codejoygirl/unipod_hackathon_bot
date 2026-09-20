@@ -27,7 +27,6 @@ def verify_hmac_signature(
     if not secret or not signature or not timestamp:
         return False
 
-    # 1. Replay attack defense: verify timestamp freshness
     try:
         req_timestamp = int(timestamp)
     except (ValueError, TypeError):
@@ -37,7 +36,6 @@ def verify_hmac_signature(
     if abs(current_time - req_timestamp) > tolerance_seconds:
         return False
 
-    # 2. Recompute expected signature: HMAC-SHA256(secret, timestamp + "." + body)
     message = f"{timestamp}.".encode("utf-8") + body
     expected_signature = hmac.new(
         key=secret.encode("utf-8"),
@@ -45,5 +43,48 @@ def verify_hmac_signature(
         digestmod=hashlib.sha256,
     ).hexdigest()
 
-    # 3. Constant-time comparison to prevent timing attacks
     return hmac.compare_digest(expected_signature.lower(), signature.strip().lower())
+
+
+def verify_hmac_message(
+    secret: str,
+    signature: str,
+    timestamp: str,
+    payload: str,
+    tolerance_seconds: int = 300,
+) -> bool:
+    """Validate HMAC over ``timestamp.`` + UTF-8 payload (JSON body or canonical multipart)."""
+    return verify_hmac_signature(
+        secret=secret,
+        signature=signature,
+        timestamp=timestamp,
+        body=payload.encode("utf-8"),
+        tolerance_seconds=tolerance_seconds,
+    )
+
+
+def multipart_canonical_payload(
+    *,
+    tenant_id: str,
+    community_id: str,
+    uri: str,
+    name: str,
+    source_type: str,
+    authority_tier: str,
+    content_sha256: str,
+    index_status: str = "pending",
+) -> str:
+    """Stable string bound into multipart HMAC (must match Laravel AiServiceClient)."""
+    return "\n".join(
+        [
+            "v1",
+            f"tenant_id={tenant_id}",
+            f"community_id={community_id}",
+            f"uri={uri}",
+            f"name={name}",
+            f"source_type={source_type}",
+            f"authority_tier={authority_tier}",
+            f"index_status={index_status}",
+            f"content_sha256={content_sha256}",
+        ]
+    )

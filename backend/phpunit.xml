@@ -32,7 +32,11 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
-        <env name="AI_SERVICE_URL" value="http://ai.test"/>
-        <env name="INTERNAL_HMAC_SECRET" value="prod_secure_hmac_secret_key_minimum_32_bytes_entropy"/>
+        <env name="AI_SERVICE_URL" value="http://ai.test" force="true"/>
+        <env name="AI_SERVICE_TIMEOUT" value="2" force="true"/>
+        <env name="AI_SERVICE_CONNECT_TIMEOUT" value="1" force="true"/>
+        <env name="INTERNAL_HMAC_SECRET" value="prod_secure_hmac_secret_key_minimum_32_bytes_entropy" force="true"/>
+        <env name="TELEGRAM_SPIKE" value="false"/>
+        <env name="WHATSAPP_WEB_SPIKE" value="false"/>
     </php>
 </phpunit>

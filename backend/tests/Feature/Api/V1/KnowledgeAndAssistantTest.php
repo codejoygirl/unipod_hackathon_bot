@@ -54,6 +54,51 @@ class KnowledgeAndAssistantTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ingestion/sync'));
     }
 
+    public function test_knowledge_publish_activates_pending_multimodal_index(): void
+    {
+        Http::fake([
+            '*/ingestion/multimodal' => Http::response([
+                'source_id' => '11111111-1111-1111-1111-111111111111',
+                'version_id' => '22222222-2222-2222-2222-222222222222',
+                'status' => 'completed',
+                'content_sha256' => 'abc',
+                'chunks_created' => 1,
+                'message' => 'ok',
+                'execution_time_ms' => 1.0,
+            ], 200),
+            '*/ingestion/activate/*' => Http::response([
+                'source_id' => '11111111-1111-1111-1111-111111111111',
+                'status' => 'active',
+            ], 200),
+        ]);
+
+        [$user, $tenant, $community] = $this->seedMember(MembershipRole::CommunityAdmin);
+        $this->actingAs($user);
+
+        $file = \Illuminate\Http\UploadedFile::fake()->create('flyer.png', 100, 'image/png');
+
+        $import = $this->post('/api/v1/knowledge-sources/import', [
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'name' => 'Clinic flyer',
+            'uri' => 'doc://clinic-flyer-activate',
+            'source_type' => 'image',
+            'file' => $file,
+        ], [
+            'Accept' => 'application/json',
+        ])->assertCreated();
+
+        $id = $import->json('data.id');
+
+        $this->postJson("/api/v1/knowledge-sources/{$id}/submit-review")->assertOk();
+        $this->postJson("/api/v1/knowledge-sources/{$id}/publish")
+            ->assertOk()
+            ->assertJsonPath('data.lifecycle_status', 'published');
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/ingestion/activate/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/ingestion/sync'));
+    }
+
     public function test_knowledge_import_text_creates_draft(): void
     {
         [$user, $tenant, $community] = $this->seedMember(MembershipRole::Member);

@@ -142,23 +142,72 @@ class MockEmbedder(EmbeddingModel):
 
 
 class MockLanguageDetector(LanguageDetectionModel):
-    """Deterministic mock language detector."""
+    """Deterministic mock language detector for common community languages."""
 
     async def detect(self, text: str) -> str:
+        import re
+
         # Detect Amharic Unicode block (U+1200 - U+137F)
         if any("\u1200" <= ch <= "\u137F" for ch in text):
             return "am"
-        # Detect Spanish markers and common terms
+
         text_lower = text.lower()
-        if (
+
+        spanish_cues = (
             "¿" in text
             or "¡" in text
-            or any(ch in text for ch in "ñáéíóú")
-            or any(w in text_lower for w in ["dónde", "está", "centro", "médico", "gracias"])
-        ):
-            return "es"
-        return "en"
+            or "ñ" in text_lower
+            or any(w in text_lower for w in ("dónde", "está", "gracias", "hola", "buenos", "médico"))
+        )
 
+        french_cues = (
+            any(ch in text for ch in "àâäçéèêëïîôùûüÿœ«»")
+            or any(
+                phrase in text_lower
+                for phrase in (
+                    "bonjour",
+                    "bonsoir",
+                    "salut",
+                    "merci",
+                    "est-ce",
+                    "y a-t-il",
+                    "qu'est-ce",
+                    "s'il vous",
+                    "s'il te",
+                    "parlez-vous",
+                    "parles-tu",
+                    "vous parlez",
+                    "tu parles",
+                    "en français",
+                    "en francais",
+                    "je parle",
+                    "je voudrais",
+                    "avez-vous",
+                    "parlez vous",
+                )
+            )
+            or (
+                re.search(r"\b(oui|non|où|quand|pourquoi|comment)\b", text_lower) is not None
+                and re.search(
+                    r"\b(le|la|les|un|une|des|du|est|il|elle|nous|vous|hackathon)\b",
+                    text_lower,
+                )
+                is not None
+            )
+        )
+
+        # English meta-questions about French ("do you speak french?") stay English.
+        if re.search(r"\b(do you speak|can you speak|speak french|speak français)\b", text_lower):
+            if not any(ch in text for ch in "àâäçéèêëïîôùûüÿœ«»") and "bonjour" not in text_lower:
+                french_cues = False
+
+        if french_cues and not spanish_cues:
+            return "fr"
+
+        if spanish_cues or any(ch in text for ch in "áéíóúü"):
+            return "es"
+
+        return "en"
 
 class MockTranslator(TranslationModel):
     """Deterministic mock translator that preserves text and glossary sentinels."""

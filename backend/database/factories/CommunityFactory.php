@@ -22,6 +22,7 @@ class CommunityFactory extends Factory
             'tenant_id' => Tenant::factory(),
             'name' => ucfirst($name),
             'slug' => Str::slug($name).'-'.Str::lower(Str::random(4)),
+            'description' => null,
         ];
     }
 }
