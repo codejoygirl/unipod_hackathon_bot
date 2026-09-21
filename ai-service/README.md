@@ -4,8 +4,10 @@ Enterprise Multimodal Grounded RAG with strict tenant isolation, hybrid retrieva
 
 ## Features
 - **Dual Providers**: Google Gemini and OpenAI integration.
-- **Multimodal Support**: Audio, Video, Image, and Text parsing.
+- **Multimodal Support**: Audio, Video, Image, and Text parsing with dynamic MIME sniffing.
 - **Enterprise Security**: PII Redaction, RBAC, and strict HMAC Auth.
+- **RAG Observability**: Granular telemetry on classification, expansion, vector vs lexical search latency, and generation timings.
+- **Advanced Integrations**: WhatsApp message parser scaffolding and robust temporal context resolution.
 
 ## Running Locally
 

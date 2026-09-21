@@ -30,7 +30,7 @@ When a user asks a question like *"When are pediatric vaccinations available?"*:
 ## 3. Pluggable Brain (OpenAI & Gemini)
 
 The AI service doesn't rely on just one provider. It acts as a "Model Factory" that can swap out its brain depending on what you configure in the `.env` file:
-*   **Google Gemini**: Super fast, handles massive context windows natively, and excels at native multimodal reasoning (Gemini 1.5 Flash).
+*   **Google Gemini**: Super fast, handles massive context windows natively, and excels at native multimodal reasoning (Gemini 3.5 Flash & 3.1 Pro).
 *   **OpenAI**: Uses GPT-4o and Text-Embedding-3 for top-tier reasoning and industry-standard vector performance.
 
 ## 4. Answering (The Generation Process)

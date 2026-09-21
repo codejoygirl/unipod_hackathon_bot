@@ -124,10 +124,38 @@ To ask the AI a question, send a `POST` request to `/retrieval/grounded-answer`.
       }
     ],
     "conflicts": [],
-    "needs_escalation": false
+    "needs_escalation": false,
+    "escalation_reason": null
   },
-  "execution_time_ms": 1250,
-  "total_chunks_retrieved": 3
+  "execution_time_ms": 1250.0,
+  "total_chunks_retrieved": 3,
+  "retrieval_diagnostics": {
+    "original_query": "When can I get a vaccine?",
+    "resolved_query": "When can I get a vaccine?",
+    "query_type": "point_lookup",
+    "expansion_queries": [
+      "When can I get a vaccine?"
+    ],
+    "expansion_validation_failures": 0,
+    "detected_language": "en",
+    "candidates": [],
+    "retrieval_status": "ok",
+    "total_candidates_scanned": 15,
+    "knowledge_freshness_gap": false,
+    "resolved_window": null,
+    "generation_invoked": true,
+    "stage_timings_ms": {
+      "context_resolution": 0.05,
+      "classification": 0.02,
+      "expansion": 0.1,
+      "embedding": 20.0,
+      "hybrid_search": 15.0,
+      "fusion_rerank": 0.5,
+      "generation": 1200.0,
+      "external_fallback": null
+    },
+    "total_execution_time_ms": 1235.67
+  }
 }
 ```
 
@@ -147,7 +175,7 @@ To ask the AI a question, send a `POST` request to `/retrieval/grounded-answer`.
 
 The AI service uses an abstract model layer and can be toggled between OpenAI and Google Gemini via `.env` or environment variables without changing your application's API calls.
 
-*   `LLM_PROVIDER=gemini` (uses Gemini 1.5 Flash for chat & reasoning)
+*   `LLM_PROVIDER=gemini` (uses Gemini 3.5 Flash for chat & reasoning)
 *   `LLM_PROVIDER=openai` (uses GPT-4o for chat & reasoning)
 *   `EMBEDDING_PROVIDER=gemini` (uses Gemini embeddings)
 *   `EMBEDDING_PROVIDER=openai` (uses text-embedding-3)
