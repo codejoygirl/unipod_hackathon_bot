@@ -7,10 +7,12 @@ Official Telegram Bot API → Laravel → grounded ask.
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import re
 from html import escape as html_escape
 from pathlib import Path
+from typing import Any
 
 import httpx
 from telegram import Update
@@ -234,7 +236,7 @@ def _member_help_text(*, in_group: bool = False) -> str:
         + "Quick commands:\n"
         "/ask - ask a community question\n"
         "/share - tell the community something worth knowing\n"
-        "/feature - suggest a product improvement\n"
+        "/feature - request a new feature or improve an existing one\n"
         "/join - connect with an invite code\n"
         "/help - show this message\n\n"
         "Or just type in plain language - no command needed."
@@ -266,6 +268,7 @@ async def call_laravel_inbound(
     bot_mentioned: bool = False,
     reply_to_bot: bool = False,
     quoted_text: str | None = None,
+    media: dict[str, Any] | None = None,
 ) -> str | None:
     payload = {
         "from": from_id,
@@ -286,6 +289,8 @@ async def call_laravel_inbound(
         payload["reply_to_message_id"] = reply_to_message_id
     if quoted_text:
         payload["quoted_text"] = quoted_text[:1500]
+    if media:
+        payload["media"] = media
     async with httpx.AsyncClient(timeout=90.0) as client:
         res = await client.post(
             f"{LARAVEL_BASE_URL}/api/v1/internal/telegram-spike/inbound",
@@ -307,12 +312,14 @@ async def call_laravel_inbound(
 
 
 def _message_mentions_bot(message, bot_id: int | None, bot_username: str | None) -> bool:
-    text = (message.text or "") if message else ""
+    if message is None:
+        return False
+    text = message.text or message.caption or ""
     if bot_username:
         uname = bot_username.lstrip("@").lower()
         if uname and re.search(rf"@{re.escape(uname)}\b", text, flags=re.I):
             return True
-    entities = list(message.entities or []) if message else []
+    entities = list(message.entities or message.caption_entities or [])
     for ent in entities:
         if ent.type == "mention" and bot_username:
             frag = text[ent.offset : ent.offset + ent.length]
@@ -321,6 +328,51 @@ def _message_mentions_bot(message, bot_id: int | None, bot_username: str | None)
         if ent.type == "text_mention" and bot_id and ent.user and ent.user.id == bot_id:
             return True
     return False
+
+
+# Keep binary under ~2.5MB so base64 stays within Laravel validation (3.5M chars).
+_MAX_VOICE_BYTES = 2_500_000
+
+
+async def _download_voice_media(message, bot) -> dict[str, Any] | None:
+    """Download Telegram voice/audio as base64 for Laravel STT."""
+    kind = None
+    file_id = None
+    mime = "audio/ogg"
+    filename = "voice.ogg"
+    if message.voice is not None:
+        kind = "voice"
+        file_id = message.voice.file_id
+        mime = message.voice.mime_type or "audio/ogg"
+        filename = "voice.ogg"
+    elif message.audio is not None:
+        kind = "audio"
+        file_id = message.audio.file_id
+        mime = message.audio.mime_type or "audio/mpeg"
+        filename = message.audio.file_name or "voice.m4a"
+    if not kind or not file_id:
+        return None
+    try:
+        tg_file = await bot.get_file(file_id)
+        raw = bytes(await tg_file.download_as_bytearray())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[zak] voice download failed: {exc}")
+        return None
+    if not raw:
+        return None
+    if len(raw) > _MAX_VOICE_BYTES:
+        print(f"[zak] voice too large ({len(raw)} bytes); skip")
+        return None
+    print(
+        f"[zak] voice downloaded kind={kind} bytes={len(raw)} "
+        f"mime={mime} file={filename}"
+    )
+    return {
+        "kind": kind,
+        "mime_type": mime,
+        "filename": filename,
+        "data_base64": base64.b64encode(raw).decode("ascii"),
+    }
 
 
 def _reply_targets_bot(message, bot_id: int | None) -> tuple[bool, str | None]:
@@ -335,7 +387,10 @@ def _reply_targets_bot(message, bot_id: int | None) -> tuple[bool, str | None]:
 
 
 async def send_via_laravel(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    media: dict[str, Any] | None = None,
 ) -> None:
     if update.message is None or update.effective_chat is None:
         return
@@ -358,10 +413,20 @@ async def send_via_laravel(
     reply_to_bot, quoted_text = _reply_targets_bot(update.message, bot_id)
     bot_mentioned = _message_mentions_bot(update.message, bot_id, bot_username) or reply_to_bot
 
+    in_group = chat_type in ("group", "supergroup")
+    # Groups: only voice/text when directed (mention or reply-to-bot). Private: always.
+    if in_group and not bot_mentioned and not reply_to_bot and not (text or "").strip().startswith("/"):
+        # Undirected group chatter (incl. voice) — stay silent.
+        if media and not (text or "").strip():
+            print(f"[zak] silent voice from={from_id} chat={chat_type} (not directed)")
+            return
+
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    preview = (text or ("[voice]" if media else ""))[:80]
     print(
         f"[zak] inbound from={from_id} chat={chat_type}"
-        f" mentioned={bot_mentioned} reply_to_bot={reply_to_bot}: {text[:80]}"
+        f" mentioned={bot_mentioned} reply_to_bot={reply_to_bot}"
+        f"{' media=' + str(media.get('kind')) if media else ''}: {preview}"
     )
     try:
         reply = await call_laravel_inbound(
@@ -376,11 +441,16 @@ async def send_via_laravel(
             bot_mentioned=bot_mentioned,
             reply_to_bot=reply_to_bot,
             quoted_text=quoted_text,
+            media=media,
         )
         if not reply:
             # Laravel returned null (silent / not directed at Zak) — do not nag.
-            print(f"[zak] silent from={from_id} chat={chat_type}")
+            print(f"[zak] silent from={from_id} chat={chat_type} media={bool(media)}")
             return
+        print(
+            f"[zak] laravel reply chars={len(reply)} "
+            f"preview={reply[:160].replace(chr(10), ' ')!r}"
+        )
         if len(reply) > 4000:
             reply = reply[:3990] + "..."
         await reply_text_safe(update.message, reply)
@@ -498,6 +568,38 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await send_via_laravel(update, context, update.message.text.strip())
 
 
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Voice note or audio → download → Laravel STT → same text pipeline."""
+    if update.message is None or update.effective_chat is None:
+        return
+    chat_type = update.effective_chat.type or "private"
+    in_group = chat_type in ("group", "supergroup")
+    bot = context.bot
+    bot_id = bot.id if bot else None
+    bot_username = bot.username if bot else None
+    reply_to_bot, _ = _reply_targets_bot(update.message, bot_id)
+    bot_mentioned = _message_mentions_bot(update.message, bot_id, bot_username) or reply_to_bot
+    caption = (update.message.caption or "").strip()
+    if in_group and not bot_mentioned and not reply_to_bot:
+        print(f"[zak] silent voice chat={chat_type} (group needs @mention or reply-to-bot)")
+        return
+
+    media = await _download_voice_media(update.message, context.bot)
+    if media is None and not caption:
+        print("[zak] voice: download empty and no caption")
+        await reply_text_safe(
+            update.message,
+            "I couldn't download that voice note. Mind trying again?",
+        )
+        return
+    print(
+        f"[zak] voice → Laravel caption={caption[:80]!r} "
+        f"media={'yes' if media else 'no'} mentioned={bot_mentioned} "
+        f"reply_to_bot={reply_to_bot}"
+    )
+    await send_via_laravel(update, context, caption, media=media)
+
+
 def main() -> None:
     print("===================================================")
     print(" Zak Telegram bot (local)")
@@ -519,6 +621,7 @@ def main() -> None:
     app.add_handler(CommandHandler("export", export_cmd))
     app.add_handler(CommandHandler("ask", ask_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     print("[zak] Polling... message your bot in Telegram.")
     try:
         asyncio.get_event_loop()

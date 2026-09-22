@@ -800,3 +800,110 @@ async def conversation_addressed(
     except Exception as exc:  # noqa: BLE001
         logger.warning("conversation addressed failed: %s", exc, exc_info=True)
         return ConversationAddressedResponse(addressed=False)
+
+
+class ConversationTranscribeRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    audio_base64: str = Field(..., min_length=8, max_length=6_000_000)
+    mime_type: str | None = Field(default=None, max_length=120)
+    language: str | None = Field(
+        default=None,
+        max_length=10,
+        description="Optional ISO hint. Omit to let the STT model detect language.",
+    )
+    filename: str | None = Field(default=None, max_length=200)
+
+
+class ConversationTranscribeResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    language: str | None = None
+    duration_seconds: float | None = None
+
+
+_transcription_model = ModelFactory.get_transcription_model()
+
+
+@router.post(
+    "/transcribe",
+    response_model=ConversationTranscribeResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_hmac)],
+    summary="Transcribe a voice note to text for channel ask-path",
+)
+async def conversation_transcribe(
+    request: ConversationTranscribeRequest,
+) -> ConversationTranscribeResponse:
+    import base64
+    import binascii
+
+    try:
+        raw = base64.b64decode(request.audio_base64, validate=False)
+    except (binascii.Error, ValueError) as exc:
+        logger.warning("conversation transcribe bad base64: %s", exc)
+        return ConversationTranscribeResponse(text="", language=None, duration_seconds=None)
+
+    if len(raw) < 32:
+        return ConversationTranscribeResponse(text="", language=None, duration_seconds=None)
+
+    # Cap ~90s of typical opus voice notes (~1.5MB) — reject huge blobs early.
+    if len(raw) > 2_500_000:
+        logger.warning("conversation transcribe rejected oversized audio bytes=%s", len(raw))
+        return ConversationTranscribeResponse(text="", language=None, duration_seconds=None)
+
+    lang_hint = (request.language or "").strip().lower() or None
+    if lang_hint in {"", "auto", "unknown"}:
+        lang_hint = None
+
+    try:
+        result = await _transcription_model.transcribe(raw, language=lang_hint)
+    except TypeError:
+        # Some providers use keyword-only `source=`.
+        try:
+            result = await _transcription_model.transcribe(source=raw, language=lang_hint)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("conversation transcribe failed: %s", exc, exc_info=True)
+            return ConversationTranscribeResponse(text="", language=None, duration_seconds=None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("conversation transcribe failed: %s", exc, exc_info=True)
+        return ConversationTranscribeResponse(text="", language=None, duration_seconds=None)
+
+    text = ""
+    language = lang_hint
+    duration = None
+    if isinstance(result, str):
+        text = result.strip()
+    else:
+        text = str(getattr(result, "text", "") or "").strip()
+        language = str(getattr(result, "language", "") or "").strip().lower() or language
+        try:
+            duration = float(getattr(result, "duration_seconds", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            duration = None
+        if not text:
+            segments = getattr(result, "segments", None) or []
+            parts = []
+            for seg in segments:
+                part = str(getattr(seg, "text", "") or "").strip()
+                if part:
+                    parts.append(part)
+            text = " ".join(parts).strip()
+
+    if language in {"", "unknown"}:
+        language = None
+
+    logger.info(
+        "conversation transcribe ok chars=%s language=%s duration=%s preview=%r",
+        len(text),
+        language,
+        duration,
+        text[:240],
+    )
+
+    return ConversationTranscribeResponse(
+        text=text,
+        language=language,
+        duration_seconds=duration,
+    )

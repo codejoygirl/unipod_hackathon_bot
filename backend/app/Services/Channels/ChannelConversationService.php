@@ -1646,7 +1646,73 @@ final class ChannelConversationService
      */
     public function adminKnowledgeIndexedAck(): string
     {
-        return 'Noted — I saved that to the knowledge base so I can use it in answers.';
+        return 'Noted. I saved that to the knowledge base so I can use it in answers.';
+    }
+
+    public function voiceNoteFailedReply(): string
+    {
+        return "I couldn't catch that voice note clearly.\n\n"
+            .'Mind sending it again, or type the question instead?';
+    }
+
+    public function voiceNoteTooLongReply(): string
+    {
+        return "That voice note is a bit long for me to process right now.\n\n"
+            .'Try a shorter clip (about a minute), or type the question.';
+    }
+
+    /**
+     * Highlight a slash command for the channel (WhatsApp monospace / Telegram <code>).
+     *
+     * @param  'whatsapp'|'telegram_html'|'plain'  $style
+     */
+    public function highlightCommand(string $command, string $style = 'whatsapp'): string
+    {
+        $command = trim($command);
+        if ($command === '') {
+            return '';
+        }
+        if (! str_starts_with($command, '/')) {
+            $command = '/'.$command;
+        }
+
+        if ($style === 'telegram_html') {
+            return '<code>'.$this->escapeTelegramHtml($command).'</code>';
+        }
+
+        if ($style === 'whatsapp') {
+            return '```'.$command.'```';
+        }
+
+        return $command;
+    }
+
+    /**
+     * Empty /feature usage: request a new product feature or improve an existing one.
+     *
+     * @param  'whatsapp'|'plain'  $style
+     */
+    public function featureUsageReply(string $style = 'whatsapp'): string
+    {
+        if ($style === 'whatsapp') {
+            $cmd = $this->highlightCommand('/feature', 'whatsapp');
+            $newFeature = $this->emphasisLabel('new feature', 'whatsapp');
+            $improve = $this->emphasisLabel('improve', 'whatsapp');
+
+            return "Use {$cmd} to ask for a {$newFeature}, or to {$improve} something that already exists.\n\n"
+                ."Examples:\n"
+                ."```\n"
+                ."/feature Add reminders for upcoming sessions\n"
+                ."/feature Make group replies shorter\n"
+                ."```\n\n"
+                .'An admin will review it, and I\'ll reply here when they respond.';
+        }
+
+        return "Use /feature to ask for a new feature, or to improve something that already exists.\n\n"
+            ."Examples:\n"
+            ."/feature Add reminders for upcoming sessions\n"
+            ."/feature Make group replies shorter\n\n"
+            .'An admin will review it, and I\'ll reply here when they respond.';
     }
 
     /**
@@ -1656,13 +1722,13 @@ final class ChannelConversationService
     {
         if ($adminNotified) {
             return "Thanks for the suggestion 🙂\n\n"
-                ."I've sent your feature request to an admin.\n"
-                ."You'll get a reply here once they approve or decline it.";
+                ."I've sent your *feature request* to an *admin*.\n"
+                .'You\'ll get a reply here once they respond.';
         }
 
         return "Thanks for the suggestion 🙂\n\n"
-            ."I've logged your feature request for an admin to review.\n"
-            ."You'll hear back once they decide.";
+            ."I've logged your *feature request* for an *admin* to review.\n"
+            .'You\'ll hear back once they respond.';
     }
 
     /**
@@ -1705,10 +1771,11 @@ final class ChannelConversationService
         $detail = $request !== ''
             ? "\n\n".$this->emphasisLabel('Your request:', $style)."\n".$this->escapeChannelBody($request, $style)
             : '';
+        $cmd = $this->highlightCommand('/feature', $style);
 
         return $hi
-            ."Thanks for the idea — an admin reviewed your feature request and won't take it forward this time.{$detail}\n\n"
-            .'You can send another suggestion anytime with /feature. We appreciate you speaking up.';
+            ."Thanks for the idea. An admin reviewed your feature request and won't take it forward this time.{$detail}\n\n"
+            ."You can send another suggestion anytime with {$cmd}. We appreciate you speaking up.";
     }
 
     /**
@@ -1817,7 +1884,8 @@ final class ChannelConversationService
 
         return $hi
             ."An admin reviewed your shared note and didn't publish it this time.{$detail}\n\n"
-            .'You can share something else anytime with /share. Thanks for trying.';
+            .'You can share something else anytime with '.$this->highlightCommand('/share', $style)
+            .'. Thanks for trying.';
     }
 
     /**
@@ -2098,7 +2166,7 @@ final class ChannelConversationService
     }
 
     /**
-     * Short “also available on …” line for intros (WhatsApp / Telegram / Web / private).
+     * Other-channel links for intros. Same stacked layout as /help (mobile-friendly).
      *
      * @param  'plain'|'whatsapp'  $style
      * @param  'whatsapp'|'telegram'|'web'|null  $currentChannel  Omit current channel from the list.
@@ -2109,30 +2177,7 @@ final class ChannelConversationService
         ?string $currentChannel = null,
         ?string $chatType = null,
     ): string {
-        $parts = [];
-        foreach ($this->channelAccessEntries($currentChannel, $chatType) as $entry) {
-            $label = trim((string) ($entry['label'] ?? ''));
-            $url = trim((string) ($entry['url'] ?? ''));
-            if ($label === '') {
-                continue;
-            }
-            if ($style === 'whatsapp' && $url !== '' && (
-                str_contains(mb_strtolower($label), 'whatsapp')
-                || str_contains(mb_strtolower($label), 'private')
-            )) {
-                $url = $this->whatsappClickableUrl($url);
-            }
-            $parts[] = $url !== '' ? "{$label}: {$url}" : $label;
-        }
-        if ($parts === []) {
-            return '';
-        }
-
-        if (count($parts) === 1) {
-            return 'Also on '.$parts[0];
-        }
-
-        return 'Also on: '.implode(' · ', $parts);
+        return $this->channelsAccessBlock($style, $currentChannel, $chatType);
     }
 
     /**
@@ -2199,11 +2244,13 @@ final class ChannelConversationService
                 ."```\n"
                 ."/ask      ask about schedules, links, or updates\n"
                 ."/share    tell the community something worth knowing\n"
-                ."/feature  suggest a product improvement\n"
+                ."/feature  request a new feature or improve an existing one\n"
                 ."/help     show this guide\n"
                 ."```\n\n"
                 ."Or just type in plain language - no command needed.\n"
-                .'In group chats, @mention me or reply to my message so I know you mean me.';
+                .'In group chats, '.$this->emphasisLabel('@mention', 'whatsapp')
+                .' me or '.$this->emphasisLabel('reply', 'whatsapp')
+                .' to my message so I know you mean me.';
         }
 
         $bot = $this->botDisplayName();
@@ -2220,7 +2267,7 @@ final class ChannelConversationService
             ."Quick commands:\n"
             ."/ask - ask about schedules, links, or updates from the community\n"
             ."/share - tell the community something worth knowing (admin reviews it first)\n"
-            ."/feature - suggest a product improvement (admin reviews it)\n"
+            ."/feature - request a new feature or improve an existing one (admin reviews it)\n"
             ."/join - connect with an invite code\n"
             ."/help - show this guide\n\n"
             .'Or just type in plain language - no command needed.';
@@ -2237,6 +2284,7 @@ final class ChannelConversationService
             return "\n\n*Admin*\n"
                 ."```\n"
                 ."/import   paste chat export text into knowledge\n"
+                ."/asset    publish Drive file links (or /asset import list)\n"
                 ."/approve  publish a share or feature request (Request ID)\n"
                 ."/decline  reject a share or feature request (Request ID)\n"
                 ."/reply    answer an escalated ask (/reply ID …)\n"
@@ -2245,6 +2293,7 @@ final class ChannelConversationService
 
         return "\n\nAdmin:\n"
             ."/import - paste chat export text into the knowledge base as a draft\n"
+            ."/asset - publish Google Drive program file links (single or /asset import list)\n"
             ."/approve - publish a share or feature request (use the Request ID)\n"
             ."/decline - reject a share or feature request (use the Request ID)\n"
             ."/reply - answer an escalated member question (/reply ID your answer)";
@@ -2337,7 +2386,8 @@ final class ChannelConversationService
         ?string $currentChannel = null,
         ?string $chatType = null,
     ): string {
-        $channels = $this->channelsAccessLine($style, $currentChannel, $chatType);
+        // Stacked label + URL (same as /help) — one-line "Also on: a · b · c" wraps badly on mobile.
+        $channels = $this->channelsAccessBlock($style, $currentChannel, $chatType);
         $line = "I help with community schedules, updates, and what's been shared. "
             .$this->anyLanguageHint();
 

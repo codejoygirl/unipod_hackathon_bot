@@ -1317,7 +1317,7 @@ final class SpikeEscalationNotifier
 
             $title = $wa
                 ? "*Member requested a feature.*\n\n"
-                : "Member requested a product feature.\n\n";
+                : "Member requested a new feature or an improvement to an existing one.\n\n";
 
             return $title
                 .$refLine
@@ -1676,12 +1676,13 @@ final class SpikeEscalationNotifier
         }
 
         $delivered = $this->deliverAnswerToAskOrigin($record, $memberText);
-        $where = $inGroup ? 'the group' : ($name !== '' ? $name : 'the member');
+        // Prefer @mention of the member who raised it (never "the group").
+        $who = $this->memberAckLabel($record, $style);
 
         if (! $delivered) {
             return [
                 'ok' => false,
-                'reply' => 'I noted the decision, but could not notify '.$where
+                'reply' => 'I noted the decision, but could not notify '.$who
                     .'. Please message them directly.',
             ];
         }
@@ -1689,14 +1690,58 @@ final class SpikeEscalationNotifier
         if ($approve) {
             return [
                 'ok' => true,
-                'reply' => 'Approved. Noted, and I notified '.$where.'.',
+                'reply' => 'Approved. Noted, and I notified '.$who.'.',
             ];
         }
 
         return [
             'ok' => true,
-            'reply' => 'Declined. Noted, and I notified '.$where.'.',
+            'reply' => 'Declined. Noted, and I notified '.$who.'.',
         ];
+    }
+
+    /**
+     * Admin-facing label for the member who raised a request.
+     * WhatsApp: @phone so the client can paint a tappable contact.
+     * Telegram / plain: @handle when present, else display name.
+     *
+     * @param  array<string, mixed>  $record
+     * @param  'whatsapp'|'telegram_html'  $style
+     */
+    private function memberAckLabel(array $record, string $style = 'whatsapp'): string
+    {
+        $name = trim((string) ($record['from_name'] ?? ''));
+        $name = ltrim($name, '~');
+        $from = trim((string) ($record['from'] ?? ''));
+        $fromDigits = preg_replace('/\D+/', '', preg_replace('/@.*/', '', $from) ?? $from) ?? '';
+        $phoneDigits = preg_replace('/\D+/', '', (string) ($record['from_phone'] ?? '')) ?? '';
+        if ($phoneDigits !== '' && $fromDigits !== '' && $phoneDigits === $fromDigits) {
+            $phoneDigits = '';
+        }
+
+        if ($style === 'whatsapp') {
+            $tag = '';
+            if ($phoneDigits !== '' && strlen($phoneDigits) >= 10 && strlen($phoneDigits) <= 13) {
+                $tag = $phoneDigits;
+            } elseif ($fromDigits !== '' && strlen($fromDigits) >= 10 && strlen($fromDigits) <= 13) {
+                $tag = $fromDigits;
+            }
+            if ($tag !== '') {
+                return '@'.$tag;
+            }
+        }
+
+        if ($name !== '' && str_starts_with($name, '@')) {
+            return $name;
+        }
+        if ($name !== '') {
+            return $name;
+        }
+        if ($fromDigits !== '') {
+            return $style === 'whatsapp' ? '@'.$fromDigits : $fromDigits;
+        }
+
+        return 'the member';
     }
 
     /**

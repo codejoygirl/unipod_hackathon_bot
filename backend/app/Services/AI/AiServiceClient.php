@@ -372,6 +372,67 @@ class AiServiceClient
     }
 
     /**
+     * Transcribe a channel voice note. Empty text on hard failure.
+     *
+     * @return array{text: string, language: string|null, duration_seconds: float|null}
+     */
+    public function transcribeVoiceNote(
+        string $audioBase64,
+        ?string $mimeType = null,
+        ?string $filename = null,
+        ?string $languageHint = null,
+    ): array {
+        $payloadArray = [
+            'audio_base64' => $audioBase64,
+            'mime_type' => $mimeType,
+            'filename' => $filename,
+            'language' => $languageHint,
+        ];
+
+        $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        try {
+            $response = $this->http
+                ->timeout(max($this->timeout, 45.0))
+                ->connectTimeout($this->connectTimeout)
+                ->withHeaders($headers)
+                ->withBody($rawBody, 'application/json')
+                ->post("{$this->baseUrl}/conversation/transcribe");
+
+            if ($response->failed()) {
+                Log::warning('AI Service /conversation/transcribe failed', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return ['text' => '', 'language' => null, 'duration_seconds' => null];
+            }
+
+            $text = trim((string) ($response->json('text') ?? ''));
+            $language = $response->json('language');
+            $language = is_string($language) ? strtolower(trim($language)) : null;
+            if ($language === '' || $language === 'unknown') {
+                $language = null;
+            }
+            $duration = $response->json('duration_seconds');
+            $duration = is_numeric($duration) ? (float) $duration : null;
+
+            return [
+                'text' => $text,
+                'language' => $language,
+                'duration_seconds' => $duration,
+            ];
+        } catch (Throwable $e) {
+            Log::warning('AI Service /conversation/transcribe unreachable', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return ['text' => '', 'language' => null, 'duration_seconds' => null];
+        }
+    }
+
+    /**
      * Soft byte budget per /ingestion/sync call. Large WhatsApp exports / API
      * bodies time out when sent as one payload; callers always go through here.
      */

@@ -21,7 +21,7 @@ final class WhatsAppWebSpikeController extends Controller
     {
         $validated = $request->validate([
             'from' => ['required', 'string', 'max:96'],
-            'text' => ['required', 'string', 'max:4000'],
+            'text' => ['nullable', 'string', 'max:4000'],
             'message_id' => ['nullable', 'string', 'max:128'],
             'chat_type' => ['nullable', 'string', 'max:32'],
             'is_group' => ['nullable', 'boolean'],
@@ -39,7 +39,25 @@ final class WhatsAppWebSpikeController extends Controller
             'mentions.*.id' => ['nullable', 'string', 'max:64'],
             'mentions.*.name' => ['nullable', 'string', 'max:128'],
             'mentions.*.phone' => ['nullable', 'string', 'max:32'],
+            'media' => ['nullable', 'array'],
+            'media.kind' => ['nullable', 'string', 'max:32'],
+            'media.mime_type' => ['nullable', 'string', 'max:120'],
+            'media.filename' => ['nullable', 'string', 'max:200'],
+            'media.data_base64' => ['nullable', 'string', 'max:3500000'],
+            'target_language' => ['nullable', 'string', 'max:10'],
         ]);
+
+        $validated['text'] = trim((string) ($validated['text'] ?? ''));
+        $hasVoice = is_array($validated['media'] ?? null)
+            && trim((string) (($validated['media']['data_base64'] ?? ''))) !== '';
+        if ($validated['text'] === '' && ! $hasVoice) {
+            return response()->json([
+                'data' => [
+                    'reply' => null,
+                    'channel' => $this->adapter->channelName(),
+                ],
+            ]);
+        }
 
         if (! isset($validated['chat_type']) && ! empty($validated['is_group'])) {
             $validated['chat_type'] = 'group';

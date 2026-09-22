@@ -20,7 +20,7 @@ final class TelegramSpikeController extends Controller
     {
         $validated = $request->validate([
             'from' => ['required', 'string', 'max:64'],
-            'text' => ['required', 'string', 'max:4000'],
+            'text' => ['nullable', 'string', 'max:4000'],
             'message_id' => ['nullable', 'string', 'max:128'],
             'reply_to_message_id' => ['nullable', 'string', 'max:128'],
             'target_language' => ['nullable', 'string', 'max:10'],
@@ -31,7 +31,24 @@ final class TelegramSpikeController extends Controller
             'bot_mentioned' => ['nullable', 'boolean'],
             'reply_to_bot' => ['nullable', 'boolean'],
             'quoted_text' => ['nullable', 'string', 'max:2000'],
+            'media' => ['nullable', 'array'],
+            'media.kind' => ['nullable', 'string', 'max:32'],
+            'media.mime_type' => ['nullable', 'string', 'max:120'],
+            'media.filename' => ['nullable', 'string', 'max:200'],
+            'media.data_base64' => ['nullable', 'string', 'max:3500000'],
         ]);
+
+        $validated['text'] = trim((string) ($validated['text'] ?? ''));
+        $hasVoice = is_array($validated['media'] ?? null)
+            && trim((string) (($validated['media']['data_base64'] ?? ''))) !== '';
+        if ($validated['text'] === '' && ! $hasVoice) {
+            return response()->json([
+                'data' => [
+                    'reply' => '',
+                    'channel' => $this->adapter->channelName(),
+                ],
+            ], 200, [], JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+        }
 
         $reply = $this->adapter->handleInbound(
             InboundMessage::fromSpikePayload($validated, 'telegram_spike')

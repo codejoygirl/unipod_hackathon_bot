@@ -20,6 +20,7 @@ final class ChannelListenGate
     public const ADMIN_COMMANDS = [
         'import',
         'export', // alias of /import (legacy)
+        'asset', // register a Drive/program file into knowledge
         'approve',
         'decline',
         'reject',
