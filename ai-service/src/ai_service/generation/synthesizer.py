@@ -1,10 +1,13 @@
 """Orchestrates XML prompt construction, LLM generation, citation validation, and 4-state resolution."""
 
 from collections.abc import Sequence
+import base64
+import html
 import logging
 import json
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+from ai_service.generation.polisher import AnswerPolisher
 from ai_service.generation.verifier import AnswerVerifier
 from ai_service.generation.prompts import (
     build_evidence_context_xml,
@@ -46,14 +49,39 @@ class AnswerSynthesizer:
 
     def __init__(self, chat_model: ChatModel) -> None:
         self._chat_model = chat_model
+        self._polisher = AnswerPolisher(chat_model)
 
     @staticmethod
     def _current_question(query: str) -> str:
-        marker = "current question:"
-        lower = query.lower()
-        if marker in lower:
-            return query[lower.rfind(marker) + len(marker) :].strip()
-        return query.strip()
+        """Extract the member's active ask (not prior Q&A stuffed into a follow-up envelope)."""
+        text = (query or "").strip()
+        if not text:
+            return ""
+        lower = text.lower()
+        # Session follow-up envelope from Laravel.
+        if "follow-up:" in lower:
+            return text[lower.rfind("follow-up:") + len("follow-up:") :].strip()
+        if "current question:" in lower:
+            return text[lower.rfind("current question:") + len("current question:") :].strip()
+        return text
+
+    @staticmethod
+    def _original_question(query: str) -> str:
+        """Original community question when this turn is a session follow-up."""
+        text = (query or "").strip()
+        lower = text.lower()
+        marker = "original question:"
+        if marker not in lower:
+            return AnswerSynthesizer._current_question(text)
+        start = lower.find(marker) + len(marker)
+        rest = text[start:]
+        # Stop before Previous answer / Follow-up sections.
+        cut = len(rest)
+        for stop in ("\n\nprevious answer", "\n\nfollow-up:"):
+            idx = rest.lower().find(stop)
+            if idx >= 0:
+                cut = min(cut, idx)
+        return rest[:cut].strip() or AnswerSynthesizer._current_question(text)
 
     @classmethod
     def _is_meeting_join_url(cls, url: str) -> bool:
@@ -110,9 +138,68 @@ class AnswerSynthesizer:
         )
 
     @classmethod
+    def _normalize_url_text(cls, url: str) -> str:
+        """Unescape HTML entities and percent-encoding noise from chat exports."""
+        raw = html.unescape((url or "").strip())
+        # Chat exports often leave &amp; inside the query string.
+        return raw.replace("&amp;", "&")
+
+    @classmethod
+    def _teams_meeting_dedupe_key(cls, url: str) -> str | None:
+        """Same Teams meeting across /meet/, meetup-join, and light-meetings shapes."""
+        raw = cls._normalize_url_text(url)
+        lower = raw.lower()
+        if "teams.microsoft.com" not in lower and "microsoft.com/l/meetup-join" not in lower:
+            return None
+
+        meet = re.search(r"/meet/(\d{8,})", raw, flags=re.I)
+        if meet:
+            return f"teams-meet:{meet.group(1)}"
+
+        # light-meetings/launch embeds meetingCode (+ passcode) in base64 coords.
+        if "light-meetings" in lower or "launch?" in lower:
+            coords = re.search(r"[?&]coords=([^&]+)", raw, flags=re.I)
+            if coords:
+                try:
+                    padded = coords.group(1) + "=" * (-len(coords.group(1)) % 4)
+                    payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8", "ignore"))
+                    code = str(payload.get("meetingCode") or "").strip()
+                    if code.isdigit() and len(code) >= 8:
+                        return f"teams-meet:{code}"
+                    # Nested meetingUrl may itself be a /meet/ link.
+                    nested = str(payload.get("meetingUrl") or "")
+                    nested_key = cls._teams_meeting_dedupe_key(nested) if nested else None
+                    if nested_key:
+                        return nested_key
+                except Exception:
+                    pass
+            # Same passcode on /meet/?p= and light-meetings?p= is one meeting.
+            qs = parse_qs(urlsplit(raw).query)
+            passcode = (qs.get("p") or [""])[0].strip()
+            if len(passcode) >= 8:
+                return f"teams-pass:{passcode.lower()}"
+
+        thread = re.search(
+            r"meetup-join/19(?:%3a|:)?meeting_([A-Za-z0-9_-]+)",
+            raw,
+            flags=re.I,
+        )
+        if thread:
+            return f"teams-thread:{thread.group(1).lower()}"
+
+        # Direct /meet/?p= without numeric path already handled; bare p= on meet host.
+        if "/meet/" in lower:
+            qs = parse_qs(urlsplit(raw).query)
+            passcode = (qs.get("p") or [""])[0].strip()
+            if len(passcode) >= 8:
+                return f"teams-pass:{passcode.lower()}"
+
+        return None
+
+    @classmethod
     def _url_dedupe_key(cls, url: str) -> str:
         """Identity key for duplicates only. Does not rewrite the stored URL."""
-        raw = url.strip()
+        raw = cls._normalize_url_text(url)
         lower = raw.lower()
 
         drive = re.search(r"drive\.google\.com/file/d/([^/]+)", raw, flags=re.I)
@@ -130,17 +217,30 @@ class AnswerSynthesizer:
         if item and "meetingrecap" in lower:
             return f"teams-recap:{item.group(1).lower()}"
 
+        teams = cls._teams_meeting_dedupe_key(raw)
+        if teams:
+            return teams
+
         return lower.split("?", 1)[0].rstrip("/")
 
     @classmethod
     def _url_query_penalty(cls, url: str) -> int:
         """Lower is cleaner. Used only to pick among genuine duplicate stored URLs."""
+        lower = url.lower()
+        penalty = 0
+        # Prefer short /meet/ joins over bloated light-meetings/launch deep links.
+        if "light-meetings" in lower or "launch?" in lower:
+            penalty += 8
+        if "meetup-join" in lower and "context=" in lower:
+            penalty += 4
         query = urlsplit(url).query
         if not query:
-            return 0
-        penalty = 1
+            return penalty
+        penalty += 1
         if "usp=" in query.lower():
             penalty += 2
+        if len(query) > 120:
+            penalty += 3
         return penalty
 
     @classmethod
@@ -148,6 +248,67 @@ class AnswerSynthesizer:
         if cls._url_query_penalty(candidate) < cls._url_query_penalty(current):
             return candidate
         return current
+
+    @classmethod
+    def _is_weak_link_label(cls, label: str) -> bool:
+        """True when the title is a speaker crumb or fluff, not a clear session name."""
+        text = (label or "").strip()
+        if not text:
+            return True
+        # Strip WhatsApp emphasis for the weakness check.
+        plain = re.sub(r"\*+", "", text).strip()
+        words = re.findall(r"[\w'’-]+", plain, flags=re.UNICODE)
+        if not words:
+            return True
+        session_re = re.compile(
+            r"\b(session|workshop|meeting|ignite|open|course|module|assessment|"
+            r"webinar|office|hours|standup|sync|office\s*hours|kickoff|onboarding|"
+            r"orientation|training|seminar|forum|clinic|briefing)\b",
+            flags=re.I,
+        )
+        if session_re.search(plain):
+            return False
+        if len(words) <= 1:
+            return True
+        if re.match(
+            r"^(at\b|your\b|our\b|there is\b|here is\b|please\b|kindly\b)",
+            plain,
+            flags=re.I,
+        ):
+            return True
+        # Speaker crumbs: "Diane", "Saidu", "Mamadou Lamine Diallo" — capitalized
+        # name tokens with no session vocabulary and no acronyms like METI/MIT.
+        if len(words) <= 3 and len(plain) <= 48:
+            name_like = True
+            for w in words:
+                if any(ch.isdigit() for ch in w):
+                    name_like = False
+                    break
+                if w.isupper() and 2 <= len(w) <= 5:
+                    name_like = False  # acronym (MIT, METI, AI)
+                    break
+                if not (w[:1].isupper() and (len(w) == 1 or w[1:].islower() or w[1:].isalpha())):
+                    name_like = False
+                    break
+            if name_like:
+                return True
+        return False
+
+    @classmethod
+    def _prefer_better_label(cls, current: str, candidate: str) -> str:
+        cur = (current or "").strip()
+        cand = (candidate or "").strip()
+        if not cand:
+            return cur
+        if not cur:
+            return cand
+        cur_weak = cls._is_weak_link_label(cur)
+        cand_weak = cls._is_weak_link_label(cand)
+        if cur_weak and not cand_weak:
+            return cand
+        if cand_weak and not cur_weak:
+            return cur
+        return cand if len(cand) > len(cur) else cur
 
     @classmethod
     def _is_social_or_profile_noise_url(cls, url: str) -> bool:
@@ -167,7 +328,7 @@ class AnswerSynthesizer:
     def _extract_http_urls(cls, text: str, *, mode: str = "default") -> list[str]:
         by_key: dict[str, str] = {}
         for match in _URL_RE.findall(text or ""):
-            url = match.rstrip(".,);]}>'\"")
+            url = cls._normalize_url_text(match.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
             if mode == "meetings":
                 if not cls._is_meeting_join_url(url):
                     continue
@@ -187,10 +348,52 @@ class AnswerSynthesizer:
         return list(by_key.values())
 
     @classmethod
+    def _raw_http_url_count(cls, text: str, *, mode: str = "default") -> int:
+        """Count matching URLs before dedupe — used to force rebuild on duplicates."""
+        count = 0
+        for match in _URL_RE.findall(text or ""):
+            url = cls._normalize_url_text(match.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
+            if mode == "meetings":
+                if not cls._is_meeting_join_url(url):
+                    continue
+            elif mode == "recordings":
+                if cls._is_meeting_join_url(url) or not cls._is_likely_recording_url(url):
+                    continue
+            elif mode == "assets":
+                if cls._is_social_or_profile_noise_url(url):
+                    continue
+            elif cls._is_meeting_join_url(url):
+                continue
+            count += 1
+        return count
+
+    @classmethod
+    def _answer_has_weak_link_titles(cls, answer: str) -> bool:
+        for line in (answer or "").splitlines():
+            trimmed = line.strip()
+            m = re.match(r"^\d+[\).\:\-]\s+(.+)$", trimmed)
+            if not m:
+                continue
+            label = m.group(1).strip()
+            if label.startswith("http://") or label.startswith("https://"):
+                continue
+            if cls._is_weak_link_label(label):
+                return True
+        return False
+
+    @classmethod
     def _clean_link_label(cls, line: str) -> str:
         line = re.sub(r"^\d+\.\s*", "", line).strip(" \t:-–—|")
         line = re.sub(r"\s*via this link\b.*$", "", line, flags=re.I)
         line = re.sub(r"\s*[-–—|]\s*join\s*$", "", line, flags=re.I)
+        # Drop leading time fluff: "At *3:00 PM CAT* (2:00 PM WAT), there is the first optional …"
+        line = re.sub(
+            r"^at\s+\*?[^,)]{0,40}\*?(\s*\([^)]*\))?\s*,?\s*"
+            r"(there is\s+(the\s+)?)?(first\s+)?(optional\s+)?",
+            "",
+            line,
+            flags=re.I,
+        ).strip()
         line = re.sub(
             r"\b(link|recording|video|here|see|watch|available|join)\s*$",
             "",
@@ -206,7 +409,8 @@ class AnswerSynthesizer:
         if re.match(r"^~\s*\S+$", line):
             return ""
         if re.match(
-            r"^(you can|here are|these links|find all|join|click here|microsoft teams)\b",
+            r"^(you can|here are|these links|find all|join|click here|microsoft teams|"
+            r"your contribution|our contribution|please join|kindly join)\b",
             line,
             flags=re.I,
         ):
@@ -214,22 +418,72 @@ class AnswerSynthesizer:
         # Prefer a clean head title, never chop mid-word from the tail.
         if len(line) > 70:
             line = line[:70].rsplit(" ", 1)[0].strip() or line[:70].strip()
+        # Incomplete export crumbs (trailing conjunctions / cut-off phrases).
+        if line.endswith((" the", " a", " an", " and", " or", " to", " for", " with", " —", " -")):
+            return ""
+        # Mid-word truncation at the start (export chopped the title), e.g. "versal AI…".
+        if re.match(r"^[a-z]", line) and not re.match(
+            r"^(the|a|an|le|la|les|un|une|des|el|los|las)\b",
+            line,
+            flags=re.I,
+        ):
+            return ""
+        # Speaker/timestamp crumbs that slipped through.
+        if re.match(r"^\d{1,2}/\d{2,4}", line) or ":" in line[:24] and re.search(
+            r"\bBot\b|\bNexus\b", line
+        ):
+            if re.match(r"^\[?\d", line) or re.search(r"\d{1,2}:\d{2}", line[:30]):
+                return ""
+        if cls._is_weak_link_label(line):
+            return ""
         return line
 
     @classmethod
     def _label_for_url(cls, url: str, content: str) -> str:
         idx = content.find(url)
-        if idx <= 0:
+        # Also try normalized / truncated variants for long light-meeting URLs.
+        if idx < 0:
+            short = url.split("?", 1)[0]
+            idx = content.find(short) if short else -1
+        if idx < 0:
             return ""
-        before = content[max(0, idx - 160) : idx]
-        line = before.splitlines()[-1].strip() if before else ""
-        return cls._clean_link_label(line)
+
+        window_start = max(0, idx - 280)
+        before = content[window_start:idx]
+        # Prefer a clean line start — a wide window often begins mid-word.
+        if before and before[0].isalnum() and not before[0].isupper():
+            cut = re.search(r"[\n.!?]\s+", before)
+            if cut:
+                before = before[cut.end() :]
+            else:
+                before = re.sub(r"^\S*\s+", "", before, count=1)
+
+        candidates: list[str] = []
+        lines = [ln.strip() for ln in before.splitlines() if ln.strip()]
+        if lines:
+            # Immediate line before the URL, then earlier lines (session titles often sit above).
+            for ln in reversed(lines[-4:]):
+                ln = re.sub(r"^[\w\s.\-]{2,48}:\s+", "", ln).strip()
+                ln = re.sub(
+                    r"^\[\d{1,2}/\d{1,2}/\d{2,4},?\s*\d{1,2}:\d{2}.*?\]\s*",
+                    "",
+                    ln,
+                ).strip()
+                cleaned = cls._clean_link_label(ln)
+                if cleaned:
+                    candidates.append(cleaned)
+
+        # Prefer the most specific (longest non-weak) candidate.
+        best = ""
+        for cand in candidates:
+            best = cls._prefer_better_label(best, cand)
+        return best
 
     @classmethod
     def _fallback_label(cls, url: str) -> str:
         lower = url.lower()
         if cls._is_meeting_join_url(url):
-            return "Meeting join link"
+            return "Microsoft Teams meeting"
         if "youtu" in lower:
             return "YouTube recording"
         if "drive.google.com" in lower:
@@ -249,8 +503,10 @@ class AnswerSynthesizer:
         language_hint: str | None = None,
     ) -> tuple[str, list[str]]:
         """If evidence has more openable URLs than the model listed, rebuild a full titled list."""
-        question = cls._current_question(query)
+        follow_up_line = cls._current_question(query)
+        question = cls._original_question(query)
         q = question.lower()
+        is_follow_up_envelope = "the member is following up" in (query or "").lower()
         mode_hint = (link_mode or "").strip().lower()
         if mode_hint in {"recordings", "meetings", "assets"}:
             wants_meeting_links = mode_hint == "meetings"
@@ -262,6 +518,13 @@ class AnswerSynthesizer:
             wants_generic_links = (
                 bool(_LINK_ASK_RE.search(question)) and not wants_meeting_links and not wants_recordings
             )
+        # Short follow-ups must not invent a link-dump intent from prior answer text
+        # stuffed into the envelope — only the original ask counts.
+        if is_follow_up_envelope and not (
+            wants_meeting_links or wants_recordings or wants_generic_links
+        ):
+            return answer, []
+
         wants_any = wants_meeting_links or wants_recordings or wants_generic_links
 
         if wants_meeting_links:
@@ -286,18 +549,43 @@ class AnswerSynthesizer:
                 label = cls._label_for_url(url, chunk.content)
                 if not label:
                     for raw in _URL_RE.findall(chunk.content or ""):
-                        raw = raw.rstrip(".,);]}>'\"")
+                        raw = cls._normalize_url_text(raw.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
                         if cls._url_dedupe_key(raw) == key:
                             label = cls._label_for_url(raw, chunk.content)
                             if label:
                                 break
+                if label and cls._is_weak_link_label(label):
+                    label = ""
                 if key not in evidence_by_key:
                     evidence_by_key[key] = (url, label)
                 else:
                     prev_url, prev_label = evidence_by_key[key]
                     chosen = cls._prefer_cleaner_stored_url(prev_url, url)
-                    best_label = label if label and len(label) > len(prev_label) else prev_label
+                    best_label = cls._prefer_better_label(prev_label, label)
                     evidence_by_key[key] = (chosen, best_label)
+
+        # Collapse light-meetings?p=… into /meet/{id}?p=… when both share a passcode.
+        pass_to_meet: dict[str, str] = {}
+        for key, (url, _label) in evidence_by_key.items():
+            if not key.startswith("teams-meet:"):
+                continue
+            qs = parse_qs(urlsplit(cls._normalize_url_text(url)).query)
+            passcode = (qs.get("p") or [""])[0].strip()
+            if len(passcode) >= 8:
+                pass_to_meet[f"teams-pass:{passcode.lower()}"] = key
+        for pass_key, meet_key in pass_to_meet.items():
+            if pass_key not in evidence_by_key or meet_key not in evidence_by_key:
+                continue
+            pass_url, pass_label = evidence_by_key.pop(pass_key)
+            meet_url, meet_label = evidence_by_key[meet_key]
+            evidence_by_key[meet_key] = (
+                cls._prefer_cleaner_stored_url(meet_url, pass_url),
+                cls._prefer_better_label(meet_label, pass_label),
+            )
+            for eid in url_evidence_ids.pop(pass_key, []):
+                url_evidence_ids.setdefault(meet_key, [])
+                if eid not in url_evidence_ids[meet_key]:
+                    url_evidence_ids[meet_key].append(eid)
 
         if not evidence_by_key:
             if wants_recordings or wants_meeting_links:
@@ -307,57 +595,68 @@ class AnswerSynthesizer:
                     return "", []
             return answer, []
 
-        answer_keys = {
-            cls._url_dedupe_key(u) for u in cls._extract_http_urls(answer or "", mode=mode)
-        }
+        answer_urls = cls._extract_http_urls(answer or "", mode=mode)
+        answer_keys = {cls._url_dedupe_key(u) for u in answer_urls}
         missing = [u for key, (u, _) in evidence_by_key.items() if key not in answer_keys]
+        raw_answer_url_count = cls._raw_http_url_count(answer or "", mode=mode)
+        # Rebuild when the draft still has duplicate Teams shapes or weak "Diane"-style titles.
+        needs_rebuild = wants_any and (
+            raw_answer_url_count > len(answer_keys)
+            or cls._answer_has_weak_link_titles(answer or "")
+            or len(answer_keys) > len(evidence_by_key)
+        )
 
         # Never turn a person/identity answer into a dump of unrelated URLs.
         if re.search(r"\bwho(?:'s|’s|\s+is|\s+are)?\b", q) and not wants_any:
             return answer, []
         if not wants_any and not answer_keys:
             return answer, []
-        if not missing and answer_keys and wants_any:
+        if not missing and answer_keys and wants_any and not needs_rebuild:
             if len(answer_keys) >= len(evidence_by_key):
                 return answer, []
 
         if not wants_any and not missing:
             return answer, []
 
-        fr = (target_language or language_hint or "").strip().lower() == "fr" or bool(
-            re.search(
-                r"\b(enregistrement|enregistrements|lien|liens|r[eé]union|s'il vous|envoyez|quand|est-ce)\b",
-                q,
-                flags=re.I,
-            )
-        )
-        if wants_meeting_links:
-            intro = "Voici les liens de réunion :" if fr else "Here are the meeting join links:"
-        elif wants_recordings and (
-            mode_hint == "recordings"
-            or re.search(r"\b(recording|recordings|replay|recap)\b", q, flags=re.I)
-        ):
-            intro = "Voici les enregistrements des sessions :" if fr else "Here are the session recordings:"
-        elif wants_recordings:
-            intro = "Voici les vidéos :" if fr else "Here are the videos:"
-        elif wants_generic_links:
-            intro = "Voici les liens :" if fr else "Here are the links:"
-        else:
-            intro = "Les voici :" if fr else "Here they are:"
-        lines = [intro, ""]
+        # Prefer the model's lead sentence (any language). Never hardcode EN/FR/AR intros.
+        intro = ""
+        for line in (answer or "").splitlines():
+            trimmed = line.strip()
+            if not trimmed or _URL_RE.search(trimmed):
+                continue
+            if re.match(r"^\d+[\).\:\-]\s*", trimmed):
+                continue
+            intro = trimmed
+            break
+
         used_ids: list[str] = []
+        link_lines: list[str] = []
         for i, (key, (url, label)) in enumerate(evidence_by_key.items(), start=1):
-            display_label = label or cls._fallback_label(url)
-            lines.append(f"{i}. {display_label}")
-            lines.append(url)
-            lines.append("")
+            display_label = (
+                label
+                if label and not cls._is_weak_link_label(label)
+                else cls._fallback_label(url)
+            )
+            link_lines.append(f"{i}. {display_label}")
+            link_lines.append(url)
+            link_lines.append("")
             for eid in url_evidence_ids.get(key, []):
                 if eid not in used_ids:
                     used_ids.append(eid)
+        link_block = "\n".join(link_lines).strip()
 
-        rebuilt = "\n".join(lines).strip()
+        # Follow-ups must not re-glue the prior summary onto a second link dump
+        # (that produced duplicate "here's more detail" blocks in chat).
+        if is_follow_up_envelope and (answer or "").strip():
+            if len((answer or "").strip()) >= 40:
+                return cls._ensure_section_spacing(answer), []
+            if link_block:
+                return cls._ensure_section_spacing(f"{(answer or '').rstrip()}\n\n{link_block}"), used_ids
+
+        rebuilt = f"{intro}\n\n{link_block}".strip() if intro else link_block
 
         # Keep prose for multi-part asks ("… also any meeting today?").
+        # Use original question only — never the whole follow-up envelope.
         has_extra = bool(
             re.search(r"\balso\b", q)
             or question.count("?") >= 2
@@ -374,14 +673,34 @@ class AnswerSynthesizer:
                     continue
                 if re.match(r"^(?:\d+\.|[•\-])\s*$", trimmed):
                     continue
+                # Numbered link titles are replaced by the rebuilt link_block.
+                if re.match(r"^\d+[\).\:\-]\s+\S", trimmed):
+                    continue
+                if re.match(r"^[•\-]\s+\S", trimmed) and len(trimmed) < 80:
+                    continue
                 prose_lines.append(trimmed)
             prose = "\n".join(prose_lines).strip()
-            if len(prose) >= 24 and not re.match(
-                r"^(here are the .+|here they are):?$", prose, flags=re.I
-            ):
-                return f"{prose}\n\n{rebuilt}", used_ids
+            if len(prose) >= 24:
+                # Append links without a second lead sentence (avoids duplicate intros).
+                return cls._ensure_section_spacing(f"{prose}\n\n{link_block}"), used_ids
 
-        return rebuilt, used_ids
+        return cls._ensure_section_spacing(rebuilt), used_ids
+
+    @staticmethod
+    def _ensure_section_spacing(answer: str) -> str:
+        """Keep replies readable: blank line after lead, no jam-packed blocks."""
+        text = (answer or "").replace("\r\n", "\n").strip()
+        if not text:
+            return ""
+        # Collapse 3+ newlines to a double break; ensure lead → list has a blank line.
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(
+            r"(?m)^([^\n\d][^\n]{0,120})\n(\d+[\).\:\-]\s+)",
+            r"\1\n\n\2",
+            text,
+        )
+        return text.strip()
+
     def _normalize_candidates_to_evidence(
         self,
         candidates: Sequence[CandidateChunk],
@@ -397,7 +716,7 @@ class AnswerSynthesizer:
                     chunk_id=cand.chunk_id,
                     source_id=cand.source_id,
                     source_name=cand.source_name or f"Source_{cand.source_type}_{cand.source_id.hex[:6]}",
-                    source_uri=cand.source_uri or f"community://sources/{cand.source_id}",
+                    source_uri=cand.source_uri or "",
                     source_type=cand.source_type,
                     content=cand.content,
                     breadcrumbs=cand.breadcrumbs,
@@ -427,8 +746,19 @@ class AnswerSynthesizer:
         """Execute end-to-end evidence synthesis and validation."""
         
         # 1. Fast-Path Pre-Check
-        if not candidates or candidates[0].final_score < self.MIN_CONFIDENCE_FLOOR:
-            top_score = candidates[0].final_score if candidates else 0.0
+        # Typed link asks (recordings/meetings/assets) may score soft cross-language
+        # (query in AR/FR vs English chunks) even when URL evidence is present — still synthesize.
+        link_mode_norm = (link_mode or "").strip().lower()
+        typed_link_ask = link_mode_norm in {"recordings", "meetings", "assets"}
+        has_http_evidence = any("http" in (c.content or "").lower() for c in candidates)
+        top_score = candidates[0].final_score if candidates else 0.0
+        detected_lang = (language_hint or "").strip().lower()
+        cross_language_evidence = detected_lang not in {"", "en"} and top_score >= 0.35
+        if not candidates or (
+            top_score < self.MIN_CONFIDENCE_FLOOR
+            and not (typed_link_ask and has_http_evidence)
+            and not cross_language_evidence
+        ):
             return ValidatedAnswerPayload(
                 state=AnswerState.INSUFFICIENT_EVIDENCE,
                 answer="",
@@ -538,6 +868,16 @@ class AnswerSynthesizer:
             evidence_ids_used=evidence_ids_used,
             evidence_map=evidence_map,
         )
+        cleaned_answer = self._ensure_section_spacing(cleaned_answer)
+
+        # 5b. Dedicated response writer: grounded draft → professional member copy.
+        # Language lock = latest ask (Follow-up:), never the older Original question.
+        cleaned_answer = await self._polisher.polish(
+            cleaned_answer,
+            question=self._current_question(query),
+            use_model=True,
+        )
+        cleaned_answer = self._ensure_section_spacing(cleaned_answer)
 
         # 6. Deterministic 4-State Resolution
         return AnswerVerifier.resolve_state(

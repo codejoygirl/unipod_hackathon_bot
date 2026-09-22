@@ -84,7 +84,7 @@ class EvaluationRunner:
                         chunk_id=c.chunk_id,
                         source_id=c.source_id,
                         source_name=f"Source_{c.source_type}",
-                        source_uri=c.source_uri or f"community://sources/{c.source_id}",
+                        source_uri=c.source_uri or "",
                         source_type=c.source_type,
                         content=c.content,
                         authority_tier=c.authority_tier,

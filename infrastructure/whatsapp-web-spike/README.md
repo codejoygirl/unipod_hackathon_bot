@@ -15,7 +15,9 @@ It drives a real Chromium session against WhatsApp Web (closer to normal linked-
 3. Laravel runs the same grounded ask + citation checks as the web API  
 4. Worker sends the reply back in WhatsApp  
 
-Also: `JOIN-{token}` (link phone → community), `EXPORT <text>` (knowledge draft).
+Also: `JOIN-{token}` (link phone → community), `/share` (member suggest), `/export` (admin ingest draft).
+
+Group listen (when sidecar `PRIVATE_CHATS_ONLY=false`): mention any `WHATSAPP_WEB_SPIKE_BOT_ALIASES` **or** a recognized command; otherwise Laravel stays silent.
 
 ## Clean run (end-to-end)
 

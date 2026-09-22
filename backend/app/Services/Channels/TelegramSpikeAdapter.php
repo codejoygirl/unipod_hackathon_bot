@@ -24,11 +24,115 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         private readonly KnowledgeLifecycleService $lifecycle,
         private readonly ChannelConversationService $conversation,
         private readonly SpikeEscalationNotifier $escalationNotifier,
+        private readonly ChannelCommandAccess $commandAccess,
+        private readonly AdminMessageKnowledgeIndexer $adminIndexer,
     ) {}
 
     public function channelName(): string
     {
         return 'telegram_spike';
+    }
+
+    /**
+     * True when Zak should answer this turn (private always; groups only if directed).
+     *
+     * @param  list<string>  $aliases
+     */
+    private function isDirectedAtBot(InboundMessage $message, array $aliases, string $chatType): bool
+    {
+        $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $botMentioned = filter_var($message->raw['bot_mentioned'] ?? false, FILTER_VALIDATE_BOOLEAN)
+            || $replyToBot;
+        $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
+
+        $decision = $this->conversation->expectsBotResponse($message->text, [
+            'chat_type' => $chatType,
+            'reply_to_bot' => $replyToBot,
+            'bot_mentioned' => $botMentioned,
+            'bot_aliases' => $aliases,
+            'quoted_text' => $quoted,
+        ]);
+
+        if ($decision === true) {
+            return true;
+        }
+        if ($decision === false) {
+            Log::info('telegram_spike.skip_undirected', [
+                'from' => $message->externalUserId,
+                'chat_type' => $chatType,
+                'reply_to_bot' => $replyToBot,
+                'bot_mentioned' => $botMentioned,
+            ]);
+
+            return false;
+        }
+
+        $ai = $this->aiClient->isMessageAddressedToBot(
+            $message->text,
+            $replyToBot,
+            $botMentioned,
+            $quoted !== '' ? $quoted : null,
+        );
+        if ($ai === true) {
+            return true;
+        }
+        if ($ai === false) {
+            Log::info('telegram_spike.skip_undirected_ai', [
+                'from' => $message->externalUserId,
+            ]);
+
+            return false;
+        }
+
+        return $replyToBot && mb_strlen(trim($message->text)) >= 2;
+    }
+
+    /**
+     * Isolate memory per chat + sender so group users never share context.
+     */
+    private function threadKey(InboundMessage $message): string
+    {
+        $chatId = trim((string) ($message->raw['chat_id'] ?? ''));
+        if ($chatId !== '') {
+            return $chatId;
+        }
+
+        $chatType = strtolower(trim((string) ($message->raw['chat_type'] ?? 'private')));
+        if ($chatType === 'group' || $chatType === 'supergroup') {
+            return 'group:unknown:'.$message->externalUserId;
+        }
+
+        return 'dm:'.$message->externalUserId;
+    }
+
+    private function chatType(InboundMessage $message): string
+    {
+        $chatType = strtolower(trim((string) ($message->raw['chat_type'] ?? 'private')));
+
+        return in_array($chatType, ['group', 'supergroup'], true) ? 'group' : 'private';
+    }
+
+    /**
+     * @return list<array{role: string, text: string}>
+     */
+    private function priorTurns(InboundMessage $message): array
+    {
+        return $this->conversation->turns(
+            $this->channelName(),
+            $message->externalUserId,
+            $this->threadKey($message),
+        );
+    }
+
+    private function rememberTurn(InboundMessage $message, string $role, string $text): void
+    {
+        $this->conversation->remember(
+            $this->channelName(),
+            $message->externalUserId,
+            $role,
+            $text,
+            $this->threadKey($message),
+        );
     }
 
     public function handleInbound(InboundMessage $message): ?string
@@ -48,46 +152,92 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             return $this->handleJoin($message);
         }
 
-        if (str_starts_with($upper, 'SHARE')
-            || str_starts_with($upper, '/SHARE')
-            || str_starts_with($upper, 'EXPORT')
-            || str_starts_with($upper, '/EXPORT')) {
+        if (str_starts_with($upper, 'SHARE') || str_starts_with($upper, '/SHARE')) {
             return $this->handleShareStub($message);
+        }
+
+        if (str_starts_with($upper, 'FEATURE') || str_starts_with($upper, '/FEATURE')) {
+            return $this->handleFeature($message);
+        }
+
+        if (str_starts_with($upper, 'IMPORT') || str_starts_with($upper, '/IMPORT')
+            || str_starts_with($upper, 'EXPORT') || str_starts_with($upper, '/EXPORT')) {
+            return $this->handleAdminImport($message);
+        }
+
+        if (str_starts_with($upper, 'ASK') || str_starts_with($upper, '/ASK')) {
+            return $this->handleMemberAsk($message);
+        }
+
+        $chatType = strtolower(trim((string) ($message->raw['chat_type'] ?? 'private')));
+        $aliases = array_values(array_filter([
+            'zak',
+            'zak_bot',
+            trim((string) config('zak_presence.telegram_handle', ''), " \t\n\r\0\x0B@"),
+        ]));
+
+        $isAdmin = $this->commandAccess->isAdmin(
+            $this->channelName(),
+            $message->externalUserId,
+            is_array($message->raw) ? $message->raw : [],
+        );
+
+        $adminIndexAck = null;
+        if ($isAdmin) {
+            $adminIndexAck = $this->tryAdminAutoIndex($message);
+        }
+
+        if (! $this->isDirectedAtBot($message, $aliases, $chatType)) {
+            return $adminIndexAck;
         }
 
         $community = $this->resolveLinkedCommunity($message);
         $scope = $community?->description;
-        $priorTurns = $this->conversation->turns($this->channelName(), $message->externalUserId);
-        $resolved = $this->conversation->resolveInbound($message->text, $priorTurns, $scope);
-        $resolved = $this->applyModelIntentIfNeeded($resolved, $community);
+        $priorTurns = $this->priorTurns($message);
+        $inboundText = $this->textForRouting($message);
+        $resolved = $this->conversation->resolveInbound($inboundText, $priorTurns, $scope);
+        $resolved = $this->applyModelIntentIfNeeded($resolved, $community, $message, $priorTurns);
         $intent = $resolved['intent'];
         $effectiveQuery = $resolved['query'];
 
         if ($intent === 'clarify') {
-            $reply = $this->modelAssistedReply($message->text, 'social', $community);
+            $reply = $this->modelAssistedReply($inboundText, 'social', $community, $message);
             if ($reply === '' || str_contains(mb_strtolower($reply), 'thanks for joining')) {
                 $reply = $this->conversation->clarificationReply();
             }
-            $this->conversation->remember($this->channelName(), $message->externalUserId, 'user', $message->text);
-            $this->conversation->remember($this->channelName(), $message->externalUserId, 'assistant', $reply);
+            $this->rememberTurn(
+                $message,
+                'user',
+                $this->conversation->userTurnTextToRemember($message->text, $effectiveQuery),
+            );
+            $this->rememberTurn($message, 'assistant', $reply);
 
             return $reply;
         }
 
         if ($intent === ChannelConversationService::INTENT_CONVERSATIONAL) {
-            return $this->handleConversational($message, $community);
+            return $this->handleConversational($message, $community, $inboundText);
         }
 
         if ($intent === ChannelConversationService::INTENT_OUT_OF_SCOPE) {
             $reply = $this->modelAssistedReply(
-                $message->text,
+                $inboundText,
                 'out_of_scope',
                 $community,
+                $message,
             );
-            $this->conversation->remember($this->channelName(), $message->externalUserId, 'user', $message->text);
-            $this->conversation->remember($this->channelName(), $message->externalUserId, 'assistant', $reply);
+            $this->rememberTurn(
+                $message,
+                'user',
+                $this->conversation->userTurnTextToRemember($message->text, $effectiveQuery),
+            );
+            $this->rememberTurn($message, 'assistant', $reply);
 
             return $reply;
+        }
+
+        if ($intent === ChannelConversationService::INTENT_PERSONAL_HELP) {
+            return $this->handlePersonalHelp($message, $community, $inboundText);
         }
 
         return $this->handleAsk(
@@ -99,43 +249,48 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
     /**
      * Hybrid cascade: rules for social + hard OOS; model for everything else.
+     * Multilingual follow-ups come from classify follow_up=yes (any language).
      *
      * @param  array{intent: string, query: string, link_mode?: string}  $resolved
+     * @param  list<array{role: string, text: string}>  $priorTurns
      * @return array{intent: string, query: string, link_mode: string}
      */
-    private function applyModelIntentIfNeeded(array $resolved, ?Community $community): array
-    {
-        $resolved['link_mode'] = (string) ($resolved['link_mode'] ?? 'none');
+    private function applyModelIntentIfNeeded(
+        array $resolved,
+        ?Community $community,
+        InboundMessage $message,
+        array $priorTurns = [],
+    ): array {
         $query = (string) ($resolved['query'] ?? '');
         if (! $this->conversation->needsModelRouting($query)) {
+            if (($resolved['link_mode'] ?? 'none') === 'none') {
+                $resolved['link_mode'] = $this->conversation->inferLinkMode($query);
+            }
+
             return $resolved;
         }
 
         $ctx = $this->communityAiContext($community);
+        $priorQuestion = $this->conversation->lastRetrievableUserQuestion($priorTurns);
+        $priorAnswer = $this->conversation->lastKnowledgeAssistantAnswer($priorTurns);
+        $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
         $classified = $this->aiClient->classifyConversationIntent(
             message: $query,
             communityName: $ctx['name'],
             communityScope: $ctx['scope'],
+            priorQuestion: $priorQuestion,
+            priorAnswerExcerpt: $priorAnswer,
+            replyToBot: $replyToBot,
         );
 
-        if ($classified === null) {
-            return $resolved;
-        }
-
-        $modelIntent = (string) ($classified['intent'] ?? '');
-        $linkMode = (string) ($classified['link_mode'] ?? 'none');
-
-        if ($modelIntent === 'clarify') {
-            $resolved['intent'] = 'clarify';
-            $resolved['link_mode'] = 'none';
-
-            return $resolved;
-        }
-
-        $resolved['intent'] = $modelIntent;
-        $resolved['link_mode'] = $linkMode;
-
-        return $resolved;
+        return $this->conversation->mergeModelClassification(
+            $resolved,
+            $classified,
+            $community?->description,
+            $priorTurns,
+            $replyToBot,
+        );
     }
 
     /**
@@ -170,44 +325,331 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             return null;
         }
 
+        $standalone = $this->escalationNotifier->tryAdminCommand(
+            $message->text,
+            $this->channelName(),
+            $message->externalUserId,
+        );
+        if ($standalone !== null) {
+            return (string) ($standalone['reply'] ?? 'Done.');
+        }
+
         $replyTo = trim((string) ($message->raw['reply_to_message_id'] ?? ''));
         if ($replyTo === '') {
             return null;
         }
 
-        $result = $this->escalationNotifier->forwardAdminReply($replyTo, $message->text);
+        $result = $this->escalationNotifier->forwardAdminReply(
+            $replyTo,
+            $message->text,
+            $message->externalUserId,
+        );
 
         return (string) ($result['reply'] ?? 'Done.');
     }
 
-    private function handleConversational(InboundMessage $message, ?Community $community = null): string
+    private function handleMemberAsk(InboundMessage $message): string
     {
-        $reply = $this->modelAssistedReply($message->text, 'social', $community);
-        $this->conversation->remember($this->channelName(), $message->externalUserId, 'user', $message->text);
-        $this->conversation->remember($this->channelName(), $message->externalUserId, 'assistant', $reply);
+        $body = trim($message->text);
+        foreach (['/ASK', 'ASK'] as $prefix) {
+            if (str_starts_with(strtoupper($body), $prefix)) {
+                $body = trim(substr($body, strlen($prefix)));
+                break;
+            }
+        }
+
+        if ($body === '') {
+            $reply = "Send your question like this:\n"
+                ."/ask When is the next UniPods session?\n\n"
+                .'If I already know the answer, I\'ll reply right away. '
+                .'Otherwise an admin will see it and can reply from their side.';
+            $this->rememberTurn($message, 'user', $message->text);
+            $this->rememberTurn($message, 'assistant', $reply);
+
+            return $reply;
+        }
+
+        $fromName = trim((string) ($message->raw['from_name'] ?? ''));
+        if ($fromName === '' && isset($message->raw['from_username'])) {
+            $fromName = '@'.ltrim((string) $message->raw['from_username'], '@');
+        }
+
+        // Prefer answering from community knowledge first; escalate only when we cannot.
+        $answered = $this->tryAnswerMemberAsk($message, $body);
+        if ($answered !== null) {
+            $this->rememberTurn($message, 'user', $message->text);
+            $this->rememberTurn($message, 'assistant', $answered);
+
+            return $answered;
+        }
+
+        $community = $this->resolveLinkedCommunity($message);
+        $communityId = $community?->id
+            ?? (string) config('telegram_spike.default_community_id', '');
+
+        $result = $this->escalationNotifier->handleMemberAsk(
+            channel: $this->channelName(),
+            from: $message->externalUserId,
+            question: $body,
+            communityId: (string) $communityId,
+            communityName: $community?->name,
+            fromName: $fromName !== '' ? $fromName : null,
+            chatType: $this->chatType($message),
+            chatId: trim((string) ($message->raw['chat_id'] ?? '')) ?: null,
+            messageId: $message->messageId,
+        );
+
+        $reply = (string) ($result['reply'] ?? 'Done.');
+        $this->rememberTurn($message, 'user', $message->text);
+        $this->rememberTurn($message, 'assistant', $reply);
 
         return $reply;
     }
 
-    private function modelAssistedReply(string $text, string $mode, ?Community $community): string
+    /**
+     * Attempt a grounded answer for /ask. Null means escalate to an admin.
+     */
+    private function tryAnswerMemberAsk(InboundMessage $message, string $question): ?string
     {
+        $link = Cache::get($this->linkCacheKey($message->externalUserId));
+        $user = $this->resolveUser();
+        $communityId = is_array($link)
+            ? (string) ($link['community_id'] ?? '')
+            : (string) config('telegram_spike.default_community_id');
+
+        if ($user === null || $communityId === '' || ! $user->belongsToCommunity($communityId)) {
+            return null;
+        }
+
+        $community = Community::query()->find($communityId);
+        if ($community === null) {
+            return null;
+        }
+
+        // Hard out-of-scope /ask still goes to an admin (member asked on purpose).
+        if ($this->conversation->isClearlyOutOfScope($question)) {
+            return null;
+        }
+
+        $override = $message->raw['target_language'] ?? null;
+        $targetLanguage = is_string($override) && trim($override) !== '' && strtolower(trim($override)) !== 'auto'
+            ? trim($override)
+            : null;
+
+        $priorTurns = $this->priorTurns($message);
+        $query = $this->conversation->buildKnowledgeQuery($question, $priorTurns);
+
+        $result = $this->aiClient->askGroundedQuestion(
+            query: $query,
+            tenantId: $community->tenant_id,
+            communityIds: [$communityId],
+            targetLanguage: $targetLanguage,
+            linkMode: 'none',
+        );
+        $result = $this->citationRevalidator->revalidate($user, $result);
+
+        if ($this->isTransientAiFailure($result) || trim((string) $result->answer) === '') {
+            return null;
+        }
+
+        $chatType = (string) ($message->raw['chat_type'] ?? 'private');
+        $reply = $this->formatAskReply($result, $chatType, $question, 'none');
+        if ($reply === '' || str_starts_with($reply, "I don't have a solid answer for that yet.")) {
+            return null;
+        }
+
+        return $reply;
+    }
+
+    private function handleConversational(
+        InboundMessage $message,
+        ?Community $community = null,
+        ?string $inboundText = null,
+    ): string {
+        $text = trim((string) ($inboundText ?? $message->text));
+        if ($text === '') {
+            $text = $message->text;
+        }
+
+        if ($this->conversation->isBareBotPing($text)) {
+            $reply = $this->conversation->mentionPingReply(
+                'plain',
+                'telegram',
+                $this->chatType($message),
+            );
+            $this->rememberTurn($message, 'user', $message->text);
+            $this->rememberTurn($message, 'assistant', $reply);
+
+            return $reply;
+        }
+
+        $reply = $this->modelAssistedReply($text, 'social', $community, $message);
+        if ($reply === '') {
+            $reply = $this->conversation->mentionPingReply(
+                'plain',
+                'telegram',
+                $this->chatType($message),
+            );
+        }
+        $this->rememberTurn($message, 'user', $message->text);
+        $this->rememberTurn($message, 'assistant', $reply);
+
+        return $reply;
+    }
+
+    /**
+     * Text used for intent routing. Bare @zak on a quote → use the quoted question.
+     */
+    private function textForRouting(InboundMessage $message): string
+    {
+        $text = trim($message->text);
+        $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
+        $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        if ($quoted !== '' && $this->isBareBotMention($text)) {
+            if ($replyToBot) {
+                return $text;
+            }
+
+            return $quoted;
+        }
+
+        if ($replyToBot) {
+            return $text;
+        }
+
+        return $this->withQuotedContext($message, $text);
+    }
+
+    /**
+     * When the member replied while quoting another message, fold that quote into the query.
+     * Never fold admin escalation/share cards.
+     * Never fold our own prior answer when the member is following up.
+     */
+    private function withQuotedContext(InboundMessage $message, string $query): string
+    {
+        $query = trim($query);
+        if ($this->shouldSkipQuotedFold($message, $query)) {
+            return $query;
+        }
+
+        $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
+        if ($quoted === '') {
+            return $query;
+        }
+
+        $lower = mb_strtolower($quoted);
+        if (str_contains($lower, 'request id:')
+            && (str_contains($lower, 'needs a quick hand')
+                || str_contains($lower, 'member shared a note')
+                || str_contains($lower, 'member requested a feature'))) {
+            return $query;
+        }
+
+        // Already the quoted ask (from textForRouting) or already wrapped.
+        if ($query === $quoted || str_starts_with($query, 'Regarding this ')
+            || str_starts_with($query, 'The member is following up')) {
+            return $query;
+        }
+
+        $quoted = mb_substr($quoted, 0, 800);
+        $who = trim((string) ($message->raw['quoted_from'] ?? ''));
+        $label = $who !== '' ? "earlier message from {$who}" : 'earlier message';
+
+        if ($query === '' || $this->isBareBotMention($query)) {
+            return "Regarding this {$label}:\n\"{$quoted}\"";
+        }
+
+        return "Regarding this {$label}:\n\"{$quoted}\"\n\nCurrent message:\n{$query}";
+    }
+
+    private function shouldSkipQuotedFold(InboundMessage $message, string $query): bool
+    {
+        $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if (! $replyToBot) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function isBareBotMention(string $text): bool
+    {
+        $stripped = trim(preg_replace(
+            '/^(?:hey|hi|hello)?\s*[,:]?\s*@?zak(?:[_\s-]?bot)?\b[,:]?\s*/iu',
+            '',
+            trim($text),
+        ) ?? '');
+
+        return $stripped === '';
+    }
+
+    private function handlePersonalHelp(
+        InboundMessage $message,
+        ?Community $community,
+        ?string $inboundText = null,
+    ): string {
+        $text = trim((string) ($inboundText ?? $message->text));
+        $mode = $this->chatType($message) === 'group' ? 'take_private' : 'personal_help';
+        $reply = $this->modelAssistedReply($text, $mode, $community, $message);
+        $this->rememberTurn($message, 'user', $message->text);
+        $this->rememberTurn($message, 'assistant', $reply);
+
+        return $reply;
+    }
+
+    private function modelAssistedReply(
+        string $text,
+        string $mode,
+        ?Community $community,
+        ?InboundMessage $message = null,
+    ): string {
+        $chatType = $message !== null ? $this->chatType($message) : 'private';
+        if ($mode === 'social' && $this->conversation->isChannelPresenceAsk($text)) {
+            return $this->conversation->channelPresenceReply('plain', 'telegram', $chatType);
+        }
+
         $ctx = $this->communityAiContext($community);
+        $override = $message?->raw['target_language'] ?? null;
+        $targetLanguage = is_string($override) && trim($override) !== '' && strtolower(trim($override)) !== 'auto'
+            ? trim($override)
+            : null;
         $reply = $this->aiClient->conversationalReply(
             message: $text,
             mode: $mode,
             communityName: $ctx['name'],
             communityScope: $ctx['scope'],
+            targetLanguage: $targetLanguage,
         );
 
         if ($reply !== '') {
+            if (
+                $mode === 'out_of_scope'
+                && $this->conversation->shouldAppendEnglishAskHint($reply, $text)
+            ) {
+                return rtrim($reply)."\n\n".$this->conversation->askAdminHint();
+            }
+
+            if ($mode === 'take_private') {
+                return $this->conversation->withPrivateChatLink($reply, 'plain', 'telegram');
+            }
+
             return $reply;
+        }
+
+        if ($mode === 'take_private') {
+            return $this->conversation->takePrivateFallbackReply('plain', 'telegram');
         }
 
         if ($mode === 'out_of_scope') {
             return $this->conversation->outOfScopeReply($community?->name, $community?->description);
         }
 
-        return $this->conversation->conversationalReply($text);
+        if ($mode === 'personal_help') {
+            return $this->conversation->personalHelpFallbackReply();
+        }
+
+        return $this->conversation->conversationalReply($text, 'plain', 'telegram', $chatType);
     }
 
     private function handleJoin(InboundMessage $message): string
@@ -240,8 +682,8 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         ]);
 
         $reply = "Welcome! You're linked now. Ask me anything about this community whenever you're ready.";
-        $this->conversation->remember($this->channelName(), $message->externalUserId, 'user', $message->text);
-        $this->conversation->remember($this->channelName(), $message->externalUserId, 'assistant', $reply);
+        $this->rememberTurn($message, 'user', $message->text);
+        $this->rememberTurn($message, 'assistant', $reply);
 
         return $reply;
     }
@@ -266,7 +708,8 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         }
 
         if (! $user->belongsToCommunity($communityId)) {
-            return "It looks like you're not a member of that community in Zak yet. An admin can add you.";
+            return "It looks like you're not a member of that community in "
+                .$this->conversation->botDisplayName().' yet. An admin can add you.';
         }
 
         $community = Community::query()->find($communityId);
@@ -280,8 +723,11 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             : null;
 
         $question = trim((string) ($effectiveQuery ?? $message->text));
+        if (! $this->shouldSkipQuotedFold($message, $question)) {
+            $question = $this->withQuotedContext($message, $question);
+        }
         if ($question === '') {
-            $question = $message->text;
+            $question = trim($message->text);
         }
 
         $allowedLink = ['none', 'recordings', 'meetings', 'assets'];
@@ -289,7 +735,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             $linkMode = 'none';
         }
 
-        $priorTurns = $this->conversation->turns($this->channelName(), $message->externalUserId);
+        $priorTurns = $this->priorTurns($message);
         $query = $this->conversation->buildKnowledgeQuery($question, $priorTurns);
 
         $result = $this->aiClient->askGroundedQuestion(
@@ -311,10 +757,15 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             && $this->conversation->shouldEscalateKnowledgeGap($question, $community->description);
 
         if ($softHandoff && ! $shouldEscalate) {
+            $mode = ($this->conversation->isPurelySocial($question)
+                || $this->conversation->isBotDirectedChat($question))
+                ? 'social'
+                : 'out_of_scope';
             $reply = $this->modelAssistedReply(
                 $question,
-                'out_of_scope',
+                $mode,
                 $community,
+                $message,
             );
         }
 
@@ -328,6 +779,9 @@ final class TelegramSpikeAdapter implements ChannelAdapter
                 'question' => $question,
                 'from' => $message->externalUserId,
                 'from_name' => $fromName !== '' ? $fromName : null,
+                'chat_type' => $this->chatType($message),
+                'chat_id' => trim((string) ($message->raw['chat_id'] ?? '')) ?: null,
+                'message_id' => $message->messageId,
                 'community_id' => $communityId,
                 'community_name' => $community->name,
                 'reason' => (string) ($result->escalationReason ?? 'insufficient_evidence'),
@@ -335,8 +789,12 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             ]);
         }
 
-        $this->conversation->remember($this->channelName(), $message->externalUserId, 'user', $message->text);
-        $this->conversation->remember($this->channelName(), $message->externalUserId, 'assistant', $reply);
+        $this->rememberTurn(
+            $message,
+            'user',
+            $this->conversation->userTurnTextToRemember($message->text, $question),
+        );
+        $this->rememberTurn($message, 'assistant', $reply);
 
         return $reply;
     }
@@ -365,11 +823,13 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
             if ($isPrivate) {
                 return "I don't have a solid answer for that yet.\n\n"
-                    ."I've passed it along, and I'll come back once I have one.";
+                    ."I've passed it along, and I'll follow up once I have one. "
+                    ."No need to keep checking or asking again.";
             }
 
             return "I don't have a solid answer for that yet.\n\n"
-                ."I've passed it along, and we'll come back once we have one.";
+                ."I've passed it along, and we'll follow up once we have one. "
+                ."No need to keep checking or asking again.";
         }
 
         $answer = $this->utf8Safe($result->answer);
@@ -392,17 +852,16 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         if ($answer === '') {
             if ($isPrivate) {
                 return "I don't have a solid answer for that yet.\n\n"
-                    ."I've passed it along, and I'll come back once I have one.";
+                    ."I've passed it along, and I'll follow up once I have one. "
+                    ."No need to keep checking or asking again.";
             }
 
             return "I don't have a solid answer for that yet.\n\n"
-                ."I've passed it along, and we'll come back once we have one.";
+                ."I've passed it along, and we'll follow up once we have one. "
+                ."No need to keep checking or asking again.";
         }
 
-        if ($result->citations !== []) {
-            $source = $this->friendlySourceName($result->citations[0]->sourceName);
-            $answer .= "\n\n(From {$source}.)";
-        }
+        $answer = $this->conversation->stripInternalEvidenceTags($answer);
 
         return $this->applyTelegramFormatting($answer);
     }
@@ -1258,12 +1717,13 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         }
 
         if (! $user->belongsToCommunity($communityId)) {
-            return "It looks like you're not a member of that community in Zak yet. An admin can add you.";
+            return "It looks like you're not a member of that community in "
+                .$this->conversation->botDisplayName().' yet. An admin can add you.';
         }
 
         $community = Community::query()->findOrFail($communityId);
         $body = trim($message->text);
-        foreach (['/SHARE', 'SHARE', '/EXPORT', 'EXPORT'] as $prefix) {
+        foreach (['/SHARE', 'SHARE'] as $prefix) {
             if (str_starts_with(strtoupper($body), $prefix)) {
                 $body = trim(substr($body, strlen($prefix)));
                 break;
@@ -1271,9 +1731,10 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         }
 
         if ($body === '') {
-            return "Please include the note, like:\n"
+            return "Share something the community should know, like:\n"
                 ."/share Water off tomorrow morning\n\n"
-                ."An admin will review it before it joins the knowledge base.";
+                .'An admin will review it before '
+                .$this->conversation->botDisplayName().' can use it in answers.';
         }
 
         $source = $this->lifecycle->import($user, [
@@ -1289,10 +1750,155 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             ],
         ]);
 
-        Log::info('telegram_spike.share_draft', ['knowledge_id' => $source->id]);
+        $this->lifecycle->submitForReview($user, $source);
 
-        return "Thank you. I've saved that as a draft for an admin to review. "
-            ."It won't appear in answers until someone publishes it.";
+        $fromName = trim((string) ($message->raw['from_name'] ?? ''));
+        if ($fromName === '' && isset($message->raw['from_username'])) {
+            $fromName = '@'.ltrim((string) $message->raw['from_username'], '@');
+        }
+
+        $notify = $this->escalationNotifier->notifyShareReview(
+            channel: $this->channelName(),
+            from: $message->externalUserId,
+            content: $body,
+            knowledgeSourceId: (string) $source->id,
+            communityId: $communityId,
+            communityName: $community->name,
+            fromName: $fromName !== '' ? $fromName : null,
+        );
+
+        Log::info('telegram_spike.share_draft', [
+            'knowledge_id' => $source->id,
+            'notified' => $notify['notified'],
+        ]);
+
+        if ($notify['notified']) {
+            return $this->conversation->shareQueuedReply(true);
+        }
+
+        return $this->conversation->shareQueuedReply(false);
+    }
+
+    private function handleFeature(InboundMessage $message): string
+    {
+        $community = $this->resolveLinkedCommunity($message);
+        if ($community === null) {
+            return 'Please link a community first with /join, then try /feature again.';
+        }
+
+        $body = trim($message->text);
+        foreach (['/FEATURE', 'FEATURE'] as $prefix) {
+            if (str_starts_with(strtoupper($body), $prefix)) {
+                $body = trim(substr($body, strlen($prefix)));
+                break;
+            }
+        }
+
+        if ($body === '') {
+            return "Suggest a product improvement, like:\n"
+                ."/feature Add reminders for upcoming sessions\n\n"
+                .'An admin will review it, and I\'ll reply here when they decide.';
+        }
+
+        $fromName = trim((string) ($message->raw['from_name'] ?? ''));
+        if ($fromName === '' && isset($message->raw['from_username'])) {
+            $fromName = '@'.ltrim((string) $message->raw['from_username'], '@');
+        }
+
+        $notify = $this->escalationNotifier->notifyFeatureRequest(
+            channel: $this->channelName(),
+            from: $message->externalUserId,
+            content: $body,
+            communityId: $community->id,
+            communityName: $community->name,
+            fromName: $fromName !== '' ? $fromName : null,
+            chatType: strtolower(trim((string) ($message->raw['chat_type'] ?? 'private'))),
+            chatId: trim((string) ($message->raw['chat_id'] ?? '')) ?: null,
+            messageId: $message->messageId,
+        );
+
+        Log::info('telegram_spike.feature_request', [
+            'ref' => $notify['ref'] ?? null,
+            'notified' => $notify['notified'],
+        ]);
+
+        return $this->conversation->featureQueuedReply((bool) ($notify['notified'] ?? false));
+    }
+
+    private function tryAdminAutoIndex(InboundMessage $message): ?string
+    {
+        $user = $this->resolveUser();
+        $community = $this->resolveLinkedCommunity($message);
+        if ($user === null || $community === null) {
+            return null;
+        }
+
+        $result = $this->adminIndexer->maybeIndex(
+            $this->channelName(),
+            $message->text,
+            $user,
+            $community,
+            $message->externalUserId,
+        );
+
+        return ($result['indexed'] ?? false) ? ($result['reply'] ?? null) : null;
+    }
+
+    /**
+     * Admin-only ingest (not the same as member /share).
+     * /import is the command; /export remains a legacy alias.
+     */
+    private function handleAdminImport(InboundMessage $message): string
+    {
+        $access = app(ChannelCommandAccess::class);
+        if (! $access->isAdmin($this->channelName(), $message->externalUserId)) {
+            return $access->adminOnlyDenial();
+        }
+
+        $user = $this->resolveUser();
+        $link = Cache::get($this->linkCacheKey($message->externalUserId));
+        $communityId = is_array($link)
+            ? (string) ($link['community_id'] ?? '')
+            : (string) config('telegram_spike.default_community_id');
+
+        if ($user === null || $communityId === '') {
+            return 'Link a community with /join before /import.';
+        }
+
+        if (! $user->belongsToCommunity($communityId)) {
+            return 'You are not a member of that community in '.$this->conversation->botDisplayName().'.';
+        }
+
+        $community = Community::query()->findOrFail($communityId);
+        $body = trim($message->text);
+        foreach (['/IMPORT', 'IMPORT', '/EXPORT', 'EXPORT'] as $prefix) {
+            if (str_starts_with(strtoupper($body), $prefix)) {
+                $body = trim(substr($body, strlen($prefix)));
+                break;
+            }
+        }
+
+        if ($body === '') {
+            return 'Usage: /import <pasted chat export text to ingest as a knowledge draft>';
+        }
+
+        $source = $this->lifecycle->import($user, [
+            'tenant_id' => $community->tenant_id,
+            'community_id' => $communityId,
+            'name' => 'Telegram admin import',
+            'uri' => 'telegram-spike://import/'.Str::ulid(),
+            'source_type' => 'telegram',
+            'content' => $body,
+            'metadata' => [
+                'channel' => 'telegram_spike',
+                'from' => $message->externalUserId,
+                'origin' => 'admin_import',
+            ],
+        ]);
+
+        Log::info('telegram_spike.admin_import_draft', ['knowledge_id' => $source->id]);
+
+        return 'Saved as draft knowledge '.$source->id.' (submit-review → publish in Laravel).';
     }
 
     private function resolveUser(): ?User

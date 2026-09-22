@@ -109,20 +109,31 @@ class AiServiceClient
     }
 
     /**
-     * Warm social or out-of-scope reply (no retrieval). Empty string on hard failure.
+     * Warm social / out-of-scope / personal-help / take-private reply (no retrieval).
+     * Empty string on hard failure.
      */
     public function conversationalReply(
         string $message,
         string $mode = 'social',
         ?string $communityName = null,
         ?string $communityScope = null,
+        ?string $targetLanguage = null,
     ): string {
+        $allowedModes = ['social', 'out_of_scope', 'take_private', 'personal_help'];
+        if (! in_array($mode, $allowedModes, true)) {
+            $mode = 'social';
+        }
+
         $payloadArray = [
             'message' => trim($message),
-            'mode' => $mode === 'out_of_scope' ? 'out_of_scope' : 'social',
+            'mode' => $mode,
             'community_name' => $communityName,
             'community_scope' => $communityScope,
         ];
+        $lang = is_string($targetLanguage) ? trim($targetLanguage) : '';
+        if ($lang !== '' && strtolower($lang) !== 'auto') {
+            $payloadArray['target_language'] = $lang;
+        }
 
         $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $headers = $this->generateAuthHeaders($rawBody);
@@ -159,17 +170,27 @@ class AiServiceClient
     /**
      * Classify an ambiguous chat turn. Null on hard failure (caller keeps heuristics).
      *
-     * @return array{intent: 'conversational'|'knowledge'|'out_of_scope'|'clarify', link_mode: 'none'|'recordings'|'meetings'|'assets'}|null
+     * @return array{intent: 'conversational'|'knowledge'|'out_of_scope'|'clarify'|'personal_help', link_mode: 'none'|'recordings'|'meetings'|'assets', follow_up: bool}|null
      */
     public function classifyConversationIntent(
         string $message,
         ?string $communityName = null,
         ?string $communityScope = null,
+        ?string $priorQuestion = null,
+        ?string $priorAnswerExcerpt = null,
+        bool $replyToBot = false,
     ): ?array {
         $payloadArray = [
             'message' => trim($message),
             'community_name' => $communityName,
             'community_scope' => $communityScope,
+            'prior_question' => $priorQuestion !== null && trim($priorQuestion) !== ''
+                ? mb_substr(trim($priorQuestion), 0, 1000)
+                : null,
+            'prior_answer_excerpt' => $priorAnswerExcerpt !== null && trim($priorAnswerExcerpt) !== ''
+                ? mb_substr(trim($priorAnswerExcerpt), 0, 800)
+                : null,
+            'reply_to_bot' => $replyToBot,
         ];
 
         $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
@@ -194,7 +215,8 @@ class AiServiceClient
 
             $intent = strtolower(trim((string) ($response->json('intent') ?? '')));
             $linkMode = strtolower(trim((string) ($response->json('link_mode') ?? 'none')));
-            $allowedIntent = ['conversational', 'knowledge', 'out_of_scope', 'clarify'];
+            $followUp = filter_var($response->json('follow_up') ?? false, FILTER_VALIDATE_BOOLEAN);
+            $allowedIntent = ['conversational', 'knowledge', 'out_of_scope', 'clarify', 'personal_help'];
             $allowedLink = ['none', 'recordings', 'meetings', 'assets'];
 
             if (! in_array($intent, $allowedIntent, true)) {
@@ -205,13 +227,20 @@ class AiServiceClient
                 $linkMode = 'none';
             }
 
+            if ($followUp) {
+                $intent = 'knowledge';
+                $linkMode = 'none';
+            }
+
             if ($intent !== 'knowledge') {
                 $linkMode = 'none';
+                $followUp = false;
             }
 
             return [
                 'intent' => $intent,
                 'link_mode' => $linkMode,
+                'follow_up' => $followUp,
             ];
         } catch (Throwable $e) {
             Log::warning('AI Service /conversation/classify unreachable', [
@@ -222,6 +251,132 @@ class AiServiceClient
         }
     }
 
+    /**
+     * Whether an admin message should be published into community knowledge.
+     * Null on hard failure (caller skips indexing).
+     */
+    public function isAdminMessageIndexable(
+        string $message,
+        ?string $communityName = null,
+        ?string $communityScope = null,
+    ): ?bool {
+        $payloadArray = [
+            'message' => trim($message),
+            'community_name' => $communityName,
+            'community_scope' => $communityScope,
+        ];
+
+        $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        try {
+            $response = $this->http
+                ->timeout(min($this->timeout, 5.0))
+                ->connectTimeout($this->connectTimeout)
+                ->withHeaders($headers)
+                ->withBody($rawBody, 'application/json')
+                ->post("{$this->baseUrl}/conversation/indexable");
+
+            if ($response->failed()) {
+                Log::warning('AI Service /conversation/indexable failed', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return null;
+            }
+
+            $raw = $response->json('indexable');
+            if (is_bool($raw)) {
+                return $raw;
+            }
+            if (is_string($raw)) {
+                $v = strtolower(trim($raw));
+                if (in_array($v, ['true', 'yes', '1'], true)) {
+                    return true;
+                }
+                if (in_array($v, ['false', 'no', '0'], true)) {
+                    return false;
+                }
+            }
+
+            return null;
+        } catch (Throwable $e) {
+            Log::warning('AI Service /conversation/indexable unreachable', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Whether a group mention/reply is actually directed at Zak.
+     * Null on hard failure (caller applies a conservative default).
+     */
+    public function isMessageAddressedToBot(
+        string $message,
+        bool $replyToBot = false,
+        bool $botMentioned = false,
+        ?string $quotedExcerpt = null,
+    ): ?bool {
+        $payloadArray = [
+            'message' => trim($message),
+            'reply_to_bot' => $replyToBot,
+            'bot_mentioned' => $botMentioned,
+            'quoted_excerpt' => $quotedExcerpt !== null ? mb_substr(trim($quotedExcerpt), 0, 400) : null,
+        ];
+
+        $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        try {
+            $response = $this->http
+                ->timeout(min($this->timeout, 5.0))
+                ->connectTimeout($this->connectTimeout)
+                ->withHeaders($headers)
+                ->withBody($rawBody, 'application/json')
+                ->post("{$this->baseUrl}/conversation/addressed");
+
+            if ($response->failed()) {
+                Log::warning('AI Service /conversation/addressed failed', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return null;
+            }
+
+            $raw = $response->json('addressed');
+            if (is_bool($raw)) {
+                return $raw;
+            }
+            if (is_string($raw)) {
+                $v = strtolower(trim($raw));
+                if (in_array($v, ['true', 'yes', '1'], true)) {
+                    return true;
+                }
+                if (in_array($v, ['false', 'no', '0'], true)) {
+                    return false;
+                }
+            }
+
+            return null;
+        } catch (Throwable $e) {
+            Log::warning('AI Service /conversation/addressed unreachable', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Soft byte budget per /ingestion/sync call. Large WhatsApp exports / API
+     * bodies time out when sent as one payload; callers always go through here.
+     */
+    public const INGEST_CHUNK_MAX_BYTES = 28000;
+
     public function syncDocument(
         string $tenantId,
         string $communityId,
@@ -231,6 +386,118 @@ class AiServiceClient
         string $content,
         string $authorityTier = 'community_discussion',
         array $metadata = []
+    ): array {
+        $parts = self::chunkTextForIngest($content, self::INGEST_CHUNK_MAX_BYTES);
+        if ($parts === []) {
+            $parts = [''];
+        }
+
+        if (count($parts) === 1) {
+            return $this->postSyncDocument(
+                $tenantId,
+                $communityId,
+                $uri,
+                $name,
+                $sourceType,
+                $parts[0],
+                $authorityTier,
+                $metadata,
+            );
+        }
+
+        $partResponses = [];
+        $total = count($parts);
+        foreach ($parts as $i => $part) {
+            $n = $i + 1;
+            $partResponses[] = $this->postSyncDocument(
+                $tenantId,
+                $communityId,
+                rtrim($uri, '/').'/part-'.$n,
+                $name.' (part '.$n.'/'.$total.')',
+                $sourceType,
+                $part,
+                $authorityTier,
+                array_merge($metadata, [
+                    'ingest_batch_uri' => $uri,
+                    'ingest_part' => $n,
+                    'ingest_parts' => $total,
+                ]),
+            );
+        }
+
+        $first = $partResponses[0] ?? [];
+        $first['ingest_parts'] = array_values(array_filter(array_map(
+            static fn (array $r): ?string => isset($r['source_id'])
+                ? (string) $r['source_id']
+                : (isset($r['data']['source_id']) ? (string) $r['data']['source_id'] : null),
+            $partResponses,
+        )));
+        $first['ingest_part_count'] = $total;
+
+        Log::info('ai_service.sync_document_chunked', [
+            'uri' => $uri,
+            'parts' => $total,
+            'bytes' => strlen($content),
+        ]);
+
+        return $first;
+    }
+
+    /**
+     * Split large text on line boundaries for ingest (shared by API + channel export).
+     *
+     * @return list<string>
+     */
+    public static function chunkTextForIngest(string $content, int $maxBytes = self::INGEST_CHUNK_MAX_BYTES): array
+    {
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+        if ($content === '') {
+            return [];
+        }
+        if ($maxBytes < 1024) {
+            $maxBytes = 1024;
+        }
+        if (strlen($content) <= $maxBytes) {
+            return [$content];
+        }
+
+        $lines = preg_split("/\r\n|\n|\r/", $content) ?: [$content];
+        $chunks = [];
+        $buf = '';
+        foreach ($lines as $line) {
+            $candidate = $buf === '' ? $line : $buf."\n".$line;
+            if (strlen($candidate) > $maxBytes && $buf !== '') {
+                $chunks[] = $buf;
+                $buf = $line;
+                // Oversized single line: hard-split.
+                while (strlen($buf) > $maxBytes) {
+                    $chunks[] = substr($buf, 0, $maxBytes);
+                    $buf = substr($buf, $maxBytes);
+                }
+            } else {
+                $buf = $candidate;
+            }
+        }
+        if ($buf !== '') {
+            $chunks[] = $buf;
+        }
+
+        return $chunks;
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    private function postSyncDocument(
+        string $tenantId,
+        string $communityId,
+        string $uri,
+        string $name,
+        string $sourceType,
+        string $content,
+        string $authorityTier,
+        array $metadata,
     ): array {
         $payloadArray = [
             'tenant_id' => $tenantId,
@@ -248,17 +515,20 @@ class AiServiceClient
         $headers = $this->generateAuthHeaders($rawBody);
 
         $response = $this->http
-            ->timeout(60.0)
+            ->timeout(max($this->timeout, 300.0))
             ->connectTimeout($this->connectTimeout)
             ->withHeaders($headers)
             ->withBody($rawBody, 'application/json')
             ->post("{$this->baseUrl}/ingestion/sync");
 
         if ($response->failed()) {
-            throw new AiServiceException("Ingestion failed: " . $response->body());
+            throw new AiServiceException('Ingestion failed: '.$response->body());
         }
 
-        return $response->json();
+        /** @var array<string, mixed> $json */
+        $json = $response->json() ?? [];
+
+        return $json;
     }
 
     /**

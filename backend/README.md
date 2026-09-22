@@ -150,3 +150,11 @@ Request flow: Route → Form Request → Policy/tenant scope → Action/Service 
 ## WhatsApp Web spike (DEV ONLY)
 
 Unofficial WA Web automation lives in [`../infrastructure/whatsapp-web-spike`](../infrastructure/whatsapp-web-spike). Enable with `WHATSAPP_WEB_SPIKE=true` + `WHATSAPP_WEB_SPIKE_SECRET` in `.env`. Not wired into Sail/prod Compose. See Phase 4W in the implementation plan.
+
+## WhatsApp via Zavu (official)
+
+BSP on Meta Cloud API. Enable with `WHATSAPP_ZAVU=true` plus API key + webhook secret. Point Zavu's sender webhook at:
+
+`POST /api/v1/webhooks/whatsapp-zavu`
+
+Mint JOIN tokens: `POST /api/v1/internal/whatsapp-zavu/join-token` with `X-Zavu-Admin-Secret`. WhatsApp Web and Telegram spikes stay independently env-gated.

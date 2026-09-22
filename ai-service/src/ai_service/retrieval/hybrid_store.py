@@ -198,9 +198,9 @@ async def fetch_url_bearing_chunks(
         meta = row.metadata_ or {}
         authority_tier_raw = meta.get("authority_tier", AuthorityTier.COMMUNITY_DISCUSSION.value)
         locator = meta.get("locator", {})
-        # Stable mid-band score so these survive into synthesis without drowning
-        # the primary hybrid hits.
-        score = 0.55
+        # Stable score at/above POSSIBLE floor so URL recall survives soft
+        # cross-language hybrid ranks (Arabic/French asks vs English chunks).
+        score = 0.7
 
         candidates.append(
             CandidateChunk(

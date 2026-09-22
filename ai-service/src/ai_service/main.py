@@ -1,4 +1,11 @@
-﻿from fastapi import FastAPI
+﻿import asyncio
+import sys
+
+# psycopg async requires SelectorEventLoop on Windows (not the default Proactor).
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+from fastapi import FastAPI
 from ai_service.api.routes import api_router
 from ai_service.core.config import settings
 from ai_service.core.logging import setup_logging

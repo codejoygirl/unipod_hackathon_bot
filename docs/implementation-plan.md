@@ -94,6 +94,20 @@ Maps to: PRD §40 Priority 4. Owner: Member 3.
 
 **Exit criteria:** Same permission rules for web, WhatsApp, and Slack questions.
 
+### Phase 4Z — WhatsApp via Zavu (BSP)
+
+Official WhatsApp Business Platform through [Zavu](https://www.zavu.dev). Laravel remains the agent; Zavu is transport only.
+
+| Slice | Deliverable | Exit check |
+| --- | --- | --- |
+| 4Z.0 | `WHATSAPP_ZAVU` flag (default off) + config | 404 when disabled |
+| 4Z.1 | Webhook `POST /api/v1/webhooks/whatsapp-zavu` + `X-Zavu-Signature` | Invalid sig → 401 |
+| 4Z.2 | Inbound → `WhatsAppZavuAdapter` → AI ask | Cited reply sent via Zavu API |
+| 4Z.3 | Signed `JOIN-{token}` + optional `wa.me` link | Identity resolves to community |
+| 4Z.4 | SHARE/EXPORT → knowledge draft | Draft in review queue |
+
+Spikes (`WHATSAPP_WEB_SPIKE`, `TELEGRAM_SPIKE`) remain available and independently env-gated for hackathon/dev.
+
 ---
 
 ## Phase 4W — WhatsApp Web automation spike (DEV / hackathon ONLY)
@@ -113,6 +127,18 @@ Parallel to Phase 4 Cloud API. **Never** the sole production channel. Unofficial
 Layout: `infrastructure/whatsapp-web-spike/` (sidecar) → `POST /api/v1/internal/whatsapp-web-spike/*` → `WhatsAppWebSpikeAdapter`. See [spike README](../infrastructure/whatsapp-web-spike/README.md).
 
 **Exit criteria:** Linked session → private inbound → Laravel ask → cited reply → optional EXPORT draft, with flag off by default and no production compose wiring.
+
+### 4W.7+ — Group listen + admin access (env)
+
+| Slice | Deliverable | Exit check |
+| --- | --- | --- |
+| 4W.7 | `ChannelListenGate` + `ChannelCommandAccess` | Unit tests for private/group/mention/command |
+| 4W.8 | Env: `WHATSAPP_WEB_SPIKE_ADMIN_PHONES`, `BOT_ALIASES`, `GROUP_LISTEN` | Multi-admin + multi-alias |
+| 4W.9 | `/share` member vs `/export` admin-only; drop EXPORT≡SHARE | Non-admin `/export` denied |
+| 4W.10 | Admin action idempotency (`resolved_at` / `resolved_by`) | Second `/approve` → polite already-handled |
+| 4W.11 | Sidecar `chat_type` / group author; Laravel silence when gated | Group chatter → null reply |
+
+Telegram stays always-listen. Zavu out of scope for this slice.
 
 ---
 

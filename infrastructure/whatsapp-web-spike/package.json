@@ -5,7 +5,9 @@
   "description": "DEV-ONLY unofficial WhatsApp Web session bridge for Zak (whatsapp-web.js). Not for production.",
   "scripts": {
     "start": "node src/index.js",
-    "qr": "node src/index.js"
+    "qr": "node src/index.js",
+    "kill-chrome": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/kill-spike-chrome.ps1",
+    "fresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fresh.ps1"
   },
   "engines": {
     "node": ">=20"

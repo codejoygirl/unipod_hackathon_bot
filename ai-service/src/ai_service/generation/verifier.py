@@ -69,9 +69,14 @@ class AnswerVerifier:
 
         Keep the answer when at least one cited evidence ID is grounded.
         Unknown IDs are hard failures. Weak extra IDs are dropped, not fatal.
+
+        For paraphrases (e.g. who-is answers), also accept a cited chunk when
+        distinctive answer tokens / speaker names clearly appear in that chunk —
+        whole-answer token overlap alone is too brittle for chat windows.
         """
         verified_citations: list[EnrichedCitation] = []
         hallucinated = False
+        cited_valid: list[EvidenceChunk] = []
 
         for eid in evidence_ids_used:
             if eid not in evidence_map:
@@ -79,10 +84,12 @@ class AnswerVerifier:
                 continue
 
             chunk = evidence_map[eid]
+            cited_valid.append(chunk)
             quote, overlap = cls._extract_best_matching_quote(
                 claim_text=answer,
                 chunk_content=chunk.content,
             )
+            overlap = max(overlap, cls._entity_grounding_score(answer, chunk.content))
 
             if overlap < cls.TOKEN_OVERLAP_THRESHOLD:
                 continue
@@ -110,10 +117,56 @@ class AnswerVerifier:
         if hallucinated:
             return "", [], False
 
+        # Collective fallback: valid IDs + most answer content tokens appear
+        # across the cited windows (typical for short who-is paraphrases).
+        if (answer or "").strip() and not verified_citations and cited_valid:
+            answer_tokens = cls._claim_tokens(answer)
+            if answer_tokens:
+                union: set[str] = set()
+                for chunk in cited_valid:
+                    union |= {t for t in re.findall(r"\w+", (chunk.content or "").lower()) if len(t) > 2}
+                recall = len(answer_tokens.intersection(union)) / len(answer_tokens)
+                if recall >= 0.25:
+                    for chunk in cited_valid:
+                        locator_data = (
+                            chunk.locator.model_dump(exclude_none=True) if chunk.locator else {}
+                        )
+                        body = (chunk.content or "").strip()
+                        snippet = body[:2500] + ("..." if len(body) > 2500 else "")
+                        verified_citations.append(
+                            EnrichedCitation(
+                                evidence_id=chunk.evidence_id,
+                                source_name=chunk.source_name,
+                                source_uri=chunk.source_uri,
+                                media_type=chunk.media_type,
+                                evidence_snippet=snippet or (chunk.content or "")[:200],
+                                locator=locator_data,
+                                relevance_score=chunk.retrieval_score,
+                            )
+                        )
+
         if (answer or "").strip() and not verified_citations:
             return "", [], False
 
         return answer, verified_citations, True
+
+    @classmethod
+    def _entity_grounding_score(cls, answer: str, chunk_content: str) -> float:
+        """Boost when the answer names a person/entity that appears as a speaker in the chunk."""
+        content = chunk_content or ""
+        content_l = content.lower()
+        # Capitalized name-like tokens from the answer (Joy, Diane, …).
+        names = re.findall(r"\b([A-Z][A-Za-z'’\-À-ÖØ-öø-ÿ]{1,30})\b", answer or "")
+        # Also plain tokens that look like speaker labels in chat windows.
+        for name in names:
+            if name.lower() in {"i", "the", "a", "an", "here", "there", "this", "that"}:
+                continue
+            # Speaker line: "] Joy:" or "Joy:"
+            if re.search(rf"\]\s*{re.escape(name)}\s*:", content, flags=re.I):
+                return 1.0
+            if name.lower() in content_l and len(name) >= 3:
+                return 0.35
+        return 0.0
 
     @classmethod
     def resolve_state(
@@ -145,7 +198,9 @@ class AnswerVerifier:
         # "no grounded reply", not POSSIBLE.
         no_usable_answer = answer_empty or not verified_citations or not all_citations_valid
 
-        if has_no_evidence or is_below_floor or no_usable_answer:
+        # Soft cross-language scores (e.g. Arabic ask vs English chunks) must not wipe a
+        # citation-verified answer. Floor only applies when there is no usable grounded reply.
+        if has_no_evidence or no_usable_answer:
             reason = (
                 f"No authorized evidence found meeting confidence threshold "
                 f"{cls.POSSIBLE_CONFIDENCE_THRESHOLD}."
