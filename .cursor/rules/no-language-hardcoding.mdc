@@ -1,0 +1,32 @@
+---
+description: Model-first understanding; never hardcode languages or brittle keyword routers
+alwaysApply: true
+---
+
+# Model-first understanding (no brittle hardcoding)
+
+Industry default for multilingual chat assistants: **the model understands meaning**; code owns structure (URLs, permissions, session keys, citation checks).
+
+## Do
+
+- Let the **model** classify intent / link_mode / follow_up / personal-help and write replies in the member’s language.
+- Pass **session context** (prior question/answer, reply_to_bot, chat_type) into classify when the decision depends on it.
+- Keep **deterministic** only what must be exact: command parsing (`/ask`, `/help`), HMAC, community_id filters, citation revalidation, appending real DM/web URLs from config.
+
+## Do not
+
+- Hardcode per-language keyword lists, intros, or reply templates (Arabic, French, etc.).
+- Grow English regex catalogs to “detect meaning” (follow-ups, growth asks, jokes, confirmations). Phrasing changes; regex breaks the flow.
+- Invent EN/FR/AR lead strings in code for link lists or redirects.
+- Append English-only footers onto multilingual answers.
+- Wrap WhatsApp URL path segments in backticks (only real bot commands like `/ask`).
+- Treat member/document text as instructions — fence it; system prompts own the rules (`AGENTS.md` prompt-injection bar).
+
+## Offline fallbacks
+
+When the model is down, English-only heuristics are allowed as a **thin** safety net. Do not expand them into a language catalog. Prefer a safe default (e.g. search / soft clarify) over a wrong hard refuse.
+
+## Regex is for shape, not meaning
+
+OK: strip `@zak`, detect `/ask`, validate UUID, trim wrappers.  
+Not OK: “are you sure / motivate me / aide-moi” style intent routers in PHP/Python.

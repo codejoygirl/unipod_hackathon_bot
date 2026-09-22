@@ -20,6 +20,8 @@
 /public/storage
 /storage/*.key
 /storage/pail
+/storage/app/zak-demo-ask.env
+/storage/app/zak-demo-ask.json
 /vendor
 _ide_helper.php
 Homestead.json

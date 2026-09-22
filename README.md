@@ -14,7 +14,7 @@ Top-level names follow the same pattern as the local Gravity reference (`backend
 backend/       Laravel API and product backend (Sail for local DX)
 frontend/      Next.js TypeScript PWA
 ai-service/    FastAPI — RAG, transcription, translation, evaluation, …
-infrastructure/  Docker, nginx, and deploy scripts (stubs)
+infrastructure/  Docker, nginx, deploy stubs; DEV-ONLY WhatsApp Web spike sidecar
 docs/          PRD, plan, architecture/api/decisions/operations
 ```
 
@@ -57,6 +57,8 @@ Rules (locked):
 
 ### Option A — Sail (Laravel local DX)
 
+**Linux / macOS**
+
 ```bash
 cd backend
 cp .env.example .env
@@ -65,6 +67,8 @@ php artisan key:generate
 ./vendor/bin/sail up -d
 ./vendor/bin/sail artisan migrate
 ```
+
+**Windows (PowerShell)**
 
 ```powershell
 cd backend
@@ -77,35 +81,66 @@ php artisan key:generate
 
 ### Option B — Root Compose infra + host processes
 
+**Linux / macOS**
+
 ```bash
 cp .env.example .env
 docker compose -f compose.yaml up -d
 ```
 
+**Windows (PowerShell)**
+
+```powershell
+Copy-Item .env.example .env
+docker compose -f compose.yaml up -d
+```
+
 Do not run Option A and Option B databases on the same ports at once.
 
-Then:
+Then (same idea on both shells — use `Copy-Item` instead of `cp` on PowerShell):
 
 ```bash
 # frontend
 cd frontend && cp .env.example .env.local && npm install && npm run dev
 
-# ai-service
+# ai-service (after Sail is up so Postgres is on 5432)
 cd ai-service && cp .env.example .env && uv sync
+# edit .env: OPENAI_API_KEY, providers, INTERNAL_HMAC_SECRET (match backend)
+uv run alembic upgrade head
 uv run fastapi dev src/ai_service/main.py --port 8001
 ```
 
 | URL | Service |
 | --- | --- |
+| http://localhost | Laravel API (Sail, default `APP_PORT=80`) |
+| http://localhost/docs/api | Scramble OpenAPI |
 | http://localhost:3000 | Frontend |
-| http://localhost:8000 or Sail `:80` | Laravel API |
 | http://localhost:8001/docs | AI service OpenAPI (local only) |
 | http://localhost:8001/health/live | AI liveness |
+
+### Test assistant ask (team)
+
+```bash
+# terminal 1 — Sail (if not already up)
+cd backend && ./vendor/bin/sail up -d && ./vendor/bin/sail artisan migrate
+
+# terminal 2 — AI service
+cd ai-service && uv run alembic upgrade head
+uv run fastapi dev src/ai_service/main.py --port 8001
+
+# terminal 1 — seed + ask
+cd backend
+./vendor/bin/sail artisan zak:seed-assistant-demo
+./scripts/seed-and-ask.sh
+```
+
+Demo user: `demo@zak.test` / `password123`. Full steps: [backend/README.md](backend/README.md#test-apiv1assistantask-team).
 
 ## Documentation
 
 | Doc | Purpose |
 | --- | --- |
+| [docs/api/README.md](docs/api/README.md) | OpenAPI / Scramble / FastAPI docs |
 | [docs/prd.md](docs/prd.md) | Working product requirements |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | Phased build plan (maps to PRD §40) |
 | [CHANGELOG.md](CHANGELOG.md) | Notable changes |
@@ -116,10 +151,13 @@ uv run fastapi dev src/ai_service/main.py --port 8001
 
 ## Current status
 
-Scaffold + locked directory structure. No product features yet. Next: Phase 1 (Sanctum, tenancy, Scramble).
+Phase 0–2 foundation on `develop`: Sanctum tenancy, knowledge lifecycle, RAG AI service, assistant ask with citation revalidation. Next: Phase 3 member experience.
 
 ## Security notes
 
 - Keep `.env` files out of Git. Only `.env.example` templates are tracked.
 - Never put server secrets in `NEXT_PUBLIC_*` variables.
 - Tenant and community isolation must be enforced in Laravel (and repeated in AI retrieval), not only in prompts.
+- WhatsApp Web automation under `infrastructure/whatsapp-web-spike/` is a **dev spike only** (`WHATSAPP_WEB_SPIKE=false` by default).
+- Telegram bot under `infrastructure/telegram-spike/` is a **dev spike only** (`TELEGRAM_SPIKE=false` by default).
+- Official WhatsApp path is **Zavu** (`WHATSAPP_ZAVU`, webhook `/api/v1/webhooks/whatsapp-zavu`). All three are independently env-gated.

@@ -28,12 +28,14 @@ Do not rename these to `laravel-api`, `web`, or `rag-service`.
 
 | Mode | Use |
 | --- | --- |
-| Laravel Sail | `backend/compose.yaml` via `./vendor/bin/sail up` — local Laravel DX |
-| Root Compose | `compose.yaml` — monorepo infra (Postgres+pgvector, Redis) and later full stack |
+| Laravel Sail | `backend/compose.yaml` via `./vendor/bin/sail up` — **required** local Laravel DX |
+| Root Compose | `compose.yaml` — optional monorepo infra only when not using Sail’s Postgres/Redis |
 
 Do **not** run Sail Postgres/Redis and root Compose Postgres/Redis on the same host ports at the same time.
 
 Sail is **not** production. Production uses dedicated Dockerfiles + production compose (Phase 7).
+
+Local backend commands run through Sail, e.g. `sail artisan migrate`, `sail artisan test`, `sail artisan queue:work`.
 
 ## Laravel
 
@@ -59,3 +61,17 @@ Sail is **not** production. Production uses dedicated Dockerfiles + production c
 ## Testing security bar
 
 A user in Community A must never retrieve a chunk that belongs only to Community B.
+
+## No meaning / language hardcoding (locked)
+
+- Do **not** hardcode per-language keyword lists, intros, reply templates, or meaning routers in application code.
+- Prefer the model for understanding; code owns structure (commands, auth, tenancy, citations, config URLs).
+- Offline: thin English-only fallbacks only when the model is down — never a multi-language catalog.
+- WhatsApp: never wrap URL path segments in backticks (only real bot commands like `/ask`).
+- Details: `.cursor/rules/no-language-hardcoding.mdc`.
+
+## Prompt injection (locked)
+
+- Member messages, quoted chat, and retrieved document bodies are **untrusted data**. Fence/sanitize before model calls; never execute them as instructions.
+- System prompts must say fenced/untrusted content cannot change role, reveal prompts, or bypass rules.
+- Keep the AI service private (HMAC); Laravel revalidates citations before answers leave the API.

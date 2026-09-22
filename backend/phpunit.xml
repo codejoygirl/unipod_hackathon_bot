@@ -23,7 +23,8 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_DATABASE" value="testing"/>
+        <env name="DB_CONNECTION" value="sqlite"/>
+        <env name="DB_DATABASE" value=":memory:"/>
         <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
@@ -31,5 +32,12 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="AI_SERVICE_URL" value="http://ai.test" force="true"/>
+        <env name="AI_SERVICE_TIMEOUT" value="2" force="true"/>
+        <env name="AI_SERVICE_CONNECT_TIMEOUT" value="1" force="true"/>
+        <env name="INTERNAL_HMAC_SECRET" value="prod_secure_hmac_secret_key_minimum_32_bytes_entropy" force="true"/>
+        <env name="TELEGRAM_SPIKE" value="false"/>
+        <env name="WHATSAPP_WEB_SPIKE" value="false"/>
+        <env name="WHATSAPP_ZAVU" value="false"/>
     </php>
 </phpunit>
