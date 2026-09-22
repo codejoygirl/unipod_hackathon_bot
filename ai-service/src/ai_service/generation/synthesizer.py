@@ -755,6 +755,8 @@ class AnswerSynthesizer:
         temperature: float = 0.0,
         link_mode: str | None = None,
         language_hint: str | None = None,
+        timezone_name: str | None = None,
+        reference_time_iso: str | None = None,
     ) -> ValidatedAnswerPayload:
         """Execute end-to-end evidence synthesis and validation."""
         
@@ -798,6 +800,8 @@ class AnswerSynthesizer:
             query=query,
             evidence_xml=evidence_xml,
             target_language=target_language,
+            timezone_name=timezone_name,
+            reference_time_iso=reference_time_iso,
         )
 
         chat_request = ChatRequest(

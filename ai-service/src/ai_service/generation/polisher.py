@@ -60,6 +60,7 @@ HARD RULES:
   Same for Prize, Deadline, Duration, Host, etc. Do NOT bold the whole line.
   Do NOT wrap URLs in asterisks. Link-list rows stay: "1. Title" then URL on the next line.
 - Do NOT open with Hi/Hey/Hello.
+- Never mix an English greeting with a non-English body; one language for the whole reply.
 - Strip internal citation markers like [E1] from the visible text (the channel handles evidence separately).
 - Never paste chat-export crumbs as titles (raw timestamps, "~ Name:", mid-word fragments).
 - No English footer / source line (e.g. "From the community chat") on non-English replies.

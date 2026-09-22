@@ -56,6 +56,8 @@ class AiServiceClient
             'enable_conflict_detection' => $enableConflictDetection,
             'temperature' => 0.0,
             'link_mode' => $linkMode,
+            'timezone' => (string) config('app.timezone', 'UTC'),
+            'reference_time' => now()->toIso8601String(),
         ];
 
         $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);

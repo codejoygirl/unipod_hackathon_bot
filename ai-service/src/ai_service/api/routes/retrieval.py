@@ -117,6 +117,8 @@ async def generate_grounded_answer(
         temperature=request.temperature,
         link_mode=request.link_mode,
         language_hint=retrieval_res.detected_language,
+        timezone_name=request.timezone,
+        reference_time_iso=request.reference_time,
     )
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000.0

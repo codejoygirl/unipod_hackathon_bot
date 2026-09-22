@@ -82,6 +82,40 @@ def test_system_prompt_contains_critical_invariants():
     assert "Yoruba" in prompt
     assert "Never switch into English" in prompt
     assert "AMBIGUOUS REFERENCES" in prompt
+    assert "UNRELATED OR NON-QUESTION INPUT" in prompt
+    assert "DATES AND TIMES" in prompt
+    assert "CURRENT TIME" in prompt
+    assert "WHEN THAT MESSAGE WAS SENT" in prompt
+
+
+def test_format_reference_clock_uses_client_timezone_and_instant():
+    from ai_service.generation.prompts import format_reference_clock
+
+    clock = format_reference_clock(
+        timezone_name="Africa/Lagos",
+        reference_time_iso="2026-09-22T22:43:00+01:00",
+    )
+    assert "CURRENT TIME (server clock - trusted)" in clock
+    assert "2026-09-22 22:43" in clock
+    assert "IANA Africa/Lagos" in clock
+    assert "UTC+01:00" in clock
+
+
+def test_build_user_prompt_includes_trusted_clock():
+    xml = '<context><evidence id="E1">[9/22/2026, 10:37 PM] Tomorrow session at 3:00 PM CAT</evidence></context>'
+    prompt = build_user_prompt(
+        "Is the Wadhwani session today?",
+        xml,
+        target_language=None,
+        timezone_name="Africa/Lagos",
+        reference_time_iso="2026-09-23T10:00:00+01:00",
+    )
+    assert "CURRENT TIME (server clock - trusted)" in prompt
+    assert "2026-09-23 10:00" in prompt
+    assert "IANA Africa/Lagos" in prompt
+    assert "trusted system clock" in prompt
+    assert xml in prompt
+
 
 def test_build_user_prompt_combines_context_and_query():
     xml = '<context><evidence id="E1">Content</evidence></context>'
@@ -94,6 +128,7 @@ def test_build_user_prompt_combines_context_and_query():
     assert "untrusted" in user_prompt.lower()
     assert "Amharic" in user_prompt or "ISO am" in user_prompt
     assert "CRITICAL" in user_prompt
+    assert "CURRENT TIME" in user_prompt
 
 
 def test_build_user_prompt_auto_matches_any_language_without_forcing_english():

@@ -147,9 +147,9 @@ final class ChannelConversationService
 
     public function clarificationReply(): string
     {
-        return "Happy to help 🙂 Could you say a bit more about what you need "
-            .'from the community (a person, a session, a link, or a deadline)? '
-            ."Once I know, I'll answer from what has been shared.";
+        return "Hmm, I didn't catch a clear question there 🙂 "
+            .'What do you need from the community — a person, session, link, or deadline? '
+            ."Once I know, I'll look it up.";
     }
 
     /**
@@ -747,15 +747,15 @@ final class ChannelConversationService
      */
     public function shouldEscalateKnowledgeGap(string $text, ?string $communityDescription = null): bool
     {
-        // Knowledge-path gap: escalate unless the turn is clearly social / OOS / tone.
-        // Do not require an English keyword catalog — the model already chose knowledge.
+        // Knowledge-path gap: only escalate real community asks.
+        // Opaque paste / nonsense must not page admins (model may have mis-routed).
         if ($this->isClearlyOutOfScope($text)
             || $this->isPurelySocial($text)
             || $this->isBotDirectedChat($text)) {
             return false;
         }
 
-        return true;
+        return $this->looksLikeCommunityKnowledgeAsk($text, $communityDescription);
     }
 
     public function looksLikeCommunityKnowledgeAsk(string $text, ?string $communityDescription = null): bool
@@ -1786,7 +1786,7 @@ final class ChannelConversationService
         string $style = 'whatsapp',
     ): string {
         $hi = ($fromName !== null && trim($fromName) !== '')
-            ? 'Hi '.trim($fromName).",\n\n"
+            ? trim($fromName).",\n\n"
             : '';
         $request = trim((string) $request);
         $detail = $request !== ''
@@ -1809,7 +1809,7 @@ final class ChannelConversationService
         string $style = 'whatsapp',
     ): string {
         $hi = ($fromName !== null && trim($fromName) !== '')
-            ? 'Hi '.trim($fromName).",\n\n"
+            ? trim($fromName).",\n\n"
             : '';
         $request = trim((string) $request);
         $detail = $request !== ''
@@ -1967,11 +1967,11 @@ final class ChannelConversationService
         string $style = 'whatsapp',
         ?string $adminMentionTag = null,
     ): string {
-        // WhatsApp: always bare "Hi," — spike inserts the member @mention as "Hi @id,".
-        // Telegram: keep a plain display name when provided (no WA-style @digits).
-        $hi = "Hi,\n\n";
+        // WhatsApp: no English "Hi," — spike inserts a language-neutral @mention.
+        // Telegram: optional plain display name (no forced English greeting).
+        $hi = '';
         if ($style === 'telegram_html' && $fromName !== null && trim($fromName) !== '') {
-            $hi = 'Hi '.trim($fromName).",\n\n";
+            $hi = trim($fromName).",\n\n";
         }
         $question = $this->escapeChannelBody($this->memberFacingQuestion($question), $style);
         $answer = $this->escapeChannelBody(trim($answer), $style);

@@ -631,21 +631,21 @@ async function resolveAskerMention(contact, senderRaw) {
 
 /**
  * Address the asker with a real @id mention tag (WA renders the green name).
- * Always "Hi @id, …" — never "@id, Hi,".
+ * Language-neutral: "@id, …" — never inject English "Hi" (reply body may be any language).
  */
 function blendMentionTag(mentionTag, body) {
   let text = stripFakeAtDisplayNames(body)
   const tag = String(mentionTag || '').trim()
   if (!tag) return text
-  if (!text) return `Hi ${tag},`
+  if (!text) return `${tag},`
 
   // Normalize inverted "@digits, Hi," from older sends / plain-name prefixes.
-  text = text.replace(/^@\+?\d{6,}\s*,\s*Hi\b[,]?/i, 'Hi,')
-  text = text.replace(/^@\d{6,}(?!\d)\s*,\s*Hi\b[,]?/i, 'Hi,')
+  text = text.replace(/^@\+?\d{6,}\s*,\s*Hi\b[,]?/i, '')
+  text = text.replace(/^@\d{6,}(?!\d)\s*,\s*Hi\b[,]?/i, '')
   text = stripFakeAtDisplayNames(text)
 
-  if (text.includes(tag) && /^Hi\s+/i.test(text)) {
-    // Already "Hi @id…" — keep order, drop duplicate leading tags.
+  if (text.includes(tag)) {
+    // Already addressed — keep order, drop duplicate leading tags.
     return text.replace(/^@\d{6,}(?!\d)\s*,\s*/u, '').trim()
   }
 
@@ -653,29 +653,14 @@ function blendMentionTag(mentionTag, body) {
   let cleaned = text.replace(/^@\+?\d{6,}\b[,\s]*/u, '').trim()
   cleaned = cleaned.replace(/^@\d{6,}(?!\d)[,\s]*/u, '').trim()
 
-  const apology = cleaned.match(/^(sorry|apologies|whoops|oops)([!.,]|\s)+/i)
-  if (apology) {
-    const word = apology[1].charAt(0).toUpperCase() + apology[1].slice(1).toLowerCase()
-    const rest = cleaned.slice(apology[0].length).replace(/^[\s,]+/, '')
-    return rest ? `${word} ${tag}, ${rest}` : `${word} ${tag}.`
-  }
+  // Strip legacy English-only channel opener (not a greeting catalog — just remove old inject).
+  cleaned = cleaned.replace(/^(hey|hi|hello|howdy|yo)\b[ \t]*,?[ \t]*/i, '').trim()
+  // Drop a leftover plain display name after a stripped Hi (e.g. "Abdulsamad,\n\n…").
+  cleaned = cleaned.replace(/^[^@\n,]{1,60},\s*(?=\S)/, '').trim()
 
-  // Only the greeting token on the first line (do not eat "*You asked:*").
-  const greeting = cleaned.match(/^(hey|hi|hello|howdy|yo)\b[ \t]*,?[ \t]*/i)
-  if (greeting) {
-    const word = greeting[1].charAt(0).toUpperCase() + greeting[1].slice(1).toLowerCase()
-    let rest = cleaned.slice(greeting[0].length).replace(/^[\s,]+/, '')
-    // Drop a leftover plain display name after Hi (e.g. "Hi Abdulsamad,")
-    rest = rest.replace(/^[^@\n,]{1,60},\s*/, '')
-    if (!rest) return `${word} ${tag},`
-    const gap = rest.startsWith('\n') ? '' : '\n\n'
-    if (/^hi\b/i.test(word)) {
-      return `Hi ${tag},${gap}${rest}`.replace(/\n{3,}/g, '\n\n')
-    }
-    return `${word} ${tag},${gap}${rest}`.replace(/\n{3,}/g, '\n\n')
-  }
-
-  return `${tag}, ${cleaned}`
+  if (!cleaned) return `${tag},`
+  const gap = cleaned.startsWith('\n') ? '' : '\n\n'
+  return `${tag},${gap}${cleaned}`.replace(/\n{3,}/g, '\n\n')
 }
 
 function isBotContact(contact) {
@@ -2314,19 +2299,11 @@ function startOutboundServer() {
         const mentionUser = idUserPart(askerJid)
         const tag = `@${(mentionUser || '').replace(/\D+/g, '') || mentionUser}`
         // Fix inverted "@id, Hi," from older clients / failed blends.
-        text = text.replace(new RegExp(`^${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,\\s*Hi\\b[,]?`, 'i'), 'Hi,')
+        text = text.replace(new RegExp(`^${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,\\s*Hi\\b[,]?`, 'i'), '')
+        text = text.replace(/^(hey|hi|hello|howdy|yo)\b[ \t]*,?[ \t]*/i, '').trim()
         if (!text.includes(tag)) {
-          // Only match the greeting line — never swallow "*You asked:*".
-          const hi = text.match(/^(Hi)\b[ \t]*(?:[^@\n,]{1,60})?,?[ \t]*\n*/i)
-          if (hi) {
-            const rest = text.slice(hi[0].length).replace(/^[\s,]+/, '')
-            const gap = rest.startsWith('\n') ? '' : '\n\n'
-            text = `Hi ${tag},${gap}${rest}`.replace(/\n{3,}/g, '\n\n')
-          } else if (/^Hi\b/i.test(text.trim())) {
-            text = text.replace(/^Hi\b[ \t]*,?[ \t]*/i, `Hi ${tag}, `)
-          } else {
-            text = `Hi ${tag},\n\n${text}`
-          }
+          const gap = text.startsWith('\n') ? '' : '\n\n'
+          text = `${tag},${gap}${text}`.replace(/\n{3,}/g, '\n\n')
         }
       }
       if (mentionJids.length > 0) {
@@ -2353,7 +2330,7 @@ function startOutboundServer() {
       try {
         sent = await sendOutbound(text, opts)
       } catch (err) {
-        // Group quote/mention can fail; retry same body without rich opts (keep Hi, @tag order).
+        // Group quote/mention can fail; retry same body without rich opts (keep @tag order).
         if (opts.quotedMessageId || opts.mentions) {
           console.error('[spike] outbound rich send failed, plain retry:', formatErr(err))
           sent = await sendOutbound(text)

@@ -690,7 +690,7 @@ final class SpikeEscalationNotifier
             trim((string) ($resolvedByPhone ?? '')),
         );
 
-        // WhatsApp: bare "Hi," + spike @mention. Telegram: keep display name when known.
+        // WhatsApp: bare text — spike inserts language-neutral @mention. Telegram: display name when known.
         $memberGreetingName = null;
         if ($style === 'telegram_html' && ! $inGroup && $name !== '') {
             $memberGreetingName = $name;
@@ -1881,7 +1881,8 @@ final class SpikeEscalationNotifier
                 $tagDigits = (strlen($fromDigits) >= 10 && strlen($fromDigits) <= 13) ? $fromDigits : '';
             }
             if ($tagDigits !== '') {
-                $memberText = 'Hi @'.$tagDigits.",\n\n".ltrim(preg_replace('/^Hi[^\n]*\n\n/u', '', $memberText) ?? $memberText);
+                $memberText = '@'.$tagDigits.",\n\n".ltrim(preg_replace('/^(?:Hi\s+)?@[^\n]*\n\n/u', '', $memberText) ?? $memberText);
+                $memberText = ltrim(preg_replace('/^Hi[^\n]*\n\n/u', '', $memberText) ?? $memberText);
             }
         }
 

@@ -158,6 +158,22 @@ class GroundedAnswerRequest(BaseModel):
         max_length=20,
         description="Optional URL-list intent from classifier: none|recordings|meetings|assets.",
     )
+    timezone: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "IANA timezone for resolving relative dates (e.g. Africa/Lagos). "
+            "Defaults to AI_TIMEZONE/TZ/UTC when omitted."
+        ),
+    )
+    reference_time: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "ISO-8601 instant for \"now\" (usually Laravel app clock). "
+            "Omit to use the AI service wall clock."
+        ),
+    )
 
 
 class GroundedAnswerResponse(BaseModel):

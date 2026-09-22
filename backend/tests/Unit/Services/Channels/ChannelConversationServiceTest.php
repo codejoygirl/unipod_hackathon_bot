@@ -40,6 +40,8 @@ class ChannelConversationServiceTest extends TestCase
         );
         $this->assertFalse($svc->shouldEscalateKnowledgeGap('2+2'));
         $this->assertTrue($svc->shouldEscalateKnowledgeGap('When is the hackathon deadline?'));
+        $this->assertFalse($svc->shouldEscalateKnowledgeGap('8qa4RWev0a0ZdQFrMeSa zak-app'));
+        $this->assertFalse($svc->shouldEscalateKnowledgeGap('asdfjkl'));
         $this->assertSame(
             ChannelConversationService::INTENT_OUT_OF_SCOPE,
             $svc->classifyIntent('Do you love me?')
@@ -293,8 +295,8 @@ class ChannelConversationServiceTest extends TestCase
             null,
             'whatsapp',
         );
-        $this->assertStringStartsWith("Hi,\n\n", $reply);
-        $this->assertStringContainsString("*You asked:*\nWho is leading Tommorrows session?", $reply);
+        $this->assertStringStartsWith("*You asked:*\nWho is leading Tommorrows session?", $reply);
+        $this->assertStringNotContainsString("Hi,\n\n", $reply);
         $this->assertStringNotContainsString('The member is following up', $reply);
         $this->assertStringNotContainsString('Previous answer', $reply);
 
@@ -832,8 +834,8 @@ class ChannelConversationServiceTest extends TestCase
             null,
             'whatsapp',
         );
-        $this->assertStringStartsWith("Hi,\n\n", $wa);
-        $this->assertStringContainsString("*You asked:*\nare we going to Lagos?", $wa);
+        $this->assertStringStartsWith("*You asked:*\nare we going to Lagos?", $wa);
+        $this->assertStringNotContainsString("Hi,\n\n", $wa);
         $this->assertStringContainsString(
             "*Here's an update from an admin:*\nNo, for this programme cohort.",
             $wa,
@@ -845,7 +847,8 @@ class ChannelConversationServiceTest extends TestCase
             'B A',
             'telegram_html',
         );
-        $this->assertStringContainsString('Hi B A,', $tg);
+        $this->assertStringStartsWith("B A,\n\n", $tg);
+        $this->assertStringNotContainsString('Hi B A,', $tg);
         $this->assertStringContainsString('<b>You asked:</b>', $tg);
         $this->assertStringContainsString("<b>Here's an update from an admin:</b>", $tg);
         $this->assertStringNotContainsString('*You asked:*', $tg);
