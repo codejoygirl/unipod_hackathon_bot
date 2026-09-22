@@ -364,7 +364,7 @@ class SpikeEscalationNotifierTest extends TestCase
 
             return str_contains($request->url(), 'sendMessage')
                 && $request['chat_id'] === '123456'
-                && str_contains($text, 'Member requested a product feature')
+                && str_contains($text, 'Member requested a new feature or an improvement')
                 && str_contains($text, 'Add calendar reminders')
                 && str_contains($text, '/approve ');
         });
@@ -373,7 +373,9 @@ class SpikeEscalationNotifierTest extends TestCase
         $decision = $notifier->tryAdminCommand("/approve {$ref}");
         $this->assertTrue($decision['ok']);
         $this->assertStringContainsString('Approved', $decision['reply']);
-        $this->assertStringContainsString('the group', $decision['reply']);
+        $this->assertStringContainsString('Ada', $decision['reply']);
+        $this->assertStringNotContainsString('the group', $decision['reply']);
+        $this->assertStringNotContainsString('@Ada', $decision['reply']);
 
         Http::assertSent(function ($request) {
             $text = (string) $request['text'];
@@ -387,6 +389,41 @@ class SpikeEscalationNotifierTest extends TestCase
         $log = Cache::get('spike_feature_decisions', []);
         $this->assertIsArray($log);
         $this->assertSame('approved', $log[0]['decision'] ?? null);
+    }
+
+    public function test_feature_admin_ack_uses_whatsapp_mention_not_plain_name(): void
+    {
+        Cache::flush();
+        $community = Community::factory()->create(['name' => 'Demo Community']);
+
+        config([
+            'whatsapp_web_spike.outbound_url' => 'http://wa-out.test',
+            'whatsapp_web_spike.shared_secret' => 'spike-secret',
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+        ]);
+
+        Http::fake([
+            'http://wa-out.test/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $notifier = app(SpikeEscalationNotifier::class);
+        $notify = $notifier->notifyFeatureRequest(
+            channel: 'whatsapp_web_spike',
+            from: '265721070268441',
+            content: 'Add voice notes',
+            communityId: $community->id,
+            fromName: 'Ada',
+            fromPhone: '2348011111111',
+            chatType: 'group',
+            chatId: '120363411674252738@g.us',
+        );
+
+        $decision = $notifier->tryAdminCommand('/approve '.$notify['ref']);
+        $this->assertTrue($decision['ok']);
+        $this->assertStringContainsString('@2348011111111', $decision['reply']);
+        $this->assertStringNotContainsString('Ada', $decision['reply']);
+        $this->assertStringNotContainsString('the group', $decision['reply']);
     }
 
     public function test_feature_request_decline_notifies_member(): void
@@ -420,6 +457,7 @@ class SpikeEscalationNotifierTest extends TestCase
         $decision = $notifier->tryAdminCommand("/decline {$ref}");
         $this->assertTrue($decision['ok']);
         $this->assertStringContainsString('Declined', $decision['reply']);
+        $this->assertStringContainsString('Bo', $decision['reply']);
 
         Http::assertSent(function ($request) {
             $text = (string) $request['text'];
@@ -427,7 +465,7 @@ class SpikeEscalationNotifierTest extends TestCase
             return str_contains($request->url(), 'sendMessage')
                 && $request['chat_id'] === '111222'
                 && str_contains($text, "won't take it forward")
-                && str_contains($text, '/feature');
+                && (str_contains($text, '/feature') || str_contains($text, '<code>/feature</code>'));
         });
     }
 

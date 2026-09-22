@@ -30,6 +30,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         private readonly ChannelListenGate $listenGate,
         private readonly ChannelCommandAccess $commandAccess,
         private readonly AdminMessageKnowledgeIndexer $adminIndexer,
+        private readonly VoiceNoteNormalizer $voiceNormalizer,
     ) {}
 
     public function channelName(): string
@@ -60,7 +61,31 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
 
     private function dispatchInbound(InboundMessage $message): ?string
     {
+        $voice = $this->voiceNormalizer->normalize($message);
+        if (($voice['error'] ?? null) !== null) {
+            Log::info('whatsapp_web_spike.voice_failed', [
+                'from' => $message->externalUserId,
+                'error_preview' => mb_substr((string) $voice['error'], 0, 120),
+            ]);
+
+            return (string) $voice['error'];
+        }
+        $message = $voice['message'];
+        $wasVoice = ($message->raw['input_modality'] ?? null) === 'voice';
+        if ($wasVoice) {
+            Log::info('whatsapp_web_spike.voice_ready', [
+                'from' => $message->externalUserId,
+                'chat_type' => $message->raw['chat_type'] ?? null,
+                'transcript_preview' => mb_substr($message->text, 0, 240),
+                'whisper_language' => $message->raw['whisper_language'] ?? null,
+            ]);
+        }
+
         if ($message->text === '') {
+            Log::info('whatsapp_web_spike.empty_after_voice', [
+                'from' => $message->externalUserId,
+            ]);
+
             return null;
         }
 
@@ -211,6 +236,10 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             return $this->handleAdminImport($message);
         }
 
+        if (str_starts_with($upper, 'ASSET') || str_starts_with($upper, '/ASSET')) {
+            return $this->handleAdminAsset($message);
+        }
+
         if (str_starts_with($upper, 'ASK') || str_starts_with($upper, '/ASK')) {
             return $this->handleMemberAsk($message);
         }
@@ -236,6 +265,15 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         $intent = $resolved['intent'];
         $effectiveQuery = $resolved['query'];
 
+        Log::info('whatsapp_web_spike.routed', [
+            'from' => $message->externalUserId,
+            'voice' => $wasVoice,
+            'intent' => $intent,
+            'link_mode' => $resolved['link_mode'] ?? 'none',
+            'inbound_preview' => mb_substr($inboundText, 0, 160),
+            'query_preview' => mb_substr((string) $effectiveQuery, 0, 160),
+        ]);
+
         if ($intent === 'clarify') {
             $reply = $this->modelAssistedReply($message, 'social', $community);
             if ($reply === '' || str_contains(mb_strtolower($reply), 'thanks for joining')) {
@@ -247,6 +285,10 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
                 $this->conversation->userTurnTextToRemember($message->text, $effectiveQuery),
             );
             $this->rememberTurn($message, 'assistant', $reply);
+            Log::info('whatsapp_web_spike.reply', [
+                'path' => 'clarify',
+                'reply_preview' => mb_substr($reply, 0, 160),
+            ]);
 
             return $reply;
         }
@@ -274,6 +316,10 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
                 $this->conversation->userTurnTextToRemember($message->text, $effectiveQuery),
             );
             $this->rememberTurn($message, 'assistant', $reply);
+            Log::info('whatsapp_web_spike.reply', [
+                'path' => 'conversational',
+                'reply_preview' => mb_substr($reply, 0, 160),
+            ]);
 
             return $reply;
         }
@@ -286,19 +332,37 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
                 $this->conversation->userTurnTextToRemember($message->text, $effectiveQuery),
             );
             $this->rememberTurn($message, 'assistant', $reply);
+            Log::info('whatsapp_web_spike.reply', [
+                'path' => 'out_of_scope',
+                'reply_preview' => mb_substr($reply, 0, 160),
+            ]);
 
             return $reply;
         }
 
         if ($intent === ChannelConversationService::INTENT_PERSONAL_HELP) {
-            return $this->handlePersonalHelp($message, $community);
+            $reply = $this->handlePersonalHelp($message, $community);
+            Log::info('whatsapp_web_spike.reply', [
+                'path' => 'personal_help',
+                'reply_preview' => mb_substr((string) $reply, 0, 160),
+            ]);
+
+            return $reply;
         }
 
-        return $this->handleAsk(
+        $askReply = $this->handleAsk(
             $message,
             $effectiveQuery,
             linkMode: (string) ($resolved['link_mode'] ?? 'none'),
         );
+        Log::info('whatsapp_web_spike.reply', [
+            'path' => 'ask',
+            'link_mode' => $resolved['link_mode'] ?? 'none',
+            'reply_preview' => mb_substr((string) ($askReply ?? ''), 0, 160),
+            'empty' => $askReply === null || trim((string) $askReply) === '',
+        ]);
+
+        return $askReply;
     }
 
     /**
@@ -626,7 +690,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         $text = $this->toWhatsAppFormatting($text);
 
         $formatted = preg_replace_callback(
-            '/```[\s\S]*?```|\/(?:ask|share|feature|help|join|export|import|approve|decline|reply|blacklist)\b/iu',
+            '/```[\s\S]*?```|\/(?:ask|share|feature|help|join|export|import|asset|approve|decline|reply|blacklist)\b/iu',
             static function (array $m): string {
                 if (str_starts_with($m[0], '```')) {
                     return $m[0];
@@ -874,6 +938,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
 
         if (trim((string) $result->answer) === '') {
             \Illuminate\Support\Facades\Log::info('whatsapp_web_spike.grounded_empty', [
+                'query_preview' => mb_substr($knowledgeQuery, 0, 240),
                 'query_len' => mb_strlen($knowledgeQuery),
                 'link_mode' => $linkMode,
                 'state' => $result->state->value,
@@ -974,7 +1039,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         }
 
         $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
-        if ($quoted === '') {
+        if ($quoted === '' || $this->isVoiceNotePlaceholder($quoted)) {
             return $query;
         }
 
@@ -1041,6 +1106,11 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
         $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
+        // Spike placeholder when quote is voice but audio was not attached — never RAG this.
+        if ($this->isVoiceNotePlaceholder($quoted)) {
+            $quoted = '';
+        }
+
         if ($quoted !== '' && $this->isBareBotMention($text)) {
             // Quoting our own answer + bare ping → continue prior topic from session.
             if ($replyToBot) {
@@ -1055,6 +1125,17 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         }
 
         return $this->withQuotedContext($message, $text);
+    }
+
+    private function isVoiceNotePlaceholder(string $quoted): bool
+    {
+        $q = mb_strtolower(trim($quoted));
+
+        return $q === ''
+            || $q === '[voice note]'
+            || $q === '[voice]'
+            || $q === '(voice note)'
+            || preg_match('/^\[?\s*voice(?:\s+note)?\s*\]?$/u', $q) === 1;
     }
 
     private function isBareBotMention(string $text): bool
@@ -1140,7 +1221,11 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
     {
         $community = $this->resolveLinkedCommunity($message);
         if ($community === null) {
-            return 'Please link a community first with /join, then try /feature again.';
+            return 'Please link a community first with '
+                .$this->conversation->highlightCommand('/join', 'whatsapp')
+                .', then try '
+                .$this->conversation->highlightCommand('/feature', 'whatsapp')
+                .' again.';
         }
 
         $body = trim($message->text);
@@ -1152,9 +1237,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         }
 
         if ($body === '') {
-            return "Suggest a product improvement, like:\n"
-                ."/feature Add reminders for upcoming sessions\n\n"
-                .'An admin will review it, and I\'ll reply here when they decide.';
+            return $this->conversation->featureUsageReply('whatsapp');
         }
 
         $fromName = trim((string) ($message->raw['from_name'] ?? ''));
@@ -1248,6 +1331,34 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         Log::info('whatsapp_web_spike.import_draft', ['knowledge_id' => $source->id]);
 
         return 'Saved as draft knowledge '.$source->id.' (submit-review → publish in Laravel).';
+    }
+
+    private function handleAdminAsset(InboundMessage $message): string
+    {
+        if (! $this->commandAccess->isAdmin(
+            $this->channelName(),
+            $message->externalUserId,
+            array_merge(is_array($message->raw) ? $message->raw : [], ['text' => $message->text]),
+        )) {
+            return $this->commandAccess->adminOnlyDenial('whatsapp');
+        }
+
+        $user = $this->resolveUser();
+        $community = $this->resolveLinkedCommunity($message);
+        if ($user === null || $community === null) {
+            return 'Link a community with a minted JOIN token before '
+                .$this->conversation->highlightCommand('/asset', 'whatsapp').'.';
+        }
+
+        $result = app(ProgramAssetRegistrar::class)->registerFromCommand(
+            $this->channelName(),
+            $message->text,
+            $user,
+            $community,
+            'whatsapp',
+        );
+
+        return (string) ($result['reply'] ?? 'Done.');
     }
 
     private function resolveLinkedCommunity(InboundMessage $message): ?Community

@@ -14,6 +14,8 @@ from ai_service.providers.base import (
     LanguageDetectionModel,
     RerankResult,
     RerankingModel,
+    TranscriptionResult,
+    TranscriptSegment,
     TranslationModel,
 )
 
@@ -269,19 +271,27 @@ class MockReranker(RerankingModel):
 
 
 class MockTranscriptionModel(TranscriptionModel):
-    """Deterministic mock audio speech-to-text provider for ingestion testing."""
+    """Deterministic mock audio speech-to-text provider for testing."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     async def transcribe(
         self,
-        audio_data: Any = None,
+        source: Any = None,
         language: str | None = None,
         *args: Any,
         **kwargs: Any,
-    ) -> str:
-        return "Deterministic mock transcription: Community emergency meeting recorded."
+    ) -> TranscriptionResult:
+        text = "Deterministic mock transcription: Community emergency meeting recorded."
+        return TranscriptionResult(
+            text=text,
+            language=(language or "en"),
+            duration_seconds=3.0,
+            segments=(
+                TranscriptSegment(start_seconds=0.0, end_seconds=3.0, text=text),
+            ),
+        )
 
     async def transcribe_segments(
         self,

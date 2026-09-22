@@ -190,3 +190,15 @@ def test_indexable_prompt_and_label_parser():
     assert "UniPods" in prompt
     assert _parse_addressed_label("YES") is True
     assert _parse_addressed_label("no thanks") is False
+
+
+def test_transcribe_request_model_bounds():
+    from ai_service.api.routes.conversation import ConversationTranscribeRequest
+
+    req = ConversationTranscribeRequest(
+        audio_base64="AAAABBBB",
+        mime_type="audio/ogg",
+        filename="voice.ogg",
+    )
+    assert req.audio_base64 == "AAAABBBB"
+    assert req.mime_type == "audio/ogg"

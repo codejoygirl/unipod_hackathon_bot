@@ -26,6 +26,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         private readonly SpikeEscalationNotifier $escalationNotifier,
         private readonly ChannelCommandAccess $commandAccess,
         private readonly AdminMessageKnowledgeIndexer $adminIndexer,
+        private readonly VoiceNoteNormalizer $voiceNormalizer,
     ) {}
 
     public function channelName(): string
@@ -137,7 +138,32 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
     public function handleInbound(InboundMessage $message): ?string
     {
+        $voice = $this->voiceNormalizer->normalize($message);
+        if (($voice['error'] ?? null) !== null) {
+            Log::info('telegram_spike.voice_failed', [
+                'from' => $message->externalUserId,
+                'error_preview' => mb_substr((string) $voice['error'], 0, 120),
+            ]);
+
+            return (string) $voice['error'];
+        }
+        $message = $voice['message'];
+        $wasVoice = ($message->raw['input_modality'] ?? null) === 'voice';
+        if ($wasVoice) {
+            Log::info('telegram_spike.voice_ready', [
+                'from' => $message->externalUserId,
+                'chat_type' => $message->raw['chat_type'] ?? null,
+                'transcript_preview' => mb_substr($message->text, 0, 240),
+                'whisper_language' => $message->raw['whisper_language'] ?? null,
+            ]);
+        }
+
         if ($message->text === '') {
+            Log::info('telegram_spike.empty_after_voice', [
+                'from' => $message->externalUserId,
+                'had_media' => is_array($message->raw['media'] ?? null),
+            ]);
+
             return null;
         }
 
@@ -163,6 +189,10 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         if (str_starts_with($upper, 'IMPORT') || str_starts_with($upper, '/IMPORT')
             || str_starts_with($upper, 'EXPORT') || str_starts_with($upper, '/EXPORT')) {
             return $this->handleAdminImport($message);
+        }
+
+        if (str_starts_with($upper, 'ASSET') || str_starts_with($upper, '/ASSET')) {
+            return $this->handleAdminAsset($message);
         }
 
         if (str_starts_with($upper, 'ASK') || str_starts_with($upper, '/ASK')) {
@@ -200,6 +230,15 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         $intent = $resolved['intent'];
         $effectiveQuery = $resolved['query'];
 
+        Log::info('telegram_spike.routed', [
+            'from' => $message->externalUserId,
+            'voice' => $wasVoice,
+            'intent' => $intent,
+            'link_mode' => $resolved['link_mode'] ?? 'none',
+            'inbound_preview' => mb_substr($inboundText, 0, 160),
+            'query_preview' => mb_substr((string) $effectiveQuery, 0, 160),
+        ]);
+
         if ($intent === 'clarify') {
             $reply = $this->modelAssistedReply($inboundText, 'social', $community, $message);
             if ($reply === '' || str_contains(mb_strtolower($reply), 'thanks for joining')) {
@@ -211,12 +250,22 @@ final class TelegramSpikeAdapter implements ChannelAdapter
                 $this->conversation->userTurnTextToRemember($message->text, $effectiveQuery),
             );
             $this->rememberTurn($message, 'assistant', $reply);
+            Log::info('telegram_spike.reply', [
+                'path' => 'clarify',
+                'reply_preview' => mb_substr($reply, 0, 160),
+            ]);
 
             return $reply;
         }
 
         if ($intent === ChannelConversationService::INTENT_CONVERSATIONAL) {
-            return $this->handleConversational($message, $community, $inboundText);
+            $reply = $this->handleConversational($message, $community, $inboundText);
+            Log::info('telegram_spike.reply', [
+                'path' => 'conversational',
+                'reply_preview' => mb_substr((string) $reply, 0, 160),
+            ]);
+
+            return $reply;
         }
 
         if ($intent === ChannelConversationService::INTENT_OUT_OF_SCOPE) {
@@ -232,19 +281,37 @@ final class TelegramSpikeAdapter implements ChannelAdapter
                 $this->conversation->userTurnTextToRemember($message->text, $effectiveQuery),
             );
             $this->rememberTurn($message, 'assistant', $reply);
+            Log::info('telegram_spike.reply', [
+                'path' => 'out_of_scope',
+                'reply_preview' => mb_substr($reply, 0, 160),
+            ]);
 
             return $reply;
         }
 
         if ($intent === ChannelConversationService::INTENT_PERSONAL_HELP) {
-            return $this->handlePersonalHelp($message, $community, $inboundText);
+            $reply = $this->handlePersonalHelp($message, $community, $inboundText);
+            Log::info('telegram_spike.reply', [
+                'path' => 'personal_help',
+                'reply_preview' => mb_substr((string) $reply, 0, 160),
+            ]);
+
+            return $reply;
         }
 
-        return $this->handleAsk(
+        $askReply = $this->handleAsk(
             $message,
             $effectiveQuery,
             linkMode: (string) ($resolved['link_mode'] ?? 'none'),
         );
+        Log::info('telegram_spike.reply', [
+            'path' => 'ask',
+            'link_mode' => $resolved['link_mode'] ?? 'none',
+            'reply_preview' => mb_substr((string) ($askReply ?? ''), 0, 160),
+            'empty' => $askReply === null || trim((string) $askReply) === '',
+        ]);
+
+        return $askReply;
     }
 
     /**
@@ -1795,9 +1862,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         }
 
         if ($body === '') {
-            return "Suggest a product improvement, like:\n"
-                ."/feature Add reminders for upcoming sessions\n\n"
-                .'An admin will review it, and I\'ll reply here when they decide.';
+            return $this->conversation->featureUsageReply('plain');
         }
 
         $fromName = trim((string) ($message->raw['from_name'] ?? ''));
@@ -1899,6 +1964,29 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         Log::info('telegram_spike.admin_import_draft', ['knowledge_id' => $source->id]);
 
         return 'Saved as draft knowledge '.$source->id.' (submit-review → publish in Laravel).';
+    }
+
+    private function handleAdminAsset(InboundMessage $message): string
+    {
+        if (! $this->commandAccess->isAdmin($this->channelName(), $message->externalUserId)) {
+            return $this->commandAccess->adminOnlyDenial('plain');
+        }
+
+        $user = $this->resolveUser();
+        $community = $this->resolveLinkedCommunity($message);
+        if ($user === null || $community === null) {
+            return 'Link a community with /join before /asset.';
+        }
+
+        $result = app(ProgramAssetRegistrar::class)->registerFromCommand(
+            $this->channelName(),
+            $message->text,
+            $user,
+            $community,
+            'plain',
+        );
+
+        return (string) ($result['reply'] ?? 'Done.');
     }
 
     private function resolveUser(): ?User

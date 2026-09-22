@@ -250,9 +250,20 @@ class AnswerSynthesizer:
         return current
 
     @classmethod
+    def _scrub_broken_chars(cls, text: str) -> str:
+        """Drop encoding damage (U+FFFD / ?? placeholders) left by bad chat exports."""
+        if not text:
+            return ""
+        text = text.replace('\ufffd', '')
+        text = re.sub(r'\?{2,}', '', text)
+        text = re.sub(r"(^|[\s\u2022\-])['\u2019]s\b", r'\1', text)
+        text = re.sub(r'\s{2,}', ' ', text).strip(' \t:-|\u2022')
+        return text.strip()
+
+    @classmethod
     def _is_weak_link_label(cls, label: str) -> bool:
         """True when the title is a speaker crumb or fluff, not a clear session name."""
-        text = (label or "").strip()
+        text = cls._scrub_broken_chars(label or "")
         if not text:
             return True
         # Strip WhatsApp emphasis for the weakness check.
@@ -383,6 +394,7 @@ class AnswerSynthesizer:
 
     @classmethod
     def _clean_link_label(cls, line: str) -> str:
+        line = cls._scrub_broken_chars(line or "")
         line = re.sub(r"^\d+\.\s*", "", line).strip(" \t:-–—|")
         line = re.sub(r"\s*via this link\b.*$", "", line, flags=re.I)
         line = re.sub(r"\s*[-–—|]\s*join\s*$", "", line, flags=re.I)
@@ -626,7 +638,7 @@ class AnswerSynthesizer:
                 continue
             if re.match(r"^\d+[\).\:\-]\s*", trimmed):
                 continue
-            intro = trimmed
+            intro = cls._scrub_broken_chars(trimmed)
             break
 
         used_ids: list[str] = []
@@ -637,6 +649,7 @@ class AnswerSynthesizer:
                 if label and not cls._is_weak_link_label(label)
                 else cls._fallback_label(url)
             )
+            display_label = cls._scrub_broken_chars(display_label) or cls._fallback_label(url)
             link_lines.append(f"{i}. {display_label}")
             link_lines.append(url)
             link_lines.append("")

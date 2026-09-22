@@ -481,6 +481,23 @@ function stripFakeAtDisplayNames(text) {
 }
 
 /**
+ * Collect @phone tags from body text → JIDs for options.mentions (green paint).
+ * Phone-length only (10–13); skip long LIDs which rarely highlight in DM.
+ *
+ * @returns {string[]}
+ */
+function phoneMentionJidsFromText(text) {
+  const jids = []
+  const re = /@(\d{10,13})\b/g
+  let m
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const jid = `${m[1]}@c.us`
+    if (!jids.includes(jid)) jids.push(jid)
+  }
+  return jids
+}
+
+/**
  * Official wwebjs mention format: @<phone digits> in the body PLUS that JID in
  * options.mentions. WhatsApp then paints the green name.
  *
@@ -691,6 +708,8 @@ async function resolveQuoteContext(msg) {
     quoted_text: null,
     quoted_from: null,
     quoted_message_id: null,
+    quoted_msg: null,
+    quoted_voice_kind: null,
   }
 
   const raw = msg._data || {}
@@ -714,8 +733,21 @@ async function resolveQuoteContext(msg) {
     }
 
     if (quoted) {
-      const body = String(quoted.body || '').trim()
-      result.quoted_text = body ? body.slice(0, 1500) : null
+      result.quoted_msg = quoted
+      result.quoted_voice_kind = voiceMediaKind(quoted)
+      // Some WA builds omit type on the wrapper — check raw payload too.
+      if (!result.quoted_voice_kind) {
+        const rawType = String(quoted._data?.type || quoted.type || '').toLowerCase()
+        if (rawType === 'ptt' || rawType === 'voice') result.quoted_voice_kind = 'voice'
+        else if (rawType === 'audio') result.quoted_voice_kind = 'audio'
+      }
+      const body = String(quoted.body || quoted.caption || '').trim()
+      // Voice notes often have empty body; keep a hint for Laravel context.
+      if (body) {
+        result.quoted_text = body.slice(0, 1500)
+      } else if (result.quoted_voice_kind) {
+        result.quoted_text = '[voice note]'
+      }
       result.quoted_from = idUserPart(quoted.author || quoted.from) || null
       result.quoted_message_id = quoted.id?._serialized || quoted.id?.id || null
 
@@ -736,7 +768,17 @@ async function resolveQuoteContext(msg) {
       // Raw fallback when getQuotedMessage fails on some WA Web builds.
       const rawQuoted = raw.quotedMsg || {}
       const body = String(rawQuoted.body || rawQuoted.caption || '').trim()
-      result.quoted_text = body ? body.slice(0, 1500) : null
+      const rawType = String(rawQuoted.type || '').toLowerCase()
+      if (rawType === 'ptt' || rawType === 'voice') {
+        result.quoted_voice_kind = 'voice'
+      } else if (rawType === 'audio') {
+        result.quoted_voice_kind = 'audio'
+      }
+      if (body) {
+        result.quoted_text = body.slice(0, 1500)
+      } else if (result.quoted_voice_kind) {
+        result.quoted_text = '[voice note]'
+      }
       result.quoted_from = idUserPart(
         raw.quotedParticipant || rawQuoted.participant || rawQuoted.author || rawQuoted.from,
       ) || null
@@ -856,10 +898,220 @@ function isRecognizedCommand(text) {
   const t = String(text || '').trim()
   if (t === '') return false
   if (/^JOIN-/i.test(t)) return true
-  return /^\/?(join|help|start|ask|share|export|approve|decline|reject|reply|blacklist|unblacklist)\b/i.test(
+  return /^\/?(join|help|start|ask|share|feature|import|export|asset|approve|decline|reject|reply|blacklist|unblacklist)\b/i.test(
     t,
   )
 }
+
+/**
+ * WhatsApp voice note / audio attachment (ptt = push-to-talk).
+ * @returns {'voice'|'audio'|null}
+ */
+function voiceMediaKind(msg) {
+  const type = String(msg?.type || msg?._data?.type || '').toLowerCase()
+  if (type === 'ptt' || type === 'voice') return 'voice'
+  if (type === 'audio') return 'audio'
+  return null
+}
+
+/**
+ * Download voice/audio media as base64 for Laravel STT.
+ * Prefers a Store/DownloadManager path: wwebjs downloadMedia() often throws
+ * Puppeteer EvaluationFailed ("r") on @lid chats even when the msg is settled.
+ * @returns {Promise<{kind: string, mime_type: string, filename: string, data_base64: string}|null>}
+ */
+async function downloadVoiceMedia(msg, kind) {
+  if (!kind || !msg) return null
+
+  // WA Web 2.3000+: id._serialized renamed to id.$1 → wwebjs passes undefined → "r".
+  normalizeMsgSerialized(msg)
+  const hint = messageKeyHint(msg) || {}
+  hint.type = kind === 'audio' ? 'audio' : 'ptt'
+  const tryWwebjs = async (target) => {
+    if (!target || typeof target.downloadMedia !== 'function') return null
+    normalizeMsgSerialized(target)
+    // Last-chance: force the serialized string wwebjs will pass into Msg.get.
+    const sid = messageSerializedId(target)
+    if (sid && target.id && typeof target.id === 'object' && !target.id._serialized) {
+      target.id._serialized = sid
+    }
+    const media = await target.downloadMedia()
+    if (!media?.data) return null
+    const mime = String(media.mimetype || media.mimeType || 'audio/ogg; codecs=opus')
+    const filename = String(media.filename || (mime.includes('ogg') ? 'voice.ogg' : 'voice.m4a'))
+    return {
+      kind,
+      mime_type: mime,
+      filename,
+      data_base64: String(media.data),
+    }
+  }
+
+  const tryStoreDownload = async () => {
+    if (!client?.pupPage || !hint) return { ok: false, reason: 'no_page_or_hint' }
+    try {
+      return await client.pupPage.evaluate(async (hintObj, finderSrc) => {
+        // eslint-disable-next-line no-new-func
+        eval(finderSrc)
+        const found = await findMsgInStore(hintObj)
+        const msg = found?.msg
+        if (!msg) {
+          return { ok: false, reason: 'not_in_store', via: found?.via || null }
+        }
+
+        // Force media resolve when WA still has a spinner / deferred stage.
+        const waitResolved = async () => {
+          const start = Date.now()
+          while (Date.now() - start < 8000) {
+            const stage = String(msg.mediaData?.mediaStage || '')
+            if (stage === 'RESOLVED') return stage
+            if (stage.includes('ERROR') || stage === 'REUPLOADING') return stage
+            try {
+              if (typeof msg.downloadMedia === 'function') {
+                await msg.downloadMedia({
+                  downloadEvenIfExpensive: true,
+                  rmrReason: 1,
+                })
+              }
+            } catch (_) { /* keep polling */ }
+            await new Promise((r) => setTimeout(r, 350))
+          }
+          return String(msg.mediaData?.mediaStage || '')
+        }
+
+        const stage = await waitResolved()
+        if (stage.includes('ERROR') || stage === 'REUPLOADING') {
+          return { ok: false, reason: 'media_stage_' + stage }
+        }
+
+        const type = String(msg.type || hintObj.type || 'ptt')
+        const mime =
+          String(msg.mimetype || '')
+          || (type === 'ptt' || type === 'voice'
+            ? 'audio/ogg; codecs=opus'
+            : 'audio/mpeg')
+
+        // Prefer media keys from the live Store model (not the Node proxy).
+        const directPath = msg.directPath || msg.mediaObject?.directPath
+        const encFilehash = msg.encFilehash || msg.mediaObject?.encFilehash
+        const filehash = msg.filehash || msg.mediaObject?.filehash
+        const mediaKey = msg.mediaKey || msg.mediaObject?.mediaKey
+        const mediaKeyTimestamp = msg.mediaKeyTimestamp || msg.mediaObject?.mediaKeyTimestamp
+
+        if (!mediaKey || !directPath) {
+          return {
+            ok: false,
+            reason: 'missing_media_keys',
+            stage,
+            hasKey: Boolean(mediaKey),
+            hasPath: Boolean(directPath),
+            via: found?.via || null,
+          }
+        }
+
+        try {
+          const mockQpl = {
+            addAnnotations() { return this },
+            addPoint() { return this },
+          }
+          const DownloadManager = window.require('WAWebDownloadManager')
+          const decrypted = await DownloadManager.downloadManager.downloadAndMaybeDecrypt({
+            directPath,
+            encFilehash,
+            filehash,
+            mediaKey,
+            mediaKeyTimestamp,
+            type,
+            signal: (new AbortController()).signal,
+            downloadQpl: mockQpl,
+          })
+          if (!decrypted) {
+            return { ok: false, reason: 'decrypt_empty', stage }
+          }
+          const data = await window.WWebJS.arrayBufferToBase64Async(decrypted)
+          if (!data) {
+            return { ok: false, reason: 'b64_empty', stage }
+          }
+          return {
+            ok: true,
+            data,
+            mimetype: mime,
+            filename: String(msg.filename || (mime.includes('ogg') ? 'voice.ogg' : 'voice.m4a')),
+            stage,
+            via: found?.via || 'store',
+          }
+        } catch (e) {
+          return {
+            ok: false,
+            reason: 'decrypt_throw',
+            err: String(e && (e.message || e)) || 'unknown',
+            stage,
+            hasKey: Boolean(mediaKey),
+            hasPath: Boolean(directPath),
+          }
+        }
+      }, hint, FIND_MSG_IN_STORE_JS)
+    } catch (err) {
+      return { ok: false, reason: 'evaluate_throw', err: formatErr(err) }
+    }
+  }
+
+  let lastErr = null
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      let target = msg
+      if (attempt > 1) {
+        await settleInboundMessage(msg)
+        await sleep(400 * attempt)
+        target = (await reloadMessage(msg)) || msg
+      } else {
+        await settleInboundMessage(msg)
+      }
+
+      // 1) Official wwebjs helper (fast when it works).
+      try {
+        const viaWweb = await tryWwebjs(target)
+        if (viaWweb) {
+          if (attempt > 1) console.log(`[spike] voice download ok wwebjs try=${attempt}`)
+          return viaWweb
+        }
+      } catch (err) {
+        lastErr = err
+        console.error(`[spike] voice wwebjs failed try=${attempt}:`, formatErr(err))
+      }
+
+      // 2) Direct Store + DownloadManager (survives many LID / EvaluationFailed "r" cases).
+      const viaStore = await tryStoreDownload()
+      if (viaStore?.ok && viaStore.data) {
+        console.log(
+          `[spike] voice download ok store try=${attempt} via=${viaStore.via} stage=${viaStore.stage || '?'}`,
+        )
+        return {
+          kind,
+          mime_type: String(viaStore.mimetype || 'audio/ogg; codecs=opus'),
+          filename: String(viaStore.filename || 'voice.ogg'),
+          data_base64: String(viaStore.data),
+        }
+      }
+      console.log(
+        `[spike] voice store miss try=${attempt}:`,
+        viaStore?.reason || 'unknown',
+        viaStore?.err ? `err=${viaStore.err}` : '',
+        viaStore?.hasKey === false ? 'no_mediaKey' : '',
+      )
+    } catch (err) {
+      lastErr = err
+      console.error(`[spike] voice download failed try=${attempt}:`, formatErr(err))
+    }
+    await sleep(350 * attempt)
+  }
+
+  if (lastErr) {
+    console.error('[spike] voice download gave up:', formatErr(lastErr))
+  }
+  return null
+}
+
 
 async function resolveSenderContact(msg, senderRaw) {
   let contact = null
@@ -910,8 +1162,8 @@ function messageKeyHint(msg) {
   return {
     serialized,
     stanza: stanza ? String(stanza) : null,
-    remote: remote ? String(remote?._serialized || remote) : null,
-    participant: participant ? String(participant?._serialized || participant) : null,
+    remote: remote ? String(remote?._serialized || remote?.$1 || remote) : null,
+    participant: participant ? String(participant?._serialized || participant?.$1 || participant) : null,
     fromMe,
     t: Number(msg.timestamp || data.t || 0) || 0,
     body: String(msg.body || data.body || '').slice(0, 80),
@@ -925,6 +1177,7 @@ function messageKeyHint(msg) {
 const FIND_MSG_IN_STORE_JS = `function serializeStoreMsgId(m) {
   if (!m || !m.id) return null
   if (m.id._serialized) return String(m.id._serialized)
+  if (m.id.$1) return String(m.id.$1)
   try {
     if (typeof m.id.toString === 'function') {
       const s = String(m.id.toString())
@@ -933,12 +1186,12 @@ const FIND_MSG_IN_STORE_JS = `function serializeStoreMsgId(m) {
   } catch (_) {}
   const fromMe = m.id.fromMe ? 'true' : 'false'
   let remote = m.id.remote
-  if (remote && typeof remote === 'object') remote = remote._serialized || ''
+  if (remote && typeof remote === 'object') remote = remote._serialized || remote.$1 || ''
   remote = String(remote || '')
   const stanza = m.id.id || ''
   let participant = m.id.participant
   if (participant && typeof participant === 'object') {
-    participant = participant._serialized || ''
+    participant = participant._serialized || participant.$1 || ''
   }
   participant = participant ? String(participant) : ''
   if (!remote || !stanza) return null
@@ -1089,7 +1342,9 @@ async function findInboundInStore(hint) {
 }
 
 /**
- * Private DMs: natural conversation — no @mentions, no forced name prefix.
+ * Private DMs: natural conversation — no forced asker @greeting.
+ * Mid-body @phone tags (e.g. admin ack "I notified @234…") still need a
+ * mentions[] JID list or WhatsApp leaves them as plain digits (not green).
  * Groups: always swipe-quote the asker's message + real @id mention.
  *
  * Quote strategy (wwebjs + WA Web):
@@ -1106,27 +1361,37 @@ async function replyInContext(msg, text, { isGroup, senderRaw, fromName, contact
 
   if (!isGroup) {
     let body = stripFakeAtDisplayNames(text)
+    // Greeting-style leading @digits only (not mid-body "I notified @234…").
     body = body.replace(/^@\d{6,}\b[,\s]*/u, '').trim()
     body = body.replace(/^@~?(?!\d)[\p{L}\p{N}._ -]{1,60},\s*/u, '').trim()
+
+    const mentionJids = phoneMentionJidsFromText(body)
+    const sendOpts = { ignoreQuoteErrors: false }
+    if (mentionJids.length > 0) {
+      sendOpts.mentions = mentionJids
+    }
 
     await settleInboundMessage(liveMsg || msg)
     liveMsg = (await reloadMessage(liveMsg || msg)) || liveMsg || msg
     await sendTyping(liveMsg)
 
     try {
-      const sent = await liveMsg.reply(body, undefined, { ignoreQuoteErrors: false })
+      const sent = await liveMsg.reply(body, undefined, sendOpts)
       rememberBotOutboundId(sent)
       const quoted = await messageLooksQuoted(sent)
-      console.log(`[spike] send ok private quoted=${quoted ? 'msg.reply' : 'NONE'} mentions=0`)
-      return { mentioned: false, to: null, quoted }
+      console.log(
+        `[spike] send ok private quoted=${quoted ? 'msg.reply' : 'NONE'}`
+          + ` mentions=${mentionJids.length}`,
+      )
+      return { mentioned: mentionJids.length > 0, to: mentionJids[0] || null, quoted }
     } catch (err) {
       console.error('[spike] private reply failed, plain send:', formatErr(err))
     }
     try {
       const chat = await resolveChat(liveMsg)
-      const sent = await chat.sendMessage(body)
+      const sent = await chat.sendMessage(body, mentionJids.length ? { mentions: mentionJids } : {})
       rememberBotOutboundId(sent)
-      return { mentioned: false, to: null, quoted: false }
+      return { mentioned: mentionJids.length > 0, to: mentionJids[0] || null, quoted: false }
     } catch (err2) {
       console.error('[spike] private plain send failed:', formatErr(err2))
       return { mentioned: false, quoted: false }
@@ -1484,14 +1749,41 @@ function debugLog(...args) {
   if (SPIKE_DEBUG) console.log('[spike:debug]', ...args)
 }
 
+/**
+ * WA Web renamed id._serialized → id.$1 on some builds. Prefer either.
+ * @param {any} id
+ */
+function idSerialized(id) {
+  if (!id) return null
+  if (typeof id === 'string') return id.includes('@') || id.includes('_') ? id : null
+  const s = id._serialized || id.$1 || null
+  return s ? String(s) : null
+}
+
+/** Ensure Node-side Message.id has _serialized so wwebjs downloadMedia/getMessageById work. */
+function normalizeMsgSerialized(msg) {
+  if (!msg) return null
+  const fill = (obj) => {
+    if (!obj || typeof obj !== 'object') return
+    if (!obj._serialized && obj.$1) obj._serialized = obj.$1
+  }
+  fill(msg.id)
+  fill(msg._data?.id)
+  // Also fill WID-like fields that Store helpers may read.
+  fill(typeof msg.from === 'object' ? msg.from : null)
+  fill(typeof msg.author === 'object' ? msg.author : null)
+  return idSerialized(msg.id) || messageSerializedId(msg)
+}
+
 /** Stable serialized id — message_create often lacks id._serialized until later. */
 function messageSerializedId(msg) {
   if (!msg) return null
-  const direct = msg.id?._serialized
-  if (direct) return String(direct)
+  const direct = idSerialized(msg.id)
+  if (direct) return direct
   if (typeof msg.id === 'string' && msg.id.includes('@')) return msg.id
   const dataId = msg._data?.id
-  if (dataId?._serialized) return String(dataId._serialized)
+  const fromData = idSerialized(dataId)
+  if (fromData) return fromData
   if (typeof dataId === 'string' && dataId) return dataId
   const stanza = msg.id?.id || dataId?.id
   const remote = String(msg.from || dataId?.remote || '')
@@ -1681,6 +1973,8 @@ function formatErr(err) {
 
 async function handleInboundMessage(msg, source) {
   try {
+    // Backfill id._serialized from id.$1 (WA Web rename) before any Store lookup.
+    normalizeMsgSerialized(msg)
     const sid = messageSerializedId(msg)
     const fingerprint = `t:${msg.timestamp}|f:${msg.from}|a:${msg.author || ''}|b:${String(msg.body || '').slice(0, 120)}`
     const keys = [sid, fingerprint].filter(Boolean)
@@ -1720,7 +2014,9 @@ async function handleInboundMessage(msg, source) {
       console.log(`[spike] skip non-chat (${source}) from=${fromRaw}`)
       return
     }
-    if (!text) {
+
+    const voiceKind = voiceMediaKind(msg)
+    if (!text && !voiceKind) {
       console.log(`[spike] skip empty body (${source}) from=${fromRaw}`)
       return
     }
@@ -1773,13 +2069,99 @@ async function handleInboundMessage(msg, source) {
     // Do NOT show typing yet — Laravel may still decide this turn is undirected
     // (incidental @, chatter, etc.). Typing starts only after we have a reply.
     await ensureMessageId(msg, 600)
-    const settlePromise = settleInboundMessage(msg)
+    // Settle BEFORE media download — message_create often races Store media keys
+    // (Puppeteer EvaluationFailed "r" / empty download).
+    await settleInboundMessage(msg)
+
+    let mediaPayload = null
+    let inboundText = text
+    if (voiceKind) {
+      mediaPayload = await downloadVoiceMedia(msg, voiceKind)
+      if (!mediaPayload && !text) {
+        console.log('[spike] voice download empty; telling member to resend / type')
+        const stopTyping = startTypingHeartbeat(msg)
+        try {
+          await replyInContext(
+            msg,
+            "I couldn't download that voice note clearly.\n\n"
+              + 'Mind sending it again, or type the question?',
+            { isGroup, senderRaw, fromName, contact },
+          )
+        } finally {
+          stopTyping()
+        }
+        return
+      }
+    } else if (
+      quote.quoted_voice_kind
+      && (barePing || mentioned || replyToBot)
+    ) {
+      // "@zak" (or reply) on a quoted voice note → transcribe THAT note, not ping-intro.
+      let quotedTarget = quote.quoted_msg
+      if (!quotedTarget && quote.quoted_message_id && typeof client?.getMessageById === 'function') {
+        try {
+          quotedTarget = await client.getMessageById(String(quote.quoted_message_id))
+          console.log(
+            `[spike] quoted voice reloaded via id=${quote.quoted_message_id} `
+              + `ok=${Boolean(quotedTarget)}`,
+          )
+        } catch (err) {
+          console.error('[spike] quoted voice reload failed:', formatErr(err))
+        }
+      }
+      if (quotedTarget) {
+        const kind = quote.quoted_voice_kind || voiceMediaKind(quotedTarget)
+        console.log(`[spike] downloading quoted ${kind} for directed ask`)
+        mediaPayload = await downloadVoiceMedia(quotedTarget, kind)
+      } else {
+        console.log(
+          `[spike] quoted voice detected (kind=${quote.quoted_voice_kind}) `
+            + 'but message object missing — cannot download',
+        )
+      }
+      if (mediaPayload && barePing) {
+        // Drop bare @zak so STT transcript becomes the real ask.
+        inboundText = ''
+      }
+      if (!mediaPayload) {
+        // Never send the "[voice note]" placeholder to Laravel as the question —
+        // that RAG'd into "I don't have a solid answer" on WhatsApp.
+        console.log('[spike] quoted voice download empty; clearing voice placeholder')
+        quote.quoted_text = null
+        if (barePing && !inboundText) {
+          inboundText = ''
+        }
+      }
+    }
+
+    // Quoted voice directed at Zak but audio never arrived → honest failure, not fake ask.
+    if (
+      !mediaPayload
+      && !voiceKind
+      && quote.quoted_voice_kind
+      && (barePing || mentioned || replyToBot)
+      && !String(inboundText || '').trim()
+    ) {
+      console.log('[spike] quoted voice unavailable; telling member to resend')
+      const stopTyping = startTypingHeartbeat(msg)
+      try {
+        await replyInContext(
+          msg,
+          "I couldn't download that voice note clearly.\n\n"
+            + 'Mind sending it again as a voice reply to me, or type the question?',
+          { isGroup, senderRaw, fromName, contact },
+        )
+      } finally {
+        stopTyping()
+      }
+      return
+    }
 
     let reply = null
     try {
-      reply = await callLaravelInbound({
+      const inbound = {
         from,
-        text,
+        text: inboundText,
         message_id: messageSerializedId(msg),
         chat_type: chatType,
         chat_id: chatId,
@@ -1795,15 +2177,20 @@ async function handleInboundMessage(msg, source) {
         quoted_from: quote.quoted_from,
         quoted_message_id: quote.quoted_message_id,
         mentions,
-      })
+      }
+      if (mediaPayload) {
+        inbound.media = mediaPayload
+        if (quote.quoted_voice_kind && !voiceKind) {
+          inbound.quoted_voice = true
+        }
+      }
+      reply = await callLaravelInbound(inbound)
     } catch (err) {
       console.error('[spike] laravel inbound failed:', formatErr(err))
     }
 
-    await settlePromise
-
     if (reply) {
-      // Confirmed we'll answer — type while composing/sending the reply.
+      // Confirmed we'll answer - type while composing/sending the reply.
       const stopTyping = startTypingHeartbeat(msg)
       let meta
       try {
@@ -1824,8 +2211,9 @@ async function handleInboundMessage(msg, source) {
             : ' private'),
       )
     } else {
-      console.log('[spike] silent (no reply from Laravel — not for Zak / nothing to say)')
+      console.log('[spike] silent (no reply from Laravel - not for Zak / nothing to say)')
     }
+
   } catch (err) {
     console.error('[spike] message handler error:', err.message || err)
   }

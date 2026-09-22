@@ -224,7 +224,9 @@ class AnswerPolisher:
                 "English member_question → English reply. "
                 "If member_question is not English, translate the whole draft into that "
                 "language. Do not return Yoruba/French/etc. for an English question, "
-                "and do not return English just because draft_reply is English."
+                "and do not return English just because draft_reply is English. "
+                "If a proper noun looks like voice-STT gibberish but community notes "
+                "show the clear official name, use the notes' spelling."
             )
         parts.append(fence_untrusted("draft_reply", draft, max_chars=6000))
         response = await self._chat.generate(

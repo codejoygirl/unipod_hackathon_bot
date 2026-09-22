@@ -622,6 +622,9 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('/ask', $wa);
         $this->assertStringContainsString('/share', $wa);
         $this->assertStringContainsString('/feature', $wa);
+        $this->assertStringContainsString('request a new feature or improve an existing one', $wa);
+        $this->assertStringContainsString('*@mention*', $wa);
+        $this->assertStringContainsString('*reply*', $wa);
         $this->assertStringContainsString('Telegram', $wa);
         $this->assertStringContainsString('https://t.me/zak_community_bot', $wa);
         $this->assertStringContainsString('Web chat', $wa);
@@ -821,5 +824,47 @@ class ChannelConversationServiceTest extends TestCase
             'telegram_html',
         );
         $this->assertStringContainsString('A &lt;b&gt;trick&lt;/b&gt; &amp; more', $escaped);
+    }
+
+    public function test_short_intro_stacks_channel_links_not_one_jammed_line(): void
+    {
+        config([
+            'zak_presence.show_web_chat' => true,
+            'zak_presence.web_chat_url' => 'http://localhost:3000',
+            'zak_presence.telegram_handle' => 'zak_meti_26_bot',
+            'zak_presence.telegram_url' => '',
+            'zak_presence.whatsapp_url' => 'https://wa.me/2347041131371',
+        ]);
+
+        $svc = new ChannelConversationService;
+        $wa = $svc->shortIntro('whatsapp', 'whatsapp', 'group');
+
+        $this->assertStringContainsString('*Also reach me on*', $wa);
+        $this->assertStringContainsString("*Telegram*\nhttps://t.me/zak_meti_26_bot", $wa);
+        $this->assertStringContainsString("*Web chat*\nhttp://localhost:3000", $wa);
+        $this->assertStringContainsString('*Private chat*', $wa);
+        $this->assertStringNotContainsString('Also on:', $wa);
+        $this->assertStringNotContainsString(' · ', $wa);
+    }
+
+    public function test_feature_usage_reply_explains_request_or_improve(): void
+    {
+        $svc = new ChannelConversationService;
+
+        $wa = $svc->featureUsageReply('whatsapp');
+        $this->assertStringContainsString('```/feature```', $wa);
+        $this->assertStringContainsString('*new feature*', $wa);
+        $this->assertStringContainsString('*improve*', $wa);
+        $this->assertStringContainsString('/feature Add reminders', $wa);
+        $this->assertStringContainsString('/feature Make group replies shorter', $wa);
+
+        $plain = $svc->featureUsageReply('plain');
+        $this->assertStringContainsString('new feature', $plain);
+        $this->assertStringContainsString('improve', $plain);
+        $this->assertStringNotContainsString('*new feature*', $plain);
+
+        $queued = $svc->featureQueuedReply(true);
+        $this->assertStringContainsString('*feature request*', $queued);
+        $this->assertStringContainsString('*admin*', $queued);
     }
 }
