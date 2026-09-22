@@ -81,6 +81,7 @@ def test_system_prompt_contains_critical_invariants():
     assert "\u2014" not in prompt
     assert "Yoruba" in prompt
     assert "Never switch into English" in prompt
+    assert "AMBIGUOUS REFERENCES" in prompt
 
 def test_build_user_prompt_combines_context_and_query():
     xml = '<context><evidence id="E1">Content</evidence></context>'

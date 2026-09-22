@@ -6,9 +6,12 @@ namespace App\Http\Controllers\Api\V1\Internal;
 
 use App\DTOs\Channels\InboundMessage;
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessTelegramSpikeInbound;
+use App\Services\Channels\ChannelConversationService;
 use App\Services\Channels\TelegramSpikeAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 final class TelegramSpikeController extends Controller
 {
@@ -45,21 +48,48 @@ final class TelegramSpikeController extends Controller
             return response()->json([
                 'data' => [
                     'reply' => '',
+                    'accepted' => false,
+                    'queued' => false,
                     'channel' => $this->adapter->channelName(),
                 ],
             ], 200, [], JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
         }
 
-        $reply = $this->adapter->handleInbound(
-            InboundMessage::fromSpikePayload($validated, 'telegram_spike')
-        );
+        // Default sync so the Python sidecar keeps waiting for data.reply.
+        if ((bool) config('telegram_spike.process_sync', true)) {
+            try {
+                $reply = $this->adapter->handleInbound(
+                    InboundMessage::fromSpikePayload($validated, 'telegram_spike')
+                );
+            } catch (\Throwable $e) {
+                Log::error('telegram_spike.controller_inbound_failed', [
+                    'error' => $e->getMessage(),
+                    'from' => $validated['from'] ?? null,
+                ]);
+                $reply = app(ChannelConversationService::class)
+                    ->transientDeferralReply();
+            }
+
+            return response()->json([
+                'data' => [
+                    'reply' => $this->utf8Safe($reply),
+                    'accepted' => true,
+                    'queued' => false,
+                    'channel' => $this->adapter->channelName(),
+                ],
+            ], 200, [], JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+        }
+
+        ProcessTelegramSpikeInbound::dispatch($validated)->afterResponse();
 
         return response()->json([
             'data' => [
-                'reply' => $this->utf8Safe($reply),
+                'reply' => null,
+                'accepted' => true,
+                'queued' => true,
                 'channel' => $this->adapter->channelName(),
             ],
-        ], 200, [], JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+        ], 202, [], JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
     }
 
     public function mintJoin(Request $request): JsonResponse

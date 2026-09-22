@@ -113,6 +113,20 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         return in_array($chatType, ['group', 'supergroup'], true) ? 'group' : 'private';
     }
 
+    private function helpText(InboundMessage $message): string
+    {
+        $chatType = $this->chatType($message);
+        $isAdmin = $this->commandAccess->isAdmin(
+            $this->channelName(),
+            $message->externalUserId,
+            is_array($message->raw) ? $message->raw : [],
+        );
+        // Admin commands only in private DM — never expose them in group /help.
+        $showAdmin = $isAdmin && $chatType === 'private';
+
+        return $this->conversation->helpTextFor('plain', 'telegram', $showAdmin, $chatType);
+    }
+
     /**
      * @return list<array{role: string, text: string}>
      */
@@ -176,6 +190,11 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
         if (str_starts_with($upper, 'JOIN-') || str_starts_with($upper, '/JOIN')) {
             return $this->handleJoin($message);
+        }
+
+        if (str_starts_with($upper, '/HELP') || $upper === 'HELP'
+            || str_starts_with($upper, '/START') || $upper === 'START') {
+            return $this->helpText($message);
         }
 
         if (str_starts_with($upper, 'SHARE') || str_starts_with($upper, '/SHARE')) {
@@ -885,7 +904,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
         if ($result->answer === '') {
             if ($this->isTransientAiFailure($result)) {
-                return "Sorry, I can't get to that right now. Mind trying again in a bit?";
+                return $this->conversation->transientDeferralReply();
             }
 
             if ($isPrivate) {

@@ -58,4 +58,11 @@ return [
     | html: leave emphasis markers for the spike bot to render with parse_mode=HTML.
     */
     'formatting' => env('TELEGRAM_SPIKE_FORMATTING', 'plain'),
+
+    /*
+    | true (default): handle inbound in-request and return data.reply (local spike DX).
+    | false: enqueue ProcessTelegramSpikeInbound on zak.queues.channels; spike gets 202
+    | accepted and Laravel sends via Bot API from the worker.
+    */
+    'process_sync' => (bool) env('TELEGRAM_SPIKE_PROCESS_SYNC', true),
 ];

@@ -66,7 +66,8 @@ if (!SPIKE_SECRET) {
 
 // Same wording as Telegram spike when Laravel / the bot snags (no em dashes).
 const TRANSIENT_ERROR_REPLY =
-  'I hit a snag answering that just now. Mind sending it again in a moment?'
+  "Thanks — I've got your message 🙂\n\n"
+  + "I'll reply as soon as I can. No need to send it again."
 
 async function callLaravelInbound(payload) {
   const started = Date.now()
@@ -80,17 +81,22 @@ async function callLaravelInbound(payload) {
         'X-Spike-Secret': SPIKE_SECRET,
       },
       body: JSON.stringify(payload),
-      // AI classify + grounded answer can take a while; fail louder than hang forever.
+      // Sync mode: AI can take a while. Async/queued mode returns ~1s with accepted.
       signal: AbortSignal.timeout(120_000),
     })
     const body = await res.json().catch(() => ({}))
     const ms = Date.now() - started
-    if (!res.ok) {
+    if (!res.ok && res.status !== 202) {
       console.error(`[spike] Laravel inbound ${res.status} after ${ms}ms:`, JSON.stringify(body).slice(0, 500))
       // Same wording as Telegram spike when Laravel returns an error.
       return body?.data?.reply || TRANSIENT_ERROR_REPLY
     }
-    const reply = body?.data?.reply ?? null
+    const data = body?.data || {}
+    if (data.queued === true) {
+      console.log(`[spike] ← Laravel ${ms}ms queued=yes (worker will send)`)
+      return null
+    }
+    const reply = data.reply ?? null
     const len = reply ? String(reply).length : 0
     console.log(`[spike] ← Laravel ${ms}ms reply_chars=${len}`)
     return reply
@@ -2084,7 +2090,7 @@ async function handleInboundMessage(msg, source) {
           await replyInContext(
             msg,
             "I couldn't download that voice note clearly.\n\n"
-              + 'Mind sending it again, or type the question?',
+              + 'Could you send it once more, or type the question?',
             { isGroup, senderRaw, fromName, contact },
           )
         } finally {
@@ -2148,7 +2154,7 @@ async function handleInboundMessage(msg, source) {
         await replyInContext(
           msg,
           "I couldn't download that voice note clearly.\n\n"
-            + 'Mind sending it again as a voice reply to me, or type the question?',
+            + 'Could you send it once more as a voice reply to me, or type the question?',
           { isGroup, senderRaw, fromName, contact },
         )
       } finally {
@@ -2356,8 +2362,9 @@ function startOutboundServer() {
         }
       }
       rememberBotOutboundId(sent)
-      console.log(`[spike] outbound ok to=${chatId} chars=${text.length}`)
-      sendJson(200, { ok: true, to: chatId })
+      const messageId = messageSerializedId(sent)
+      console.log(`[spike] outbound ok to=${chatId} chars=${text.length} id=${messageId || 'none'}`)
+      sendJson(200, { ok: true, to: chatId, message_id: messageId })
     } catch (err) {
       console.error('[spike] outbound failed:', err.message || err)
       sendJson(500, { ok: false, error: String(err.message || err) })

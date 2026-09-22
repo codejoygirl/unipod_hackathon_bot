@@ -236,6 +236,76 @@ final class SpikeEscalationNotifier
     }
 
     /**
+     * Resolve a pending escalation from a WhatsApp swipe-reply target message id.
+     */
+    public function findEscalationIdByWhatsAppMessageId(string $messageId): ?string
+    {
+        foreach ($this->whatsappMessageIdCacheKeys($messageId) as $key) {
+            $id = Cache::get($key);
+            if (is_string($id) && $id !== '') {
+                return $id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function whatsappMessageIdCacheKeys(string $messageId): array
+    {
+        $messageId = trim($messageId);
+        if ($messageId === '') {
+            return [];
+        }
+
+        $keys = ['spike_escalation_wa_msg:'.$messageId];
+        // Bare stanza id (last segment of true_…@c.us_3EB0…)
+        if (str_contains($messageId, '_')) {
+            $bare = substr($messageId, strrpos($messageId, '_') + 1);
+            if ($bare !== '' && $bare !== $messageId) {
+                $keys[] = 'spike_escalation_wa_msg:'.$bare;
+            }
+        }
+
+        return $keys;
+    }
+
+    public function rememberWhatsAppEscalationMessage(string $messageId, string $escalationId): void
+    {
+        $escalationId = trim($escalationId);
+        if ($escalationId === '') {
+            return;
+        }
+
+        foreach ($this->whatsappMessageIdCacheKeys($messageId) as $key) {
+            Cache::put($key, $escalationId, now()->addDays(7));
+        }
+    }
+
+    /**
+     * Prefer Request ID line; fall back to `/reply REF` in the How-to-act block.
+     */
+    public function extractRefFromCardText(string $quoted): ?string
+    {
+        $quoted = trim($quoted);
+        if ($quoted === '') {
+            return null;
+        }
+
+        if (preg_match('/Request ID:\s*([A-Z0-9]+)/i', $quoted, $m) === 1) {
+            return strtoupper(trim($m[1]));
+        }
+
+        if (preg_match('/\/reply\s+([A-Z0-9]{4,12})\b/i', $quoted, $m) === 1) {
+            return strtoupper(trim($m[1]));
+        }
+
+        return null;
+    }
+
+    /**
      * Member-initiated /ask: rate-limit + blacklist aware, then escalate.
      *
      * @return array{ok: bool, reply: string}
@@ -455,14 +525,83 @@ final class SpikeEscalationNotifier
         }
 
         if ($by !== '') {
-            $msg .= " by {$by}";
+            $msg .= ' by '.$this->formatResolvedByLabel($by, $record);
         }
-        $msg .= " on {$resolvedAt}.";
+        $when = $this->formatResolvedAtLabel($resolvedAt);
+        if ($when !== '') {
+            $msg .= ' on '.$when;
+        }
+        $msg .= '.';
 
         return [
             'ok' => true,
             'reply' => $msg,
         ];
+    }
+
+    /**
+     * Admin-facing actor label: prefer @phone (tappable), never raw …@lid.
+     *
+     * @param  array<string, mixed>  $record
+     */
+    private function formatResolvedByLabel(string $by, array $record): string
+    {
+        $phone = preg_replace('/\D+/', '', (string) ($record['resolved_by_phone'] ?? '')) ?? '';
+        if ($phone !== '' && $this->looksLikeE164PhoneDigits($phone)) {
+            return '@'.$phone;
+        }
+
+        $bare = trim((string) (preg_replace('/@.*/', '', $by) ?? $by));
+        $digits = preg_replace('/\D+/', '', $bare) ?? '';
+
+        if ($bare !== '') {
+            $resolved = app(ChannelCommandAccess::class)->resolveWhatsAppAdminPhone($bare, [
+                'from_phone' => (string) ($record['resolved_by_phone'] ?? ''),
+            ]);
+            if (is_string($resolved) && $resolved !== '' && $this->looksLikeE164PhoneDigits($resolved)) {
+                return '@'.$resolved;
+            }
+        }
+
+        // Human name / @handle — keep. Opaque LID digits — hide.
+        if ($bare !== '' && ! ctype_digit($bare) && ! $this->looksLikeWhatsAppLidDigits($digits)) {
+            return ltrim($bare, '~');
+        }
+
+        return 'an admin';
+    }
+
+    /**
+     * Readable local time with timezone abbreviation + UTC offset (e.g. WAT (UTC+1)).
+     */
+    private function formatResolvedAtLabel(string $iso): string
+    {
+        $iso = trim($iso);
+        if ($iso === '') {
+            return '';
+        }
+
+        try {
+            $tzName = (string) config('app.timezone', 'UTC');
+            $dt = \Illuminate\Support\Carbon::parse($iso)->timezone($tzName);
+            $offsetSeconds = $dt->getOffset();
+            $hours = intdiv(abs($offsetSeconds), 3600);
+            $mins = intdiv(abs($offsetSeconds) % 3600, 60);
+            $sign = $offsetSeconds >= 0 ? '+' : '-';
+            $utcLabel = $mins === 0
+                ? sprintf('UTC%s%d', $sign, $hours)
+                : sprintf('UTC%s%d:%02d', $sign, $hours, $mins);
+            $abbr = $dt->format('T');
+            $stamp = $dt->format('M j, Y \a\t g:i A');
+
+            if (in_array(strtoupper($abbr), ['UTC', 'GMT', 'Z'], true)) {
+                return "{$stamp} · {$utcLabel}";
+            }
+
+            return "{$stamp} · {$abbr} ({$utcLabel})";
+        } catch (\Throwable) {
+            return $iso;
+        }
     }
 
     /**
@@ -683,13 +822,15 @@ final class SpikeEscalationNotifier
         }
 
         if ($channel === 'whatsapp_web_spike') {
-            if ($inGroup && $originChatId !== '') {
-                $mentionJid = $this->whatsappPeerJid($memberChatId, $memberPhone);
-                // Mentions in groups need a JID; prefer phone @c.us when we have one.
-                if ($mentionJid !== null && ! str_contains($mentionJid, '@')) {
-                    $mentionJid = $mentionJid.'@c.us';
-                }
+            $mentionJid = $this->whatsappPeerJid($memberChatId, $memberPhone);
+            if ($mentionJid !== null && ! str_contains($mentionJid, '@')) {
+                $digits = preg_replace('/\D+/', '', $mentionJid) ?? '';
+                $mentionJid = $this->looksLikeWhatsAppLidDigits($digits)
+                    ? $digits.'@lid'
+                    : ($digits !== '' ? $digits.'@c.us' : null);
+            }
 
+            if ($inGroup && $originChatId !== '') {
                 return $this->notifyWhatsAppMember(
                     $originChatId,
                     $text,
@@ -706,7 +847,15 @@ final class SpikeEscalationNotifier
                 return false;
             }
 
-            return $this->notifyWhatsAppMember($to, $text, null, null, $extraMentions);
+            // Private DM: quote the original ask (swipe-reply context). Skip member
+            // @mention — the peer already knows the thread; tagging is for groups.
+            return $this->notifyWhatsAppMember(
+                $to,
+                $text,
+                null,
+                $messageId !== '' ? $messageId : null,
+                $extraMentions,
+            );
         }
 
         Log::warning('spike.member_notify.unsupported_channel', [
@@ -879,6 +1028,17 @@ final class SpikeEscalationNotifier
             $ref = trim($m[1]);
             $answer = trim($m[2]);
             if ($this->findEscalationIdByRef($ref) === null) {
+                // Valid-looking Request ID that is missing/expired vs prose mistaken for an ID.
+                if (preg_match('/^[A-Z0-9]{4,12}$/i', $ref) === 1) {
+                    return [
+                        'ok' => false,
+                        'reply' => "I couldn't find request {$ref}. It may have expired — check the Request ID on the card, then:\n"
+                            ."```\n"
+                            ."/reply {$ref} Your answer here\n"
+                            ."```",
+                    ];
+                }
+
                 // Likely forgot the Request ID: "/reply I have responded"
                 return [
                     'ok' => false,
@@ -1085,12 +1245,16 @@ final class SpikeEscalationNotifier
         }
 
         $text = $this->formatAdminMessage($record, 'plain');
+        $conversation = app(ChannelConversationService::class);
+        $text = $conversation->escapeTelegramHtml($text);
+        $text = $conversation->formatCommandsInText($text, 'telegram_html');
 
         $response = Http::timeout(15)->asJson()->post(
             "https://api.telegram.org/bot{$token}/sendMessage",
             [
                 'chat_id' => $chatId,
                 'text' => $text,
+                'parse_mode' => 'HTML',
             ]
         );
 
@@ -1147,14 +1311,19 @@ final class SpikeEscalationNotifier
         }
 
         $text = $this->formatAdminMessage($record, 'whatsapp');
-        $mentionJid = $this->whatsappPeerJid(
-            trim((string) ($record['from'] ?? '')),
-            trim((string) ($record['from_phone'] ?? '')),
-        );
-        if ($mentionJid !== null && ! str_contains($mentionJid, '@')) {
-            $mentionJid = $this->looksLikeWhatsAppLidDigits(preg_replace('/\D+/', '', $mentionJid) ?? '')
-                ? $mentionJid.'@lid'
-                : $mentionJid.'@c.us';
+        $text = app(ChannelConversationService::class)->formatCommandsInText($text, 'whatsapp');
+        $mentionJid = null;
+        // Only mention WhatsApp peers — Telegram chat ids are not WA contacts.
+        if (trim((string) ($record['channel'] ?? '')) !== 'telegram_spike') {
+            $mentionJid = $this->whatsappPeerJid(
+                trim((string) ($record['from'] ?? '')),
+                trim((string) ($record['from_phone'] ?? '')),
+            );
+            if ($mentionJid !== null && ! str_contains($mentionJid, '@')) {
+                $mentionJid = $this->looksLikeWhatsAppLidDigits(preg_replace('/\D+/', '', $mentionJid) ?? '')
+                    ? $mentionJid.'@lid'
+                    : $mentionJid.'@c.us';
+            }
         }
         $any = false;
 
@@ -1193,6 +1362,11 @@ final class SpikeEscalationNotifier
             $any = true;
             // Seed phone so a later LID inbound can be linked when from_phone arrives.
             Cache::put('whatsapp_admin_phone_seen:'.$phone, true, now()->addDays(30));
+
+            $waMessageId = trim((string) ($response->json('message_id') ?? ''));
+            if ($waMessageId !== '' && is_string($record['id'] ?? null) && $record['id'] !== '') {
+                $this->rememberWhatsAppEscalationMessage($waMessageId, (string) $record['id']);
+            }
         }
 
         return $any;
@@ -1238,11 +1412,12 @@ final class SpikeEscalationNotifier
         }
 
         $channel = trim((string) ($record['channel'] ?? ''));
-        $channelLine = $channel !== '' ? "Channel: {$channel}\n\n" : '';
+        $channelLabel = $this->channelDisplayName($channel);
+        $channelLine = $channelLabel !== '' ? "Channel: {$channelLabel}\n\n" : '';
         $ref = strtoupper(trim((string) ($record['ref'] ?? '')));
         $refLine = $ref !== '' ? "Request ID: {$ref}\n\n" : '';
 
-        $why = $this->friendlyReason((string) ($record['reason'] ?? ''));
+        $why = $this->friendlyReason((string) ($record['reason'] ?? ''), $style);
         $wa = $style === 'whatsapp';
 
         if (($record['type'] ?? '') === 'share_review'
@@ -1364,7 +1539,9 @@ final class SpikeEscalationNotifier
     }
 
     /**
-     * WhatsApp: "Name: @digits" so the outbound mention paints a green, tappable contact.
+     * WhatsApp: "Name: @digits" so the outbound mention paints a green, tappable contact
+     * when the member is a real WhatsApp phone/LID. Never @-tag Telegram user ids —
+     * WhatsApp reformats them as fake international numbers (e.g. @+7 216…).
      * Telegram/plain: keep @handle when present, otherwise the display name.
      *
      * @param  array<string, mixed>  $record
@@ -1380,20 +1557,32 @@ final class SpikeEscalationNotifier
         if ($phoneDigits !== '' && $fromDigits !== '' && $phoneDigits === $fromDigits) {
             $phoneDigits = '';
         }
+        $channel = trim((string) ($record['channel'] ?? ''));
+        $telegramMember = $channel === 'telegram_spike'
+            || ($phoneDigits === '' && $fromDigits !== '' && ! $this->looksLikeWhatsAppLidDigits($fromDigits)
+                && ! $this->looksLikeE164PhoneDigits($fromDigits));
 
         if ($style === 'whatsapp') {
-            $tag = '';
-            if ($phoneDigits !== '' && strlen($phoneDigits) >= 10 && strlen($phoneDigits) <= 13) {
-                $tag = $phoneDigits;
-            } elseif ($fromDigits !== '') {
-                $tag = $fromDigits;
-            }
-            if ($tag !== '') {
-                // WA replaces @digits with the contact name when mentions[] is set.
-                return 'Name: @'.$tag;
+            // Only @-mention real WhatsApp peers (phone or LID) — never Telegram chat ids.
+            if (! $telegramMember) {
+                $tag = '';
+                if ($phoneDigits !== '' && ($this->looksLikeE164PhoneDigits($phoneDigits) || $this->looksLikeWhatsAppLidDigits($phoneDigits))) {
+                    $tag = $phoneDigits;
+                } elseif ($fromDigits !== '' && ($this->looksLikeE164PhoneDigits($fromDigits) || $this->looksLikeWhatsAppLidDigits($fromDigits))) {
+                    $tag = $fromDigits;
+                }
+                if ($tag !== '') {
+                    // WA replaces @digits with the contact name when mentions[] is set.
+                    return 'Name: @'.$tag;
+                }
             }
             if ($name !== '') {
                 return 'Name: '.$name;
+            }
+            if ($fromDigits !== '') {
+                return $telegramMember
+                    ? 'Name: Telegram user '.$fromDigits
+                    : 'Name: '.$fromDigits;
             }
 
             return 'Name: Unknown';
@@ -1407,6 +1596,27 @@ final class SpikeEscalationNotifier
         }
 
         return 'Name: Unknown';
+    }
+
+    /**
+     * Human label for admin cards (never raw adapter keys like telegram_spike).
+     */
+    private function channelDisplayName(string $channel): string
+    {
+        return match (trim($channel)) {
+            'telegram_spike' => 'Telegram',
+            'whatsapp_web_spike', 'whatsapp_zavu' => 'WhatsApp',
+            '' => '',
+            default => trim($channel),
+        };
+    }
+
+    private function looksLikeE164PhoneDigits(string $digits): bool
+    {
+        $len = strlen($digits);
+
+        // E.164 without +: country code + NSN, typically 10–13 digits.
+        return $len >= 10 && $len <= 13;
     }
 
     /**
@@ -1883,20 +2093,25 @@ final class SpikeEscalationNotifier
         return true;
     }
 
-    private function friendlyReason(string $reason): string
+    private function friendlyReason(string $reason, string $style = 'plain'): string
     {
         $lower = strtolower($reason);
+        $conversation = app(ChannelConversationService::class);
+        $cmdStyle = $style === 'whatsapp' ? 'whatsapp' : ($style === 'telegram_html' ? 'telegram_html' : 'plain');
 
         if (str_contains($lower, 'member_share')) {
-            return 'The member used /share so an admin can approve it for the knowledge base.';
+            return 'The member used '.$conversation->highlightCommand('/share', $cmdStyle)
+                .' so an admin can approve it for the knowledge base.';
         }
 
         if (str_contains($lower, 'member_feature')) {
-            return 'The member used /feature so an admin can approve or decline the suggestion.';
+            return 'The member used '.$conversation->highlightCommand('/feature', $cmdStyle)
+                .' so an admin can approve or decline the suggestion.';
         }
 
         if (str_contains($lower, 'member_ask')) {
-            return 'The member used /ask so an admin can see this and reply.';
+            return 'The member used '.$conversation->highlightCommand('/ask', $cmdStyle)
+                .' so an admin can see this and reply.';
         }
 
         if (str_contains($lower, 'insufficient')

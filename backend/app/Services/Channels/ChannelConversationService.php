@@ -1056,7 +1056,10 @@ final class ChannelConversationService
         return str_contains($q, "don't have a solid answer")
             || str_contains($q, 'passed it along')
             || str_contains($q, 'hit a snag')
-            || str_contains($q, 'mind sending it again');
+            || str_contains($q, 'mind sending it again')
+            || str_contains($q, "i'll reply as soon as i can")
+            || str_contains($q, 'no need to send it again')
+            || str_contains($q, "i've got your message");
     }
 
     /**
@@ -1651,14 +1654,25 @@ final class ChannelConversationService
 
     public function voiceNoteFailedReply(): string
     {
-        return "I couldn't catch that voice note clearly.\n\n"
-            .'Mind sending it again, or type the question instead?';
+        return "I couldn't catch that voice note clearly 🎧\n\n"
+            .'Could you send it once more, or type the question?';
     }
 
     public function voiceNoteTooLongReply(): string
     {
-        return "That voice note is a bit long for me to process right now.\n\n"
+        return "That voice note is a bit long for me right now ⏱️\n\n"
             .'Try a shorter clip (about a minute), or type the question.';
+    }
+
+    /**
+     * Soft deferral when a turn fails transiently (sync snag or after queue retries).
+     * Industry pattern: acknowledge receipt + set expectation — do not ask them to resend.
+     * Jobs should rethrow so Redis retries; only send this on final failure / sync catch.
+     */
+    public function transientDeferralReply(): string
+    {
+        return "Thanks — I've got your message 🙂\n\n"
+            ."I'll reply as soon as I can. No need to send it again.";
     }
 
     /**
@@ -1685,6 +1699,36 @@ final class ChannelConversationService
         }
 
         return $command;
+    }
+
+    /**
+     * Wrap known bot commands in channel formatting anywhere they appear in copy.
+     * Skips fenced ```…``` blocks and never touches URL path segments.
+     *
+     * @param  'whatsapp'|'telegram_html'|'plain'  $style
+     */
+    public function formatCommandsInText(string $text, string $style = 'whatsapp'): string
+    {
+        if ($style === 'plain' || $text === '') {
+            return $text;
+        }
+
+        $pattern = '/```[\s\S]*?```|<code>[\s\S]*?<\/code>|\/(?:ask|share|feature|help|join|start|export|import|asset|approve|decline|reply|blacklist|unblacklist)\b/iu';
+
+        $formatted = preg_replace_callback(
+            $pattern,
+            function (array $m) use ($style): string {
+                $token = $m[0];
+                if (str_starts_with($token, '```') || str_starts_with($token, '<code>')) {
+                    return $token;
+                }
+
+                return $this->highlightCommand($token, $style);
+            },
+            $text
+        );
+
+        return is_string($formatted) ? $formatted : $text;
     }
 
     /**
@@ -2214,7 +2258,8 @@ final class ChannelConversationService
     }
 
     /**
-     * Member-facing /help (no admin commands).
+     * Member-facing /help and /start (no admin commands).
+     * WhatsApp + Telegram share the same content; only emphasis/wrapping differs.
      *
      * @param  'plain'|'whatsapp'  $style
      * @param  'whatsapp'|'telegram'|'web'|null  $currentChannel
@@ -2227,50 +2272,219 @@ final class ChannelConversationService
     ): string {
         $channels = $this->channelsAccessBlock($style, $currentChannel, $chatType);
         $scope = $this->friendlyScopeSummary(null);
+        $bot = $this->botDisplayName();
+        $examples = $this->formatHelpExampleLines($this->rotatingHelpExamples());
 
         if ($style === 'whatsapp') {
-            $bot = $this->botDisplayName();
-
-            return "*Hi - I'm {$bot}*\n\n"
+            return "*Hi - I'm {$bot}* 👋\n\n"
                 ."I help with {$scope}.\n"
                 .$this->anyLanguageHint()."\n\n"
-                ."*You can ask me things like*\n"
-                ."• When is the next session?\n"
-                ."• What's the meeting link?\n"
-                ."• Share today's updates\n"
-                ."• Who should I talk to about X?\n\n"
+                ."*What I can do*\n"
+                ."• Answer questions from community knowledge - schedules, links, people, updates 💬\n"
+                ."• Catch you up on what you missed, with sources when I have them 🔎\n"
+                ."• Take a tip via /share (an admin reviews it before I use it) ✍️\n"
+                ."• Take a /feature request or improvement idea for admin review 💡\n"
+                ."• Hear voice notes and reply in your language 🎧\n\n"
+                ."*If I don't have an answer yet*\n"
+                ."I'll pass it along and notify you once one is available - "
+                ."no need to keep asking 🙂\n\n"
+                ."*Try asking*\n"
+                .$examples."\n\n"
                 .($channels !== '' ? $channels."\n\n" : '')
                 ."*Quick commands*\n"
-                ."```\n"
-                ."/ask      ask about schedules, links, or updates\n"
-                ."/share    tell the community something worth knowing\n"
-                ."/feature  request a new feature or improve an existing one\n"
-                ."/help     show this guide\n"
-                ."```\n\n"
+                .$this->formatMemberCommandHelp('whatsapp')."\n\n"
                 ."Or just type in plain language - no command needed.\n"
                 .'In group chats, '.$this->emphasisLabel('@mention', 'whatsapp')
                 .' me or '.$this->emphasisLabel('reply', 'whatsapp')
                 .' to my message so I know you mean me.';
         }
 
-        $bot = $this->botDisplayName();
-
-        return "Hi - I'm {$bot}\n\n"
+        return "Hi - I'm {$bot} 👋\n\n"
             ."I help with {$scope}.\n"
             .$this->anyLanguageHint()."\n\n"
-            ."You can ask me things like:\n"
-            ."• When is the next session?\n"
-            ."• What's the meeting link?\n"
-            ."• Share today's updates\n"
-            ."• Who should I talk to about X?\n\n"
+            ."What I can do:\n"
+            ."• Answer questions from community knowledge - schedules, links, people, updates 💬\n"
+            ."• Catch you up on what you missed, with sources when I have them 🔎\n"
+            ."• Take a tip via /share (an admin reviews it before I use it) ✍️\n"
+            ."• Take a /feature request or improvement idea for admin review 💡\n"
+            ."• Hear voice notes and reply in your language 🎧\n\n"
+            ."If I don't have an answer yet:\n"
+            ."I'll pass it along and notify you once one is available - "
+            ."no need to keep asking 🙂\n\n"
+            ."Try asking:\n"
+            .$examples."\n\n"
             .($channels !== '' ? $channels."\n\n" : '')
             ."Quick commands:\n"
-            ."/ask - ask about schedules, links, or updates from the community\n"
-            ."/share - tell the community something worth knowing (admin reviews it first)\n"
-            ."/feature - request a new feature or improve an existing one (admin reviews it)\n"
-            ."/join - connect with an invite code\n"
-            ."/help - show this guide\n\n"
-            .'Or just type in plain language - no command needed.';
+            .$this->formatMemberCommandHelp('plain')."\n\n"
+            ."Or just type in plain language - no command needed.\n"
+            .'In group chats, @mention me or reply to my message so I know you mean me.';
+    }
+
+    /**
+     * Rotating example asks so /help and /start feel fresh (English structural copy only).
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    public function rotatingHelpExamples(): array
+    {
+        /** @var list<list<array{0: string, 1: string}>> $sets */
+        $sets = [
+            [
+                ['When is the next session?', '📅'],
+                ["What's the meeting link?", '🔗'],
+                ["Share today's updates", '📰'],
+                ['Who should I talk to about X?', '👤'],
+            ],
+            [
+                ['Any deadlines this week?', '⏰'],
+                ['Where are the session recordings?', '🎬'],
+                ['What did I miss yesterday?', '📝'],
+                ['Is there a form I still need to fill?', '📋'],
+            ],
+            [
+                ['When does onboarding start?', '🚀'],
+                ['Send me the join link for today', '🔗'],
+                ["What's new in the community?", '✨'],
+                ['Who is the mentor for my cohort?', '👤'],
+            ],
+            [
+                ['Is there a meeting tomorrow?', '📆'],
+                ['Do you have the Drive folder?', '📁'],
+                ['Summarise this week\'s updates', '🗞️'],
+                ['Who can help with my application?', '🤝'],
+            ],
+        ];
+
+        $index = random_int(0, count($sets) - 1);
+
+        return $sets[$index];
+    }
+
+    /**
+     * @param  list<array{0: string, 1: string}>  $examples
+     */
+    public function formatHelpExampleLines(array $examples): string
+    {
+        $lines = [];
+        foreach ($examples as $row) {
+            $text = (string) ($row[0] ?? '');
+            $emoji = (string) ($row[1] ?? '');
+            if ($text === '') {
+                continue;
+            }
+            $lines[] = $emoji !== '' ? "• {$text} {$emoji}" : "• {$text}";
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Rotating sample invocations for member /commands (English structural UX only).
+     *
+     * @return array{ask: string, share: string, feature: string}
+     */
+    public function rotatingMemberCommandExamples(): array
+    {
+        /** @var list<array{ask: string, share: string, feature: string}> $sets */
+        $sets = [
+            [
+                'ask' => '/ask When is the next session?',
+                'share' => '/share Clinic moved to 3pm tomorrow',
+                'feature' => '/feature Remind me a day before deadlines',
+            ],
+            [
+                'ask' => '/ask Where are the session recordings?',
+                'share' => '/share Join link for Friday is in the Drive folder',
+                'feature' => '/feature Add a weekly summary every Monday',
+            ],
+            [
+                'ask' => '/ask Who is the mentor for my cohort?',
+                'share' => '/share Onboarding starts Monday at 10am',
+                'feature' => '/feature Let me save favourite links',
+            ],
+            [
+                'ask' => '/ask Is there a form I still need to fill?',
+                'share' => '/share Demo day is next Thursday',
+                'feature' => '/feature Support voice replies in groups',
+            ],
+        ];
+
+        return $sets[random_int(0, count($sets) - 1)];
+    }
+
+    /**
+     * Rotating sample invocations for admin /commands.
+     *
+     * @return array{import: string, asset: string, approve: string, decline: string, reply: string}
+     */
+    public function rotatingAdminCommandExamples(): array
+    {
+        /** @var list<array{import: string, asset: string, approve: string, decline: string, reply: string}> $sets */
+        $sets = [
+            [
+                'import' => '/import [paste the WhatsApp/Telegram export text]',
+                'asset' => '/asset handbook UniPods Handbook https://drive.google.com/file/d/...',
+                'approve' => '/approve H7G74Y',
+                'decline' => '/decline H7G74Y',
+                'reply' => '/reply H7G74Y The session is at 4pm',
+            ],
+            [
+                'import' => '/import [paste chat export here]',
+                'asset' => '/asset form Signup form https://drive.google.com/file/d/...',
+                'approve' => '/approve W7X1YT',
+                'decline' => '/decline W7X1YT',
+                'reply' => '/reply W7X1YT Yes - open until Friday',
+            ],
+            [
+                'import' => '/import [full export dump]',
+                'asset' => '/asset slides Week 1 deck https://drive.google.com/file/d/...',
+                'approve' => '/approve 9D5GWS',
+                'decline' => '/decline 9D5GWS',
+                'reply' => '/reply 9D5GWS Mentors are listed in the Drive folder',
+            ],
+        ];
+
+        return $sets[random_int(0, count($sets) - 1)];
+    }
+
+    /**
+     * @param  'plain'|'whatsapp'  $style
+     */
+    public function formatMemberCommandHelp(string $style = 'plain'): string
+    {
+        $ex = $this->rotatingMemberCommandExamples();
+
+        return $this->formatCommandWithExample('/ask', 'schedules, links, or updates', $ex['ask'], $style)."\n"
+            .$this->formatCommandWithExample('/share', 'tip for the community (admin reviews first)', $ex['share'], $style)."\n"
+            .$this->formatCommandWithExample('/feature', 'request or improve a feature (admin reviews)', $ex['feature'], $style)."\n"
+            .$this->formatCommandWithExample('/help', 'show this guide', null, $style);
+    }
+
+    /**
+     * @param  'plain'|'whatsapp'  $style
+     */
+    private function formatCommandWithExample(
+        string $command,
+        string $blurb,
+        ?string $example,
+        string $style,
+    ): string {
+        $cmd = $this->highlightCommand($command, $style === 'whatsapp' ? 'whatsapp' : 'plain');
+        if ($style === 'whatsapp') {
+            $line = "{$cmd}  {$blurb}";
+            if ($example !== null && $example !== '') {
+                $line .= "\n  _e.g._ {$example}";
+            }
+
+            return $line;
+        }
+
+        $line = "{$cmd} - {$blurb}";
+        if ($example !== null && $example !== '') {
+            $line .= "\n  e.g. {$example}";
+        }
+
+        return $line;
     }
 
     /**
@@ -2280,23 +2494,16 @@ final class ChannelConversationService
      */
     public function adminHelpAppendix(string $style = 'plain'): string
     {
-        if ($style === 'whatsapp') {
-            return "\n\n*Admin*\n"
-                ."```\n"
-                ."/import   paste chat export text into knowledge\n"
-                ."/asset    publish Drive file links (or /asset import list)\n"
-                ."/approve  publish a share or feature request (Request ID)\n"
-                ."/decline  reject a share or feature request (Request ID)\n"
-                ."/reply    answer an escalated ask (/reply ID …)\n"
-                ."```";
-        }
+        $ex = $this->rotatingAdminCommandExamples();
+        $wa = $style === 'whatsapp';
+        $heading = $wa ? "\n\n*Admin*\n" : "\n\nAdmin:\n";
 
-        return "\n\nAdmin:\n"
-            ."/import - paste chat export text into the knowledge base as a draft\n"
-            ."/asset - publish Google Drive program file links (single or /asset import list)\n"
-            ."/approve - publish a share or feature request (use the Request ID)\n"
-            ."/decline - reject a share or feature request (use the Request ID)\n"
-            ."/reply - answer an escalated member question (/reply ID your answer)";
+        return $heading
+            .$this->formatCommandWithExample('/import', 'paste chat export as a knowledge draft', $ex['import'], $style)."\n"
+            .$this->formatCommandWithExample('/asset', 'publish Drive file links (or /asset import list)', $ex['asset'], $style)."\n"
+            .$this->formatCommandWithExample('/approve', 'publish a share or feature (Request ID)', $ex['approve'], $style)."\n"
+            .$this->formatCommandWithExample('/decline', 'reject a share or feature (Request ID)', $ex['decline'], $style)."\n"
+            .$this->formatCommandWithExample('/reply', 'answer an escalated member question', $ex['reply'], $style);
     }
 
     /**

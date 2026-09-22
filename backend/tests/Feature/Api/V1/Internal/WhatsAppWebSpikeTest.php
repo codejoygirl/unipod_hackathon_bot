@@ -469,6 +469,7 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.bot_number' => '2347041131371',
             'whatsapp_web_spike.admin_phones' => ['2347041131371', '2348117084647'],
             'whatsapp_web_spike.outbound_url' => 'http://127.0.0.1:3101',
+            'whatsapp_web_spike.process_sync' => true,
             'telegram_spike.bot_token' => '',
             'telegram_spike.admin_chat_id' => '',
             'telegram_spike.default_user_email' => 'demo@zak.test',
@@ -527,5 +528,81 @@ class WhatsAppWebSpikeTest extends TestCase
                 && str_contains((string) $request['text'], 'Joy is a member of the group')
                 && str_contains((string) $request['text'], "Who's @80599524048943");
         });
+    }
+
+    public function test_admin_swipe_reply_via_quoted_message_id_when_quote_text_truncated(): void
+    {
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Demo Community',
+        ]);
+        User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => User::query()->where('email', 'demo@zak.test')->value('id'),
+        ]);
+
+        config([
+            'whatsapp_web_spike.enabled' => true,
+            'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
+            'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
+            'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.bot_number' => '2347041131371',
+            'whatsapp_web_spike.admin_phones' => ['2347041131371', '2349137374124'],
+            'whatsapp_web_spike.outbound_url' => 'http://127.0.0.1:3101',
+            'whatsapp_web_spike.process_sync' => true,
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+            'telegram_spike.default_user_email' => 'demo@zak.test',
+            'ai_service.base_url' => 'http://ai.test',
+            'ai_service.hmac_secret' => 'test-secret',
+        ]);
+        $this->app->forgetInstance(\App\Services\AI\AiServiceClient::class);
+
+        Http::fake([
+            '127.0.0.1:3101/*' => Http::response(['ok' => true], 200),
+            'http://ai.test/*' => Http::response([
+                'source_id' => 'ai-src-1',
+                'version_id' => 'ai-ver-1',
+            ], 200),
+        ]);
+
+        $escId = '01ADMINSWIPEMSGID1';
+        $ref = 'W7X1YT';
+        $waMsgId = 'true_2349137374124@c.us_3EB0CARD01';
+        \Illuminate\Support\Facades\Cache::put('spike_escalation:'.$escId, [
+            'id' => $escId,
+            'type' => 'ask',
+            'ref' => $ref,
+            'question' => 'Who created the universe?',
+            'from' => '265721070268441',
+            'from_phone' => '2348011111111',
+            'from_name' => 'Abdulsamad',
+            'community_id' => $community->id,
+            'community_name' => $community->name,
+            'reason' => 'insufficient_evidence',
+            'channel' => 'whatsapp_web_spike',
+        ], now()->addDay());
+        \Illuminate\Support\Facades\Cache::put('spike_escalation_ref:'.$ref, $escId, now()->addDay());
+        app(\App\Services\Channels\SpikeEscalationNotifier::class)
+            ->rememberWhatsAppEscalationMessage($waMsgId, $escId);
+
+        // WhatsApp UI quote often shows only the title — no Request ID in quoted_text.
+        $response = $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '2349137374124',
+            'text' => 'God is the creator of the universe.',
+            'chat_type' => 'private',
+            'is_group' => false,
+            'reply_to_bot' => true,
+            'quoted_text' => "Zak Bot needs a quick hand.\n...",
+            'quoted_message_id' => $waMsgId,
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])->assertOk();
+
+        $reply = (string) $response->json('data.reply');
+        $this->assertStringContainsString('sent that to', $reply);
+        $this->assertStringNotContainsString('Include the Request ID', $reply);
+        $this->assertStringNotContainsString("couldn't read the Request ID", $reply);
     }
 }

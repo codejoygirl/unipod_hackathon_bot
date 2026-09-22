@@ -618,11 +618,15 @@ class ChannelConversationServiceTest extends TestCase
         $wa = $svc->memberHelpText('whatsapp', 'whatsapp');
 
         $this->assertStringContainsString("I'm Zak Bot", $wa);
-        $this->assertStringContainsString('You can ask me things like', $wa);
+        $this->assertStringContainsString('What I can do', $wa);
+        $this->assertStringContainsString('no need to keep asking', $wa);
         $this->assertStringContainsString('/ask', $wa);
         $this->assertStringContainsString('/share', $wa);
         $this->assertStringContainsString('/feature', $wa);
-        $this->assertStringContainsString('request a new feature or improve an existing one', $wa);
+        $this->assertStringContainsString('request or improve a feature', $wa);
+        $this->assertStringContainsString('e.g.', $wa);
+        $this->assertStringNotContainsString('/join', $wa);
+        $this->assertStringContainsString('👋', $wa);
         $this->assertStringContainsString('*@mention*', $wa);
         $this->assertStringContainsString('*reply*', $wa);
         $this->assertStringContainsString('Telegram', $wa);
@@ -636,26 +640,55 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringNotContainsString('Admin', $wa);
 
         $tg = $svc->memberHelpText('plain', 'telegram');
+        $this->assertStringContainsString('What I can do', $tg);
+        $this->assertStringContainsString('no need to keep asking', $tg);
         $this->assertStringContainsString('WhatsApp', $tg);
         $this->assertStringContainsString('wa.me/2347041131371', $tg);
         $this->assertStringContainsString('Web chat', $tg);
+        $this->assertStringNotContainsString('/join', $tg);
         $this->assertStringNotContainsString('t.me/', $tg);
         $this->assertStringNotContainsString('/import', $tg);
         $this->assertStringNotContainsString('/export', $tg);
 
         $admin = $svc->helpTextFor('whatsapp', 'whatsapp', true);
         $this->assertStringContainsString('/import', $admin);
-        $this->assertStringContainsString('paste chat export text', $admin);
+        $this->assertStringContainsString('knowledge draft', $admin);
         $this->assertStringContainsString('/approve', $admin);
         $this->assertStringContainsString('/reply', $admin);
         $this->assertStringContainsString('Admin', $admin);
+        $this->assertStringContainsString('e.g.', $admin);
+        $this->assertMatchesRegularExpression('/e\.g\._?\s*`{0,3}\/?ask/i', $admin);
+        $this->assertMatchesRegularExpression('/e\.g\._?\s*`{0,3}\/?reply\s+[A-Z0-9]+\s+/i', $admin);
+
+        $plainAdmin = $svc->helpTextFor('plain', 'telegram', true);
+        $this->assertStringContainsString('e.g. /ask', $plainAdmin);
+        $this->assertStringContainsString('e.g. /share', $plainAdmin);
+        $this->assertStringContainsString('e.g. /approve', $plainAdmin);
 
         $groupHelp = $svc->memberHelpText('whatsapp', 'whatsapp', 'group');
         $this->assertStringContainsString('Private chat', $groupHelp);
         $this->assertStringContainsString('api.whatsapp.com/send?phone=2347041131371', $groupHelp);
-        $this->assertStringContainsString("ask about schedules", $groupHelp);
-        $this->assertStringContainsString('tell the community something worth knowing', $groupHelp);
+        $this->assertStringContainsString('schedules, links, or updates', $groupHelp);
+        $this->assertStringContainsString('tip for the community', $groupHelp);
         $this->assertStringNotContainsString("\u{2014}", $groupHelp);
+
+        $sets = [];
+        for ($i = 0; $i < 24; $i++) {
+            $sets[$svc->formatHelpExampleLines($svc->rotatingHelpExamples())] = true;
+        }
+        $this->assertGreaterThanOrEqual(2, count($sets), 'help examples should rotate across calls');
+
+        $cmdSets = [];
+        for ($i = 0; $i < 24; $i++) {
+            $cmdSets[$svc->formatMemberCommandHelp('plain')] = true;
+        }
+        $this->assertGreaterThanOrEqual(2, count($cmdSets), 'command e.g. examples should rotate');
+
+        $adminSets = [];
+        for ($i = 0; $i < 24; $i++) {
+            $adminSets[$svc->adminHelpAppendix('plain')] = true;
+        }
+        $this->assertGreaterThanOrEqual(2, count($adminSets), 'admin command e.g. examples should rotate');
     }
 
     public function test_channel_presence_ask_returns_clickable_links(): void

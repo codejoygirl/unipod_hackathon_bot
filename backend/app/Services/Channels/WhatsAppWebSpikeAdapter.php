@@ -54,8 +54,8 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
                 'file' => $e->getFile().':'.$e->getLine(),
             ]);
 
-            return "I hit a snag answering that just now. "
-                .'Mind sending it again in a moment?';
+            // Rethrow so queued jobs retry; sync controllers catch → soft deferral.
+            throw $e;
         }
     }
 
@@ -603,15 +603,46 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
     private function tryAdminCardReply(InboundMessage $message): ?string
     {
         $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
-        if ($quoted === '' || ! filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+        $quotedMsgId = trim((string) ($message->raw['quoted_message_id'] ?? ''));
+        $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if (! $replyToBot) {
+            return null;
+        }
+        if ($quoted === '' && $quotedMsgId === '') {
             return null;
         }
 
-        if (preg_match('/Request ID:\s*([A-Z0-9]+)/i', $quoted, $m) !== 1) {
+        $ref = null;
+        if ($quotedMsgId !== '') {
+            $escId = $this->escalationNotifier->findEscalationIdByWhatsAppMessageId($quotedMsgId);
+            if (is_string($escId) && $escId !== '') {
+                $record = Cache::get('spike_escalation:'.$escId);
+                if (is_array($record)) {
+                    $ref = strtoupper(trim((string) ($record['ref'] ?? '')));
+                }
+            }
+        }
+        if ($ref === null || $ref === '') {
+            $ref = $this->escalationNotifier->extractRefFromCardText($quoted) ?? '';
+        }
+
+        $looksLikeCard = $this->commandAccess->looksLikeEscalationCardReply(
+            is_array($message->raw) ? $message->raw : [],
+        );
+
+        if ($ref === '') {
+            // Swipe on a card title preview without a resolvable Request ID.
+            if ($looksLikeCard) {
+                return "I couldn't read the Request ID from that swipe-reply (WhatsApp often truncates the quote).\n\n"
+                    ."Copy it from the card and send:\n"
+                    ."```\n"
+                    ."/reply W7X1YT Your answer here\n"
+                    .'```';
+            }
+
             return null;
         }
 
-        $ref = strtoupper(trim($m[1]));
         $body = trim($message->text);
         if ($body === '') {
             return null;
@@ -689,19 +720,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         // WhatsApp bold is *single* asterisks — Markdown **bold** shows raw stars.
         $text = $this->toWhatsAppFormatting($text);
 
-        $formatted = preg_replace_callback(
-            '/```[\s\S]*?```|\/(?:ask|share|feature|help|join|export|import|asset|approve|decline|reply|blacklist)\b/iu',
-            static function (array $m): string {
-                if (str_starts_with($m[0], '```')) {
-                    return $m[0];
-                }
-
-                return '```'.$m[0].'```';
-            },
-            $text
-        );
-
-        return is_string($formatted) ? $formatted : $text;
+        return $this->conversation->formatCommandsInText($text, 'whatsapp');
     }
 
     /**
@@ -933,7 +952,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         $result = $this->citationRevalidator->revalidate($user, $result);
 
         if ($this->isTransientAiFailure($result)) {
-            return 'I hit a snag answering that just now. Mind sending it again in a moment?';
+            throw new \RuntimeException('whatsapp_web_spike.transient_ai');
         }
 
         if (trim((string) $result->answer) === '') {
