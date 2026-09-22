@@ -24,6 +24,21 @@ Substitute your hostnames everywhere below:
 | `app.yourdomain.com` | Next.js PWA |
 | `YOUR_SITE_USER` | CloudPanel site user for the API |
 
+### This VPS (`vmi3072365` / `zak-app.xerotek.io`)
+
+Repo is already cloned. Use these values:
+
+| Item | Value |
+| --- | --- |
+| SSH user | `zak-app` (site) and `root` (Docker / systemd) |
+| Checkout | `/home/zak-app/htdocs/zak-app.xerotek.io` |
+| Public site (today) | `https://zak-app.xerotek.io` |
+| Recommended API host | `https://api.zak-app.xerotek.io` (add DNS + CloudPanel PHP site) |
+
+**Do not leave CloudPanel’s document root on the repo root.** That would publish `.env`, `.git`, and `backend/`. Point the PHP site at `backend/public` only.
+
+Step-by-step runbook for this clone: follow the numbered commands in chat, or start at [§4](#4-postgres--redis--ai-service-docker) after CloudPanel SSL + document root.
+
 ---
 
 ## 0. Invariants (do not skip)

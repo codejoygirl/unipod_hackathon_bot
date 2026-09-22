@@ -278,17 +278,47 @@ class AnswerSynthesizer:
             flags=re.I,
         )
         if session_re.search(plain):
+            # Still weak when the "title" is clearly a chat message crumb.
+            if re.search(
+                r"\b(can you|could you|please send|send me|good morning|hope you|"
+                r"anyone|don'?t keep|keep them to yourself|ideally to be completed|"
+                r"took place|waiting|joined from)\b",
+                plain,
+                flags=re.I,
+            ):
+                return True
+            if re.match(r"^(reminder\b|today at\b|there (is|are)\b)", plain, flags=re.I):
+                return True
+            if re.search(r"(^|[\s'’])t keep them\b", plain, flags=re.I):
+                return True
+            if "@" in plain and re.search(r"@\w*bot\b", plain, flags=re.I):
+                return True
             return False
         if len(words) <= 1:
             return True
         if re.match(
-            r"^(at\b|your\b|our\b|there is\b|here is\b|please\b|kindly\b)",
+            r"^(at\b|your\b|our\b|there is\b|there are\b|here is\b|please\b|kindly\b|"
+            r"professor\b|jeovaire\b|reminder\b|today at\b|genial\b)",
             plain,
             flags=re.I,
         ):
             return True
-        # Speaker crumbs: "Diane", "Saidu", "Mamadou Lamine Diallo" — capitalized
-        # name tokens with no session vocabulary and no acronyms like METI/MIT.
+        # Chat-message crumbs pasted as titles.
+        if re.search(
+            r"\b(can you|could you|send me|good morning|hope you are|"
+            r"anyone|don'?t keep|keep them to yourself|took place|"
+            r"people in the (teams )?call|joined from the community)\b",
+            plain,
+            flags=re.I,
+        ):
+            return True
+        if re.search(r"(^|[\s'’])t keep them\b", plain, flags=re.I):
+            return True
+        if "@" in plain and re.search(r"@\w*bot\b", plain, flags=re.I):
+            return True
+        # Long sentence fragments are not link titles.
+        if len(plain) > 72 and plain.count(" ") >= 8:
+            return True
         if len(words) <= 3 and len(plain) <= 48:
             name_like = True
             for w in words:
@@ -638,12 +668,47 @@ class AnswerSynthesizer:
                 continue
             if re.match(r"^\d+[\).\:\-]\s*", trimmed):
                 continue
-            intro = cls._scrub_broken_chars(trimmed)
+            # Keep lead punctuation (e.g. trailing ":"); scrub is for titles/labels.
+            intro = re.sub(r"\?{2,}", "", (trimmed or "").replace("\ufffd", "")).strip()
             break
 
         used_ids: list[str] = []
         link_lines: list[str] = []
-        for i, (key, (url, label)) in enumerate(evidence_by_key.items(), start=1):
+        # Do NOT dump every URL for singular asks ("the first onboarding meeting
+        # link"). Keep one best match. Expand only when they clearly asked for
+        # plural links / all meetings / all recordings.
+        emit_items: list[tuple[str, tuple[str, str]]] = list(evidence_by_key.items())
+        wants_full_list = bool(
+            re.search(r"\blinks\b", q)
+            or re.search(r"\b(meetings|recordings)\b", q)
+            or re.search(r"\b(all|every)\b.{0,40}\b(link|meeting|recording)s?\b", q)
+        )
+        singular_ask = (not wants_full_list) and bool(
+            re.search(r"\b(the|first|initial|main|primary)\b", q)
+            or re.search(r"\blink\b", q)
+        )
+        if mode in {"assets", "meetings", "recordings"} and singular_ask:
+            ordered: list[tuple[str, tuple[str, str]]] = []
+            for url in answer_urls:
+                key = cls._url_dedupe_key(url)
+                if key in evidence_by_key and key not in {k for k, _ in ordered}:
+                    ordered.append((key, evidence_by_key[key]))
+            if not ordered:
+                strong = [
+                    (k, v)
+                    for k, v in emit_items
+                    if v[1] and not cls._is_weak_link_label(v[1])
+                ]
+                ordered = strong or emit_items
+            emit_items = ordered[:1]
+        elif mode == "assets" and answer_keys and not wants_full_list:
+            focused = [(k, v) for k, v in emit_items if k in answer_keys]
+            if focused:
+                emit_items = focused
+        elif mode == "assets" and not answer_keys:
+            emit_items = emit_items[:3]
+
+        for i, (key, (url, label)) in enumerate(emit_items, start=1):
             display_label = (
                 label
                 if label and not cls._is_weak_link_label(label)

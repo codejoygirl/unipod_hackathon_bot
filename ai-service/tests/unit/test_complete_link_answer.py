@@ -121,6 +121,78 @@ def test_complete_link_answer_uses_links_intro_when_not_recordings():
     assert "session recordings" not in completed.lower()
 
 
+def test_complete_link_answer_singular_asset_does_not_dump_corpus():
+    chunks = [
+        _chunk("E1", "MIT Universal AI course https://learn.mit.edu/universal-learning/ai"),
+        _chunk("E2", "Team declaration https://docs.google.com/spreadsheets/d/abc"),
+        _chunk("E3", "Open hour https://teams.microsoft.com/meet/111?p=x"),
+        _chunk(
+            "E4",
+            "Professor: @meti_bot Can you send me the team member declaration "
+            "https://docs.google.com/spreadsheets/d/xyz",
+        ),
+    ]
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Send the first onboarding link for the programme",
+        answer=(
+            "Here is the onboarding link:\n\n"
+            "1. MIT Universal AI course\n"
+            "https://learn.mit.edu/universal-learning/ai"
+        ),
+        evidence_chunks=chunks,
+        link_mode="assets",
+    )
+    assert "https://learn.mit.edu/universal-learning/ai" in completed
+    assert "docs.google.com" not in completed
+    assert "teams.microsoft.com" not in completed
+    assert "Can you send me" not in completed
+    assert set(ids) == {"E1"}
+
+
+def test_complete_link_answer_singular_meeting_keeps_one():
+    meet_a = "https://teams.microsoft.com/meet/419860837373470?p=aaaa"
+    meet_b = "https://teams.microsoft.com/meet/369123389215172?p=bbbb"
+    meet_c = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_xxx%40thread.v2/0"
+    chunks = [
+        _chunk("E1", f"Reminder! Today at 3pm CAT we start\n{meet_a}"),
+        _chunk("E2", f"Don't keep them to yourself! ask anything\n{meet_b}"),
+        _chunk("E3", f"MIT Universal AI Welcome and onboarding\n{meet_c}"),
+    ]
+    draft = (
+        f"1. Reminder! Today at 3pm\n{meet_a}\n"
+        f"2. keep them to yourself\n{meet_b}\n"
+        f"3. Microsoft Teams meeting\n{meet_c}"
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Send the first onboarding meeting link for the programme",
+        answer=draft,
+        evidence_chunks=chunks,
+        link_mode="meetings",
+    )
+    assert meet_a in completed
+    assert meet_b not in completed
+    assert meet_c not in completed
+    assert "keep them to yourself" not in completed.lower()
+    assert completed.count("https://") == 1
+    assert set(ids) == {"E1"}
+
+
+def test_weak_link_label_rejects_meeting_chat_crumbs():
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Reminder! Today at *3pm CAT (2pm WA / 4pm EA local time) we"
+    )
+    assert AnswerSynthesizer._is_weak_link_label(
+        "'t keep them to yourself! This is a great opportunity to ask anything"
+    )
+    assert AnswerSynthesizer._is_weak_link_label(
+        "There are *15* people in the Teams call just waiting."
+    )
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Genial: *Genial joined from the community*"
+    )
+    assert not AnswerSynthesizer._is_weak_link_label("MIT Universal AI onboarding call")
+
+
 def test_complete_link_answer_skips_teams_meet_joins_for_recordings():
     meet = "https://teams.microsoft.com/meet/419860837373470?p=fake"
     chunks = [

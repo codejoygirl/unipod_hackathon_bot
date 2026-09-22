@@ -275,6 +275,107 @@ final class ChannelConversationService
     }
 
     /**
+     * Prefer a green-capable WhatsApp @tag when referencing a group member.
+     * Prefer the resolved full display name when the ask is about who they are.
+     * Never invent tags; only reuse ids/phones from the inbound mention roster.
+     *
+     * @param  list<array{id?: string, name?: string|null, phone?: string|null}>  $mentions
+     * @param  list<string>  $botIds
+     */
+    public function applyGroupPeopleMentions(
+        string $answer,
+        array $mentions,
+        bool $preferFullName = false,
+        array $botIds = [],
+    ): string {
+        $out = trim($answer);
+        if ($out === '' || $mentions === []) {
+            return $out;
+        }
+
+        $botSet = [];
+        foreach ($botIds as $id) {
+            $digits = preg_replace('/\D+/', '', (string) $id) ?? '';
+            if ($digits !== '') {
+                $botSet[$digits] = true;
+            }
+        }
+
+        $rows = [];
+        foreach ($mentions as $mention) {
+            if (! is_array($mention)) {
+                continue;
+            }
+            $id = preg_replace('/\D+/', '', (string) ($mention['id'] ?? '')) ?? '';
+            if ($id === '' || isset($botSet[$id])) {
+                continue;
+            }
+            $phone = preg_replace('/\D+/', '', (string) ($mention['phone'] ?? '')) ?? '';
+            if ($phone !== '' && (strlen($phone) < 10 || strlen($phone) > 13)) {
+                $phone = '';
+            }
+            // Prefer E.164 phone tags for green paint; fall back to LID/user id.
+            $tag = $phone !== '' ? $phone : $id;
+
+            $name = trim((string) ($mention['name'] ?? ''));
+            $name = ltrim($name, '~');
+            $searchName = trim((string) (preg_replace('/[^\p{L}\p{N}\s._-]+/u', '', $name) ?? $name));
+            $searchName = trim(preg_replace('/\s+/u', ' ', $searchName) ?? $searchName);
+            if ($searchName === '' || $tag === '') {
+                continue;
+            }
+            $rows[] = [
+                'tag' => $tag,
+                'name' => $searchName,
+                'id' => $id,
+                'phone' => $phone,
+            ];
+        }
+
+        if ($rows === []) {
+            return $out;
+        }
+
+        usort(
+            $rows,
+            static fn (array $a, array $b): int => mb_strlen($b['name']) <=> mb_strlen($a['name'])
+        );
+
+        if ($preferFullName) {
+            foreach ($rows as $row) {
+                foreach (array_unique(array_filter([$row['tag'], $row['id'], $row['phone']])) as $digits) {
+                    $out = preg_replace('/@'.preg_quote((string) $digits, '/').'(?!\d)/u', $row['name'], $out) ?? $out;
+                }
+            }
+
+            return trim($out);
+        }
+
+        foreach ($rows as $row) {
+            $quoted = preg_quote($row['name'], '/');
+            if ($quoted === '') {
+                continue;
+            }
+            // Whole-name reference → green @tag (skip if already tagged).
+            $out = preg_replace(
+                '/(?<!@)\b'.$quoted.'\b/ui',
+                '@'.$row['tag'],
+                $out
+            ) ?? $out;
+            // Prefer phone tag over a bare LID tag when both appear.
+            if ($row['phone'] !== '' && $row['id'] !== '' && $row['phone'] !== $row['id']) {
+                $out = preg_replace(
+                    '/@'.preg_quote($row['id'], '/').'(?!\d)/u',
+                    '@'.$row['phone'],
+                    $out
+                ) ?? $out;
+            }
+        }
+
+        return trim($out);
+    }
+
+    /**
      * Person-ish asks used only as offline fallback when model classify is down.
      */
     public function looksLikePersonLookup(string $text): bool

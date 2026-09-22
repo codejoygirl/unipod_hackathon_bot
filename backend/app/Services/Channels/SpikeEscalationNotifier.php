@@ -1539,10 +1539,10 @@ final class SpikeEscalationNotifier
     }
 
     /**
-     * WhatsApp: "Name: @digits" so the outbound mention paints a green, tappable contact
-     * when the member is a real WhatsApp phone/LID. Never @-tag Telegram user ids —
-     * WhatsApp reformats them as fake international numbers (e.g. @+7 216…).
-     * Telegram/plain: keep @handle when present, otherwise the display name.
+     * WhatsApp Name line: prefer the member's resolved full display name (identity).
+     * Fall back to a green-capable @digits tag only when no name is known.
+     * Never @-tag Telegram user ids as fake WhatsApp phones.
+     * Mid-message references use @tags via memberAckLabel / applyGroupPeopleMentions.
      *
      * @param  array<string, mixed>  $record
      * @param  'plain'|'whatsapp'  $style
@@ -1563,7 +1563,11 @@ final class SpikeEscalationNotifier
                 && ! $this->looksLikeE164PhoneDigits($fromDigits));
 
         if ($style === 'whatsapp') {
-            // Only @-mention real WhatsApp peers (phone or LID) — never Telegram chat ids.
+            // Identity line: prefer the resolved full display name.
+            // Green @tags are for referencing someone mid-message (see memberAckLabel).
+            if ($name !== '') {
+                return 'Name: '.$name;
+            }
             if (! $telegramMember) {
                 $tag = '';
                 if ($phoneDigits !== '' && ($this->looksLikeE164PhoneDigits($phoneDigits) || $this->looksLikeWhatsAppLidDigits($phoneDigits))) {
@@ -1572,12 +1576,8 @@ final class SpikeEscalationNotifier
                     $tag = $fromDigits;
                 }
                 if ($tag !== '') {
-                    // WA replaces @digits with the contact name when mentions[] is set.
                     return 'Name: @'.$tag;
                 }
-            }
-            if ($name !== '') {
-                return 'Name: '.$name;
             }
             if ($fromDigits !== '') {
                 return $telegramMember

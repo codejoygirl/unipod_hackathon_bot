@@ -158,7 +158,8 @@ class SpikeEscalationNotifierTest extends TestCase
                 && $request['secret'] === 'spike-secret'
                 && $request['to'] === '2348117084647'
                 && str_contains((string) $request['text'], 'Are we going to India?')
-                && str_contains((string) $request['text'], 'Name: @276694879498269')
+                && str_contains((string) $request['text'], 'Name: Abdulsamad Balogun')
+                && ! str_contains((string) $request['text'], 'Name: @276694879498269')
                 && ($request['mention'] ?? null) === '276694879498269@lid';
         });
         Http::assertNotSent(function ($request) {

@@ -457,6 +457,22 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         );
 
         if ($reply !== '') {
+            if ($chatType === 'group') {
+                $mentionRows = is_array($message->raw['mentions'] ?? null) ? $message->raw['mentions'] : [];
+                $botIds = array_values(array_filter([
+                    (string) config('whatsapp_web_spike.bot_number', ''),
+                    (string) config('whatsapp_web_spike.bot_lid', ''),
+                    (string) ($message->raw['bot_number'] ?? ''),
+                    (string) ($message->raw['bot_lid'] ?? ''),
+                ]));
+                $reply = $this->conversation->applyGroupPeopleMentions(
+                    $reply,
+                    $mentionRows,
+                    $this->conversation->looksLikePersonLookup($message->text),
+                    $botIds,
+                );
+            }
+
             if (
                 $mode === 'out_of_scope'
                 && $this->conversation->shouldAppendEnglishAskHint($reply, $message->text)
@@ -970,6 +986,22 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         }
 
         $answer = $this->memberFacingAnswer((string) $result->answer);
+
+        if ($this->chatType($message) === 'group') {
+            $mentionRows = is_array($message->raw['mentions'] ?? null) ? $message->raw['mentions'] : [];
+            $botIds = array_values(array_filter([
+                (string) config('whatsapp_web_spike.bot_number', ''),
+                (string) config('whatsapp_web_spike.bot_lid', ''),
+                (string) ($message->raw['bot_number'] ?? ''),
+                (string) ($message->raw['bot_lid'] ?? ''),
+            ]));
+            $answer = $this->conversation->applyGroupPeopleMentions(
+                $answer,
+                $mentionRows,
+                $this->conversation->looksLikePersonLookup($query),
+                $botIds,
+            );
+        }
 
         // No English "(From …)" footer — it mixes languages with non-English replies.
         return $answer;

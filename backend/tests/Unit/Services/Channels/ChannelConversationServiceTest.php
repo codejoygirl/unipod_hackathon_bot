@@ -275,6 +275,41 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('Who is leading Tommorrows session?', $glued);
     }
 
+    public function test_apply_group_people_mentions_prefers_tag_or_full_name(): void
+    {
+        $svc = new ChannelConversationService;
+        $people = [
+            [
+                'id' => '80599524048943',
+                'name' => '~Joy❤️',
+                'phone' => '2348166710953',
+            ],
+        ];
+
+        $identity = $svc->applyGroupPeopleMentions(
+            'Joy is a METI member who helps with sessions.',
+            $people,
+            preferFullName: true,
+        );
+        $this->assertStringContainsString('Joy is a METI member', $identity);
+        $this->assertStringNotContainsString('@2348166710953', $identity);
+
+        $reference = $svc->applyGroupPeopleMentions(
+            'You can ask Joy about the Wadhwani session.',
+            $people,
+            preferFullName: false,
+        );
+        $this->assertStringContainsString('@2348166710953', $reference);
+        $this->assertStringNotContainsString('ask Joy about', $reference);
+
+        $fromTag = $svc->applyGroupPeopleMentions(
+            '@80599524048943 leads the cohort.',
+            $people,
+            preferFullName: true,
+        );
+        $this->assertStringContainsString('Joy leads the cohort.', $fromTag);
+    }
+
     public function test_member_facing_question_strips_follow_up_envelope(): void
     {
         $svc = new ChannelConversationService;

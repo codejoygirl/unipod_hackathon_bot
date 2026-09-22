@@ -487,20 +487,26 @@ function stripFakeAtDisplayNames(text) {
 }
 
 /**
- * Collect @phone tags from body text → JIDs for options.mentions (green paint).
- * Phone-length only (10–13); skip long LIDs which rarely highlight in DM.
+ * Collect @digit tags from body text → JIDs for options.mentions (green paint).
+ * Phone-length (10–13) → @c.us; longer IDs → @lid (group Linked IDs).
  *
  * @returns {string[]}
  */
-function phoneMentionJidsFromText(text) {
+function mentionJidsFromText(text) {
   const jids = []
-  const re = /@(\d{10,13})\b/g
+  const re = /@(\d{6,})\b/g
   let m
   while ((m = re.exec(String(text || ''))) !== null) {
-    const jid = `${m[1]}@c.us`
+    const digits = m[1]
+    const jid = digits.length >= 14 ? `${digits}@lid` : `${digits}@c.us`
     if (!jids.includes(jid)) jids.push(jid)
   }
   return jids
+}
+
+/** @deprecated use mentionJidsFromText — kept for private mid-body phone tags */
+function phoneMentionJidsFromText(text) {
+  return mentionJidsFromText(text).filter((jid) => jid.endsWith('@c.us'))
 }
 
 /**
@@ -655,6 +661,8 @@ function blendMentionTag(mentionTag, body) {
 
   // Strip legacy English-only channel opener (not a greeting catalog — just remove old inject).
   cleaned = cleaned.replace(/^(hey|hi|hello|howdy|yo)\b[ \t]*,?[ \t]*/i, '').trim()
+  // Drop fake "@~Joy" / "@Abdulsamad Balogun," openers (not real WA digit mentions).
+  cleaned = cleaned.replace(/^@~?(?!\d)[\p{L}\p{N}._❤️💕🙏\s-]{1,80},?[ \t]*/u, '').trim()
   // Drop a leftover plain display name after a stripped Hi (e.g. "Abdulsamad,\n\n…").
   cleaned = cleaned.replace(/^[^@\n,]{1,60},\s*(?=\S)/, '').trim()
 
@@ -1403,7 +1411,10 @@ async function replyInContext(msg, text, { isGroup, senderRaw, fromName, contact
     body = blendMentionTag(askerTag, body)
   }
 
-  const uniqueMentions = [...new Set(askerMentionJids.filter(Boolean))]
+  const uniqueMentions = [...new Set([
+    ...askerMentionJids.filter(Boolean),
+    ...mentionJidsFromText(body),
+  ])]
   const mentionOpts = uniqueMentions.length > 0 ? { mentions: uniqueMentions } : {}
   debugLog('group mention plan', { tag: askerTag, mentions: uniqueMentions })
 
@@ -2057,8 +2068,8 @@ async function handleInboundMessage(msg, source) {
 
     const mentions = await resolveMentionedPeople(msg)
 
-    // Do NOT show typing yet — Laravel may still decide this turn is undirected
-    // (incidental @, chatter, etc.). Typing starts only after we have a reply.
+    // Do NOT skip typing for directed turns — members need composing feedback
+    // during the Laravel/RAG wait. Undirected group chatter never reaches here.
     await ensureMessageId(msg, 600)
     // Settle BEFORE media download — message_create often races Store media keys
     // (Puppeteer EvaluationFailed "r" / empty download).
@@ -2149,6 +2160,8 @@ async function handleInboundMessage(msg, source) {
     }
 
     let reply = null
+    // Typing during the whole Laravel/RAG wait (not only after the reply arrives).
+    const stopTyping = startTypingHeartbeat(msg)
     try {
       const inbound = {
         from,
@@ -2181,8 +2194,6 @@ async function handleInboundMessage(msg, source) {
     }
 
     if (reply) {
-      // Confirmed we'll answer - type while composing/sending the reply.
-      const stopTyping = startTypingHeartbeat(msg)
       let meta
       try {
         meta = await replyInContext(msg, reply, {
@@ -2202,6 +2213,7 @@ async function handleInboundMessage(msg, source) {
             : ' private'),
       )
     } else {
+      stopTyping()
       console.log('[spike] silent (no reply from Laravel - not for Zak / nothing to say)')
     }
 
