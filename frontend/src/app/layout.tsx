@@ -37,8 +37,30 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
+      data-theme="light"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${newsreader.variable} ${notoNaskhArabic.variable} h-full antialiased`}
     >
+      <head>
+        {/*
+         * Apply the persisted theme (or system preference) before paint so the first
+         * frame never flashes the wrong mode. Inline in <head> so it runs synchronously
+         * while the document parses; React never re-renders this server-only script.
+         */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function () {
+  try {
+    var stored = localStorage.getItem("zak-theme");
+    var theme = stored === "light" || stored === "dark"
+      ? stored
+      : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.dataset.theme = theme;
+  } catch (e) {}
+})();`,
+          }}
+        />
+      </head>
       <body className="flex min-h-full flex-col bg-paper text-ink">
         <Providers>{children}</Providers>
       </body>
