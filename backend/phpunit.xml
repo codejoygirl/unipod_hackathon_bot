@@ -38,5 +38,6 @@
         <env name="INTERNAL_HMAC_SECRET" value="prod_secure_hmac_secret_key_minimum_32_bytes_entropy" force="true"/>
         <env name="TELEGRAM_SPIKE" value="false"/>
         <env name="WHATSAPP_WEB_SPIKE" value="false"/>
+        <env name="WHATSAPP_ZAVU" value="false"/>
     </php>
 </phpunit>

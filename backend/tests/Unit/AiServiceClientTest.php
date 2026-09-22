@@ -123,4 +123,28 @@ class AiServiceClientTest extends TestCase
         $this->assertSame('E1', $dto->citations[0]->evidenceId);
         $this->assertSame(2, $dto->citations[0]->pageNumber);
     }
+
+    public function test_chunk_text_for_ingest_splits_on_line_boundaries(): void
+    {
+        $lines = [];
+        for ($i = 0; $i < 50; $i++) {
+            $lines[] = str_repeat('a', 100)."-line-{$i}";
+        }
+        $content = implode("\n", $lines);
+        $parts = AiServiceClient::chunkTextForIngest($content, 1200);
+
+        $this->assertGreaterThan(1, count($parts));
+        foreach ($parts as $part) {
+            $this->assertLessThanOrEqual(1200, strlen($part));
+        }
+        $this->assertSame($content, implode("\n", $parts));
+    }
+
+    public function test_chunk_text_for_ingest_keeps_small_docs_whole(): void
+    {
+        $content = "Clinic opens Saturday 9am.\nBring your ID.";
+        $parts = AiServiceClient::chunkTextForIngest($content, 28000);
+
+        $this->assertSame([$content], $parts);
+    }
 }

@@ -54,6 +54,52 @@ class KnowledgeAndAssistantTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ingestion/sync'));
     }
 
+    public function test_knowledge_publish_chunks_large_content_into_multiple_syncs(): void
+    {
+        $seq = 0;
+        Http::fake(function (\Illuminate\Http\Client\Request $request) use (&$seq) {
+            if (! str_contains($request->url(), '/ingestion/sync')) {
+                return Http::response(['ok' => true], 200);
+            }
+            $seq++;
+
+            return Http::response([
+                'source_id' => sprintf('11111111-1111-1111-1111-%012d', $seq),
+                'version_id' => sprintf('22222222-2222-2222-2222-%012d', $seq),
+                'status' => 'completed',
+            ], 200);
+        });
+
+        [$user, $tenant, $community] = $this->seedMember(MembershipRole::CommunityAdmin);
+        $this->actingAs($user);
+
+        $big = '';
+        for ($i = 0; $i < 1200; $i++) {
+            $big .= '[04/09/2026, 09:27:15] ~Diane: Session note line '.$i.' with enough padding '.str_repeat('x', 40)."\n";
+        }
+        $this->assertGreaterThan(28000, strlen($big));
+
+        $create = $this->postJson('/api/v1/knowledge-sources', [
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'name' => 'Large WA export',
+            'source_type' => 'whatsapp',
+            'content' => $big,
+            'uri' => 'whatsapp://export/test-large',
+        ])->assertCreated();
+
+        $id = $create->json('data.id');
+        $this->postJson("/api/v1/knowledge-sources/{$id}/submit-review")->assertOk();
+        $publish = $this->postJson("/api/v1/knowledge-sources/{$id}/publish")->assertOk();
+
+        $this->assertSame('11111111-1111-1111-1111-000000000001', $publish->json('data.ai_source_id'));
+        $this->assertGreaterThanOrEqual(2, $seq);
+
+        $meta = \App\Models\KnowledgeSource::query()->findOrFail($id)->metadata ?? [];
+        $this->assertArrayHasKey('ingest_part_count', $meta);
+        $this->assertGreaterThanOrEqual(2, (int) $meta['ingest_part_count']);
+    }
+
     public function test_knowledge_publish_activates_pending_multimodal_index(): void
     {
         Http::fake([
@@ -233,6 +279,70 @@ class KnowledgeAndAssistantTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.state', 'VERIFIED')
             ->assertJsonPath('data.evidence_drawer.0.source_uri', 'doc://clinic-hours');
+    }
+
+    public function test_assistant_ask_allows_chunked_ingest_part_uris(): void
+    {
+        Http::fake([
+            '*/retrieval/grounded-answer' => Http::response([
+                'query' => 'Send recordings',
+                'detected_language' => 'en',
+                'execution_time_ms' => 12.0,
+                'total_chunks_retrieved' => 1,
+                'validated_payload' => [
+                    'state' => 'VERIFIED',
+                    'answer' => 'Here is a recording https://example.com/r1 [E1].',
+                    'confidence_score' => 0.9,
+                    'needs_escalation' => false,
+                    'escalation_reason' => null,
+                    'citations' => [[
+                        'evidence_id' => 'E1',
+                        'chunk_id' => '72b079bc-25c2-4a0b-800f-8ee57de015c9',
+                        'source_name' => 'WA export',
+                        'source_uri' => 'whatsapp://export/cohort-3/abc/part-3',
+                        'authority_tier' => 'community_discussion',
+                        'exact_quote' => 'https://example.com/r1',
+                        'context_snippet' => 'recording https://example.com/r1',
+                        'page_number' => null,
+                        'timestamp_seconds' => null,
+                        'is_verified' => true,
+                    ]],
+                    'conflicts' => [],
+                ],
+            ], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id, 'slug' => 'cohort']);
+        $user = User::factory()->create();
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => $user->id,
+        ]);
+
+        \App\Models\KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'WA export',
+            'uri' => 'whatsapp://export/cohort-3/abc',
+            'source_type' => 'whatsapp',
+            'authority_tier' => 'community_discussion',
+            'lifecycle_status' => 'published',
+            'language' => 'en',
+            'content' => 'recording https://example.com/r1',
+            'content_sha256' => hash('sha256', 'recording https://example.com/r1'),
+            'published_at' => now(),
+        ]);
+
+        $this->actingAs($user);
+
+        $this->postJson('/api/v1/assistant/ask', [
+            'query' => 'Send recordings',
+            'community_ids' => [$community->id],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'VERIFIED')
+            ->assertJsonPath('data.answer', 'Here is a recording https://example.com/r1 [E1].');
     }
 
     /**

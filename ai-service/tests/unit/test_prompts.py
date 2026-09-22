@@ -79,7 +79,8 @@ def test_system_prompt_contains_critical_invariants():
     assert "who is X" not in prompt
     assert "formal biography" not in prompt
     assert "\u2014" not in prompt
-
+    assert "Yoruba" in prompt
+    assert "Never switch into English" in prompt
 
 def test_build_user_prompt_combines_context_and_query():
     xml = '<context><evidence id="E1">Content</evidence></context>'
@@ -87,7 +88,9 @@ def test_build_user_prompt_combines_context_and_query():
     user_prompt = build_user_prompt(query, xml, target_language="am")
 
     assert xml in user_prompt
-    assert "User Question: When will water return?" in user_prompt
+    assert "member_question" in user_prompt
+    assert "When will water return?" in user_prompt
+    assert "untrusted" in user_prompt.lower()
     assert "Amharic" in user_prompt or "ISO am" in user_prompt
     assert "CRITICAL" in user_prompt
 
@@ -108,6 +111,7 @@ def test_build_user_prompt_auto_matches_any_language_without_forcing_english():
 def test_build_user_prompt_no_query_type_hardcoding():
     xml = '<context><evidence id="E1">Diane created this group</evidence></context>'
     prompt = build_user_prompt("Who's Diane?", xml, target_language=None)
-    assert prompt.count("User Question: Who's Diane?") == 1
+    assert prompt.count("Who's Diane?") == 1
+    assert "member_question" in prompt
     assert "formal biography" not in prompt
     assert "INSUFFICIENT_EVIDENCE for lack" not in prompt

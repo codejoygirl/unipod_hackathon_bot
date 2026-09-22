@@ -1,8 +1,31 @@
+import re
 import uuid
 
+import pytest
+
 from ai_service.generation.synthesizer import AnswerSynthesizer
+from ai_service.providers.base import ChatRequest, ChatResponse
 from ai_service.schemas.evidence import EvidenceChunk
-from ai_service.schemas.retrieval import AuthorityTier
+from ai_service.schemas.retrieval import AuthorityTier, CandidateChunk
+
+
+class _GroundedChat:
+    async def generate(self, request: ChatRequest) -> ChatResponse:
+        if request.extra_params.get("response_format") == {"type": "json_object"}:
+            return ChatResponse(
+                content=(
+                    '{"state":"POSSIBLE",'
+                    '"answer":"بدأ الهاكاثون في 18 سبتمبر 2026 [E1].",'
+                    '"evidence_ids_used":["E1"]}'
+                ),
+                model="test",
+            )
+
+        draft = str(request.messages[-1].content)
+        marker = "<draft_reply>"
+        if marker in draft:
+            draft = draft.split(marker, 1)[1].split("</draft_reply>", 1)[0].strip()
+        return ChatResponse(content=draft, model="test")
 
 
 def _chunk(eid: str, content: str) -> EvidenceChunk:
@@ -20,6 +43,44 @@ def _chunk(eid: str, content: str) -> EvidenceChunk:
     )
 
 
+def _candidate(content: str, score: float) -> CandidateChunk:
+    uid = uuid.uuid4()
+    return CandidateChunk(
+        chunk_id=uid,
+        source_id=uid,
+        version_id=uid,
+        source_name="UniPods",
+        source_uri="whatsapp://export/fake",
+        source_type="whatsapp",
+        content=content,
+        token_count=20,
+        authority_tier=AuthorityTier.COMMUNITY_DISCUSSION,
+        community_id=str(uid),
+        rrf_score=score,
+        final_score=score,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cross_language_evidence_below_english_floor_still_synthesizes():
+    synthesizer = AnswerSynthesizer(chat_model=_GroundedChat())
+
+    result = await synthesizer.synthesize_grounded_answer(
+        query="متى بدأ الهاكاثون؟",
+        candidates=[
+            _candidate(
+                "The hackathon started on September 18, 2026 and runs until September 24, 2026.",
+                0.48,
+            )
+        ],
+        language_hint="ar",
+    )
+
+    assert result.answer
+    assert "18 سبتمبر 2026" in result.answer
+    assert result.citations
+
+
 def test_complete_link_answer_fills_missing_urls_with_intro():
     chunks = [
         _chunk("E1", "Welcome session + Module 0 (10 September) https://youtu.be/yVji4ZQECVw"),
@@ -34,11 +95,11 @@ def test_complete_link_answer_fills_missing_urls_with_intro():
         evidence_chunks=chunks,
     )
 
-    assert "Here are the session recordings:" in completed
     assert "https://youtu.be/yVji4ZQECVw" in completed
     assert "https://youtu.be/6q4uPBO_sDc" in completed
     assert "https://youtu.be/-6G7LXiu47o" in completed
     assert "Welcome session + Module 0" in completed
+    # Lead intros come from the model when present — never hardcode EN/FR strings here.
     assert set(ids) == {"E1", "E2", "E3"}
 
 
@@ -49,11 +110,13 @@ def test_complete_link_answer_uses_links_intro_when_not_recordings():
     ]
     completed, _ids = AnswerSynthesizer._complete_link_answer_from_evidence(
         query="Send me the links",
-        answer="1. Signup form\nhttps://example.com/form",
+        answer="Here are the links:\n1. Signup form\nhttps://example.com/form",
         evidence_chunks=chunks,
         link_mode="assets",
     )
-    assert completed.startswith("Here are the links:")
+    assert "https://example.com/form" in completed
+    assert "https://example.com/slides" in completed
+    assert "Here are the links:" in completed
     assert "https://example.com/slides" in completed
     assert "session recordings" not in completed.lower()
 
@@ -160,12 +223,112 @@ def test_complete_link_answer_meeting_links_only_keeps_joins():
         answer="I don't see a meeting scheduled for today in the notes.",
         evidence_chunks=chunks,
     )
-    assert "meeting join links" in completed.lower()
     assert meet in completed
     assert light in completed
     assert linkedin not in completed
     assert yt not in completed
     assert "don't see a meeting scheduled for today" in completed
+    assert set(ids) == {"E1", "E2"}
+
+
+def test_teams_meet_and_light_meetings_same_session_deduped():
+    """ /meet/{id}?p= and light-meetings with the same meetingCode are one join. """
+    meet = "https://teams.microsoft.com/meet/360293151621628?p=cM5gEphg2N9i9d0w7G"
+    # coords payload: {"meetingCode":"360293151621628","passcode":"cM5gEphg2N9i9d0w7G"}
+    import base64
+    import json
+
+    coords = base64.urlsafe_b64encode(
+        json.dumps(
+            {
+                "meetingUrl": meet + "&anon=true",
+                "meetingCode": "360293151621628",
+                "passcode": "cM5gEphg2N9i9d0w7G",
+            }
+        ).encode()
+    ).decode().rstrip("=")
+    light = (
+        "https://teams.microsoft.com/light-meetings/launch"
+        f"?p=cM5gEphg2N9i9d0w7G&anon=true&coords={coords}"
+    )
+    chunks = [
+        _chunk("E1", f"Saidu\n{light}"),
+        _chunk("E2", f"Mamadou Lamine Diallo\n{meet}"),
+    ]
+    draft = (
+        "Here are the meeting links:\n\n"
+        f"1. Saidu\n{light}\n\n"
+        f"2. Mamadou Lamine Diallo\n{meet}\n"
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="meeting links for tomorrow",
+        answer=draft,
+        evidence_chunks=chunks,
+        link_mode="meetings",
+    )
+    assert completed.count("teams.microsoft.com") == 1
+    assert meet in completed
+    assert "light-meetings" not in completed
+    assert "Saidu" not in completed
+    assert "Mamadou" not in completed
+    assert "Microsoft Teams meeting" in completed or "Teams" in completed
+    assert set(ids) == {"E1", "E2"}
+
+
+def test_url_dedupe_key_unifies_teams_shapes():
+    meet = "https://teams.microsoft.com/meet/360293151621628?p=cM5gEphg2N9i9d0w7G"
+    import base64
+    import json
+
+    coords = base64.urlsafe_b64encode(
+        json.dumps(
+            {
+                "meetingCode": "360293151621628",
+                "passcode": "cM5gEphg2N9i9d0w7G",
+            }
+        ).encode()
+    ).decode().rstrip("=")
+    light = f"https://teams.microsoft.com/light-meetings/launch?p=cM5gEphg2N9i9d0w7G&coords={coords}"
+    assert AnswerSynthesizer._url_dedupe_key(meet) == AnswerSynthesizer._url_dedupe_key(light)
+    assert AnswerSynthesizer._url_dedupe_key(meet).startswith("teams-meet:")
+
+
+def test_clean_link_label_rejects_weak_and_time_fluff():
+    assert AnswerSynthesizer._clean_link_label("Diane") == ""
+    assert AnswerSynthesizer._clean_link_label("Saidu") == ""
+    assert AnswerSynthesizer._clean_link_label(
+        "Your contribution will help the UniPods team better support you at"
+    ) == ""
+    cleaned = AnswerSynthesizer._clean_link_label(
+        "At *3:00 PM CAT* (2:00 PM WAT), there is the first optional METI Open"
+    )
+    assert cleaned
+    assert "METI Open" in cleaned
+    assert cleaned.lower().startswith("meti") or "METI" in cleaned
+    assert "Wadhwani Ignite session" in AnswerSynthesizer._clean_link_label(
+        "Wadhwani Ignite session"
+    )
+
+
+def test_complete_link_answer_rebuilds_weak_titles():
+    meet_a = "https://teams.microsoft.com/meet/111111111111111?p=aaaaaaa1"
+    meet_b = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_MjlkNWYyMjYtMGNhMi00NDM1LTlkNmYtOTZhYTU2MDU4MDc2%40thread.v2/0?context=%7B%22Tid%22%3A%22x%22%7D"
+    chunks = [
+        _chunk("E1", f"Wadhwani Ignite session\n{meet_a}"),
+        _chunk("E2", f"Diane\n{meet_b}"),
+    ]
+    draft = f"1. Diane\n{meet_a}\n2. Diane\n{meet_b}"
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="meeting links",
+        answer=draft,
+        evidence_chunks=chunks,
+        link_mode="meetings",
+    )
+    assert "Wadhwani Ignite session" in completed
+    assert meet_a in completed
+    assert "meetup-join" in completed or meet_b.split("?", 1)[0] in completed
+    # Lone "Diane" must not remain as a numbered title.
+    assert not re.search(r"^\d+\.\s*Diane\s*$", completed, flags=re.M)
     assert set(ids) == {"E1", "E2"}
 
 
@@ -211,17 +374,67 @@ def test_complete_link_answer_french_enregistrements_skips_linkedin():
     ]
     completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
         query="Envoyez-moi les liens vers les enregistrements, s'il vous plaît",
-        answer=f"Here they are:\n1. junk\n{linkedin}\n2. home\n{lecture}",
+        answer=f"Voici les enregistrements des sessions :\n1. junk\n{linkedin}\n2. home\n{lecture}",
         evidence_chunks=chunks,
         link_mode="recordings",
         target_language="fr",
     )
+    # Keep the model's lead (any language); do not invent a hardcoded FR string.
     assert "Voici les enregistrements des sessions :" in completed
     assert yt in completed
     assert linkedin not in completed
     assert lecture not in completed
-    assert "Here they are" not in completed
     assert set(ids) == {"E1"}
+
+
+def test_follow_up_envelope_does_not_duplicate_summary_with_link_dump():
+    chunks = [
+        _chunk("E1", "Welcome session https://youtu.be/yVji4ZQECVw"),
+        _chunk("E2", "Module 1 https://youtu.be/6q4uPBO_sDc"),
+    ]
+    prior = (
+        "Here's a bit more detail on today's discussions:\n\n"
+        "1. Request for a summary\n"
+        "2. Official UniPods updates"
+    )
+    query = (
+        "The member is following up on a previous community answer.\n\n"
+        "Original question: What happened today and share available links\n\n"
+        f"Previous answer already shown to the member:\n{prior}\n\n"
+        "Follow-up: Is that all?"
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query=query,
+        answer=prior,
+        evidence_chunks=chunks,
+    )
+    # Must keep the follow-up model answer as-is — not glue a second link dump.
+    assert completed == prior or completed.count("Here's a bit more detail") <= 1
+    assert ids == []
+
+
+def test_current_question_reads_follow_up_marker():
+    q = (
+        "The member is following up on a previous community answer.\n\n"
+        "Original question: How many bots are being tested?\n\n"
+        "Follow-up: Is that all?"
+    )
+    assert AnswerSynthesizer._current_question(q) == "Is that all?"
+    assert "How many bots" in AnswerSynthesizer._original_question(q)
+
+
+def test_ensure_section_spacing_adds_blank_after_lead():
+    raw = "Here are the updates:\n1. First item\n2. Second item"
+    out = AnswerSynthesizer._ensure_section_spacing(raw)
+    assert "Here are the updates:\n\n1. First item" in out
+
+
+def test_clean_link_label_rejects_truncated_export_crumbs():
+    assert AnswerSynthesizer._clean_link_label("versal AI course is self-paced") == ""
+    assert AnswerSynthesizer._clean_link_label("es ressources. Votre contribution") == ""
+    assert "Welcome session" in AnswerSynthesizer._clean_link_label(
+        "Welcome session + Module 0 (10 September)"
+    )
 
 
 def test_complete_link_answer_recordings_empty_when_only_noise_urls():

@@ -64,43 +64,59 @@ def to_telegram_html(text: str) -> str:
     return "".join(parts)
 
 
-def mention_prefix(user) -> str:
-    """Real @username or first name only. Never invent a fake label."""
+def _is_private_chat(message) -> bool:
+    chat = getattr(message, "chat", None)
+    chat_type = (getattr(chat, "type", None) or "").lower()
+    return chat_type in ("private", "")
+
+
+def natural_name(user) -> str:
+    """Plain first name only (never @username). Empty if unknown."""
     if user is None:
         return ""
+    name = (user.first_name or "").strip()
+    return name
+
+
+def mention_prefix(user, *, private: bool = False) -> str:
+    """Group: @username or first name. Private: plain first name only, never @."""
+    if user is None:
+        return ""
+    if private:
+        return natural_name(user)
     if user.username:
         return f"@{user.username}"
-    if user.first_name:
-        return str(user.first_name).strip()
-    return ""
+    return natural_name(user)
 
 
-def mention_prefix_html(user) -> str:
-    """HTML mention; skip entirely if we have no real name (cut mention if wrong)."""
+def mention_prefix_html(user, *, private: bool = False) -> str:
+    """HTML address. Private: plain escaped name. Groups: @user or deep-link name."""
     if user is None:
         return ""
+    if private:
+        name = natural_name(user)
+        return html_escape(name) if name else ""
     if user.username:
         return f"@{html_escape(user.username)}"
-    name = (user.first_name or "").strip()
+    name = natural_name(user)
     if not name:
         return ""
     return f'<a href="tg://user?id={user.id}">{html_escape(name)}</a>'
 
 
-def blend_mention(tag: str, body: str) -> str:
-    """Address the person naturally. Mention is required; 'Hey' is not."""
+def blend_mention(tag: str, body: str, *, force: bool = True) -> str:
+    """Optionally address the person. Private chats pass force=False (no prefix)."""
     body = (body or "").lstrip()
+    # Strip leftover @handles the model may have prefixed.
+    body = re.sub(r"^@[\w_]{2,64}[,\s]+", "", body)
     tag = (tag or "").strip()
-    if not tag:
+    if not force or not tag:
         return body
     if not body:
         return tag
-    # Already addressed with this tag.
     if re.search(rf"(?i)\b{re.escape(tag)}\b", body):
         return body
 
-    # Drop a leading bare greeting the model added; we supply the mention ourselves.
-    # Keep the greeting word only when it is doing real social work (short hi).
     greeting = re.match(
         r"^(hey|hi|hello|howdy|yo)(?:\s+there)?([!.,]|\s)+",
         body,
@@ -109,7 +125,6 @@ def blend_mention(tag: str, body: str) -> str:
     if greeting:
         rest = body[greeting.end() :].lstrip()
         rest = re.sub(r"^there\b[!.,\s]*", "", rest, flags=re.I).lstrip()
-        # Long factual answers: just "@user, …" (no Hey).
         if rest and len(rest) > 80:
             return f"{tag}, {rest}"
         word = greeting.group(1)
@@ -118,7 +133,6 @@ def blend_mention(tag: str, body: str) -> str:
             return f"{word} {tag}, {rest}"
         return f"{word} {tag}!"
 
-    # Apologies / snags: "Sorry @user, …"
     apology = re.match(r"^(sorry|apologies|whoops|oops)([!.,]|\s)+", body, flags=re.I)
     if apology:
         word = apology.group(1)
@@ -128,56 +142,115 @@ def blend_mention(tag: str, body: str) -> str:
             return f"{word} {tag}, {rest}"
         return f"{word} {tag}."
 
-    # Default knowledge / normal replies: mention first, no forced Hey.
     return f"{tag}, {body}"
 
 
-async def reply_text_safe(message, text: str, *, mention: bool = True) -> None:
-    """Reply in-thread and address the asker inside the first sentence."""
+async def reply_text_safe(message, text: str, *, mention: bool | None = None) -> None:
+    """Reply in-thread. Private: natural (no @, no forced name). Groups: address asker."""
     user = getattr(message, "from_user", None)
+    private = _is_private_chat(message)
+    # Default: never force address in private; groups still tag the asker.
+    if mention is None:
+        mention = not private
+
     plain = strip_markdown_emphasis(text)
+    tag = mention_prefix(user, private=private) if mention else ""
 
     if TELEGRAM_PARSE_MODE == "html":
         try:
             html_body = to_telegram_html(text)
             if mention:
-                html_body = blend_mention(mention_prefix_html(user), html_body)
+                html_body = blend_mention(
+                    mention_prefix_html(user, private=private),
+                    html_body,
+                    force=not private,
+                )
+            elif private:
+                html_body = blend_mention("", html_body, force=False)
             await message.reply_text(html_body, parse_mode="HTML")
             return
         except Exception as exc:  # noqa: BLE001
             print(f"[zak] html parse_mode failed, falling back to plain: {exc}")
 
     if mention:
-        plain = blend_mention(mention_prefix(user), plain)
+        plain = blend_mention(tag, plain, force=not private)
+    else:
+        plain = blend_mention("", plain, force=False)
     await message.reply_text(plain)
 
 
-# /start: greeting + honest scope + one next step (keep short for mobile).
-# /help: commands live here, not on the welcome screen.
-WELCOME = (
-    "I'm Zak.\n\n"
-    "Ask me anything about this community. That often includes "
-    "deadlines, schedules, announcements, meeting notes, and links, "
-    "and I'm happy to help with whatever else has been shared here.\n\n"
-    "If I can't answer something right now, I'll let you know "
-    "and come back once I have an answer.\n\n"
-    "Just ask whenever you're ready.\n"
-    "Need commands? Send /help."
-)
+# /start + /help: short, member-facing (no admin commands).
+# On Telegram we advertise WhatsApp + Web chat (not Telegram again).
 
-HELP = (
-    "Quick guide:\n\n"
-    "Ask in plain language about anything in this community. "
-    "Common questions cover deadlines, schedules, announcements, "
-    "meeting notes, and links, but you can ask about anything "
-    "that has been shared.\n\n"
-    "If I can't answer yet, I'll say so and follow up when I can.\n\n"
-    "You can also just say hi.\n\n"
-    "/join <code> - connect with an invite code\n"
-    "/share <text> - suggest something to keep\n"
-    "   e.g. /share Clinic closed Friday afternoon\n\n"
-    "That's all you need."
-)
+def _env_flag(name: str, default: str = "true") -> bool:
+    return (os.getenv(name, default) or default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _telegram_other_channels(*, in_group: bool = False) -> str:
+    lines: list[str] = []
+    wa_url = (os.getenv("ZAK_WHATSAPP_URL") or "").strip()
+    wa_label = (os.getenv("ZAK_WHATSAPP_LABEL") or "WhatsApp").strip() or "WhatsApp"
+    if wa_url:
+        lines.append(f"• {wa_label}: {wa_url}")
+    else:
+        lines.append(f"• {wa_label}")
+
+    if _env_flag("ZAK_SHOW_WEB_CHAT", "true"):
+        web_url = (
+            (os.getenv("ZAK_WEB_CHAT_URL") or "").strip()
+            or (os.getenv("FRONTEND_URL") or "").strip()
+        )
+        web_label = (os.getenv("ZAK_WEB_CHAT_LABEL") or "Web chat").strip() or "Web chat"
+        if web_url:
+            lines.append(f"• {web_label}: {web_url}")
+        else:
+            lines.append(f"• {web_label}")
+
+    if in_group:
+        handle = (os.getenv("ZAK_TELEGRAM_HANDLE") or "").strip().lstrip("@")
+        tg_url = (os.getenv("ZAK_TELEGRAM_URL") or "").strip()
+        if not tg_url and handle:
+            tg_url = f"https://t.me/{handle}"
+        if tg_url:
+            lines.append(f"• Private chat: {tg_url}")
+
+    if not lines:
+        return ""
+    return "Also reach me on:\n" + "\n".join(lines)
+
+
+def _member_help_text(*, in_group: bool = False) -> str:
+    channels = _telegram_other_channels(in_group=in_group)
+    return (
+        "Hi - I'm Zak\n\n"
+        "I help with community schedules, updates, links, and what's been shared.\n"
+        "You can ask in any language; I'll reply in the same one.\n\n"
+        "You can ask me things like:\n"
+        "• When is the next session?\n"
+        "• What's the meeting link?\n"
+        "• Share today's updates\n"
+        "• Who should I talk to about X?\n\n"
+        + ((channels + "\n\n") if channels else "")
+        + "Quick commands:\n"
+        "/ask - ask a community question\n"
+        "/share - tell the community something worth knowing\n"
+        "/feature - suggest a product improvement\n"
+        "/join - connect with an invite code\n"
+        "/help - show this message\n\n"
+        "Or just type in plain language - no command needed."
+    )
+
+
+def _welcome_text(*, in_group: bool = False) -> str:
+    channels = _telegram_other_channels(in_group=in_group)
+    return (
+        "Hi - I'm Zak.\n\n"
+        "I help with community schedules, updates, links, and what's been shared.\n"
+        "You can ask in any language; I'll reply in the same one.\n\n"
+        + ((channels + "\n\n") if channels else "")
+        + "Just ask whenever you're ready.\n"
+        "Need a quick tour? Send /help."
+    )
 
 
 async def call_laravel_inbound(
@@ -186,9 +259,13 @@ async def call_laravel_inbound(
     text: str,
     message_id: str | None,
     chat_type: str = "private",
+    chat_id: str | None = None,
     from_name: str | None = None,
     from_username: str | None = None,
     reply_to_message_id: str | None = None,
+    bot_mentioned: bool = False,
+    reply_to_bot: bool = False,
+    quoted_text: str | None = None,
 ) -> str | None:
     payload = {
         "from": from_id,
@@ -196,13 +273,19 @@ async def call_laravel_inbound(
         "message_id": message_id,
         "target_language": TARGET_LANGUAGE,
         "chat_type": chat_type,
+        "bot_mentioned": bot_mentioned,
+        "reply_to_bot": reply_to_bot,
     }
+    if chat_id:
+        payload["chat_id"] = chat_id
     if from_name:
         payload["from_name"] = from_name
     if from_username:
         payload["from_username"] = from_username
     if reply_to_message_id:
         payload["reply_to_message_id"] = reply_to_message_id
+    if quoted_text:
+        payload["quoted_text"] = quoted_text[:1500]
     async with httpx.AsyncClient(timeout=90.0) as client:
         res = await client.post(
             f"{LARAVEL_BASE_URL}/api/v1/internal/telegram-spike/inbound",
@@ -223,6 +306,34 @@ async def call_laravel_inbound(
     return data.get("reply")
 
 
+def _message_mentions_bot(message, bot_id: int | None, bot_username: str | None) -> bool:
+    text = (message.text or "") if message else ""
+    if bot_username:
+        uname = bot_username.lstrip("@").lower()
+        if uname and re.search(rf"@{re.escape(uname)}\b", text, flags=re.I):
+            return True
+    entities = list(message.entities or []) if message else []
+    for ent in entities:
+        if ent.type == "mention" and bot_username:
+            frag = text[ent.offset : ent.offset + ent.length]
+            if frag.lstrip("@").lower() == bot_username.lstrip("@").lower():
+                return True
+        if ent.type == "text_mention" and bot_id and ent.user and ent.user.id == bot_id:
+            return True
+    return False
+
+
+def _reply_targets_bot(message, bot_id: int | None) -> tuple[bool, str | None]:
+    replied = message.reply_to_message if message else None
+    if replied is None:
+        return False, None
+    quoted = ((replied.text or replied.caption or "")).strip() or None
+    from_user = replied.from_user
+    if bot_id and from_user and from_user.id == bot_id:
+        return True, quoted
+    return False, quoted
+
+
 async def send_via_laravel(
     update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
 ) -> None:
@@ -240,20 +351,36 @@ async def send_via_laravel(
     reply_to_message_id = None
     if update.message.reply_to_message is not None:
         reply_to_message_id = str(update.message.reply_to_message.message_id)
+
+    bot = context.bot
+    bot_id = bot.id if bot else None
+    bot_username = bot.username if bot else None
+    reply_to_bot, quoted_text = _reply_targets_bot(update.message, bot_id)
+    bot_mentioned = _message_mentions_bot(update.message, bot_id, bot_username) or reply_to_bot
+
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    print(f"[zak] inbound from={from_id} chat={chat_type}: {text[:80]}")
+    print(
+        f"[zak] inbound from={from_id} chat={chat_type}"
+        f" mentioned={bot_mentioned} reply_to_bot={reply_to_bot}: {text[:80]}"
+    )
     try:
         reply = await call_laravel_inbound(
             from_id=from_id,
             text=text,
             message_id=str(update.message.message_id),
             chat_type=chat_type,
+            chat_id=str(update.effective_chat.id),
             from_name=from_name,
             from_username=from_username,
             reply_to_message_id=reply_to_message_id,
+            bot_mentioned=bot_mentioned,
+            reply_to_bot=reply_to_bot,
+            quoted_text=quoted_text,
         )
         if not reply:
-            reply = "Sorry, I didn't quite catch that. Could you try asking another way?"
+            # Laravel returned null (silent / not directed at Zak) — do not nag.
+            print(f"[zak] silent from={from_id} chat={chat_type}")
+            return
         if len(reply) > 4000:
             reply = reply[:3990] + "..."
         await reply_text_safe(update.message, reply)
@@ -268,12 +395,16 @@ async def send_via_laravel(
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
-        await reply_text_safe(update.message, WELCOME, mention=True)
+        chat_type = (update.effective_chat.type if update.effective_chat else "private") or "private"
+        in_group = chat_type in ("group", "supergroup")
+        await reply_text_safe(update.message, _welcome_text(in_group=in_group))
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
-        await reply_text_safe(update.message, HELP, mention=True)
+        chat_type = (update.effective_chat.type if update.effective_chat else "private") or "private"
+        in_group = chat_type in ("group", "supergroup")
+        await reply_text_safe(update.message, _member_help_text(in_group=in_group))
 
 
 async def id_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -316,14 +447,49 @@ async def share_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not body:
         await reply_text_safe(
             update.message,
-            "Happy to help. Send the note like this:\n"
+            "Share something the community should know, like:\n"
             "/share Water will be off tomorrow morning\n\n"
             "Or reply to a message with /share.\n\n"
-            "An admin will review it before it becomes part of the "
-            "community knowledge base.",
+            "An admin will review it before Zak can use it in answers.",
         )
         return
     await send_via_laravel(update, context, f"SHARE {body}")
+
+
+async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin-only ingest — not the same as member /share."""
+    if update.message is None:
+        return
+    body = " ".join(context.args).strip() if context.args else ""
+    if not body and update.message.reply_to_message and update.message.reply_to_message.text:
+        body = update.message.reply_to_message.text.strip()
+    if not body:
+        await reply_text_safe(
+            update.message,
+            "Admins can ingest text like this:\n"
+            "/export Pasted announcement or notes\n\n"
+            "Members should use /share instead (goes to admin review).",
+        )
+        return
+    await send_via_laravel(update, context, f"EXPORT {body}")
+
+
+async def ask_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None:
+        return
+    body = " ".join(context.args).strip() if context.args else ""
+    if not body and update.message.reply_to_message and update.message.reply_to_message.text:
+        body = update.message.reply_to_message.text.strip()
+    if not body:
+        await reply_text_safe(
+            update.message,
+            "Of course. Send it like this:\n"
+            "/ask Can someone approve my UniPods form?\n\n"
+            "Or reply to a message with /ask.\n\n"
+            "An admin will see it and can reply from their side.",
+        )
+        return
+    await send_via_laravel(update, context, f"ASK {body}")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -350,8 +516,8 @@ def main() -> None:
     app.add_handler(CommandHandler("id", id_cmd))
     app.add_handler(CommandHandler("join", join_cmd))
     app.add_handler(CommandHandler("share", share_cmd))
-    # Keep /export as a quiet alias so old muscle memory still works.
-    app.add_handler(CommandHandler("export", share_cmd))
+    app.add_handler(CommandHandler("export", export_cmd))
+    app.add_handler(CommandHandler("ask", ask_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     print("[zak] Polling... message your bot in Telegram.")
     try:

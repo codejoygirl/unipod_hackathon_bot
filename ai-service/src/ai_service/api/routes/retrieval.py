@@ -100,12 +100,13 @@ async def generate_grounded_answer(
 
     retrieval_res = await retrieval_service.search(session=session, request=query_req)
 
-    # Reply language: explicit client override only.
-    # Auto mode leaves target_language unset so the synthesizer instructs the model
-    # to match the User Question language (any language; no hardcoded catalog).
-    # Do NOT pass heuristic detected_language into generation: wrong/"en" defaults
-    # force English answers when evidence is English (common RAG failure mode).
+    # Reply language: explicit override, or a non-English detector result.
+    # Keep English as auto because false "en" defaults are common when evidence is English,
+    # but lock detected non-English so short Latin-script asks do not drift back to English.
+    detected_reply_lang = (retrieval_res.detected_language or "").strip().lower()
     reply_language = explicit_reply_lang
+    if reply_language is None and detected_reply_lang not in {"", "en", "unknown"}:
+        reply_language = detected_reply_lang
 
     # Step 2: Synthesis and verification
     validated_payload = await synthesizer.synthesize_grounded_answer(

@@ -86,7 +86,7 @@ final class KnowledgeLifecycleService
                     uri: $source->uri,
                     name: $source->name,
                     sourceType: $source->source_type,
-                    content: $source->content,
+                    content: (string) $source->content,
                     authorityTier: $source->authority_tier->value,
                     metadata: array_merge($source->metadata ?? [], [
                         'lifecycle_status' => KnowledgeLifecycleStatus::Published->value,
@@ -96,6 +96,13 @@ final class KnowledgeLifecycleService
 
                 $source->ai_source_id = $response['source_id'] ?? $response['data']['source_id'] ?? null;
                 $source->ai_version_id = $response['version_id'] ?? $response['data']['version_id'] ?? null;
+
+                if (isset($response['ingest_parts']) && is_array($response['ingest_parts'])) {
+                    $meta = $source->metadata ?? [];
+                    $meta['ingest_parts'] = array_values($response['ingest_parts']);
+                    $meta['ingest_part_count'] = (int) ($response['ingest_part_count'] ?? count($response['ingest_parts']));
+                    $source->metadata = $meta;
+                }
             }
 
             $source->lifecycle_status = KnowledgeLifecycleStatus::Published;

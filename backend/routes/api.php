@@ -6,10 +6,13 @@ use App\Http\Controllers\Api\V1\CommunityController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\Internal\TelegramSpikeController;
 use App\Http\Controllers\Api\V1\Internal\WhatsAppWebSpikeController;
+use App\Http\Controllers\Api\V1\Internal\WhatsAppZavuController;
 use App\Http\Controllers\Api\V1\KnowledgeSourceController;
 use App\Http\Controllers\Api\V1\TenantController;
+use App\Http\Controllers\Api\V1\Webhooks\WhatsAppZavuWebhookController;
 use App\Http\Middleware\EnsureTelegramSpikeEnabled;
 use App\Http\Middleware\EnsureWhatsAppWebSpikeEnabled;
+use App\Http\Middleware\EnsureWhatsAppZavuEnabled;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -73,5 +76,20 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->group(function (): void {
             Route::post('/inbound', [TelegramSpikeController::class, 'inbound'])->name('inbound');
             Route::post('/join-token', [TelegramSpikeController::class, 'mintJoin'])->name('join');
+        });
+
+    /*
+    | WhatsApp via Zavu (official BSP). Gated by WHATSAPP_ZAVU.
+    | Webhook verifies X-Zavu-Signature. Spikes remain independently env-gated.
+    */
+    Route::post('/webhooks/whatsapp-zavu', WhatsAppZavuWebhookController::class)
+        ->middleware(EnsureWhatsAppZavuEnabled::class)
+        ->name('webhooks.whatsapp_zavu');
+
+    Route::prefix('internal/whatsapp-zavu')
+        ->middleware(EnsureWhatsAppZavuEnabled::class)
+        ->name('internal.whatsapp_zavu.')
+        ->group(function (): void {
+            Route::post('/join-token', [WhatsAppZavuController::class, 'mintJoin'])->name('join');
         });
 });

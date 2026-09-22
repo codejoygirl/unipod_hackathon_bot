@@ -2,6 +2,7 @@
 
 import logging
 
+from ai_service.ingestion.chat_export import ChatExportNormalizer
 from ai_service.providers.factory import ModelFactory
 from ai_service.schemas.ingestion import RawDocument
 from ai_service.schemas.evidence import MediaLocator
@@ -15,6 +16,7 @@ class MultimodalProcessor:
     def __init__(self):
         self.vision_model = ModelFactory.get_vision_model()
         self.audio_model = ModelFactory.get_transcription_model()
+        self.chat_normalizer = ChatExportNormalizer()
 
     async def process_document(self, doc: RawDocument) -> list[dict]:
         """Process a document according to its source type."""
@@ -34,9 +36,37 @@ class MultimodalProcessor:
         if source_type in {"video", "mp4", "mov", "webm", "mkv"}:
             return await self._process_video(doc, locator)
 
+        content = doc.content if isinstance(doc.content, str) else ""
+        chatish = (
+            source_type in ChatExportNormalizer.CHAT_SOURCE_HINTS
+            or ChatExportNormalizer.looks_like_chat(content)
+        )
+        if chatish:
+            export_type, windows = self.chat_normalizer.process(
+                content,
+                source_type_hint=source_type,
+                uri=doc.uri,
+            )
+            if windows:
+                logger.info(
+                    "chat_export_normalized type=%s windows=%s uri=%s",
+                    export_type.value,
+                    len(windows),
+                    doc.uri,
+                )
+                return windows
+            # Detected as chat but nothing useful remained after cleaning —
+            # do not fall through to indexing the raw noisy export.
+            logger.info(
+                "chat_export_empty_after_clean type=%s uri=%s",
+                export_type.value,
+                doc.uri,
+            )
+            return []
+
         return [
             {
-                "content": doc.content,
+                "content": content,
                 "media_type": "text",
                 "locator": locator,
             }

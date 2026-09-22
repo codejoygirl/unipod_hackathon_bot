@@ -25,8 +25,12 @@ final class TelegramSpikeController extends Controller
             'reply_to_message_id' => ['nullable', 'string', 'max:128'],
             'target_language' => ['nullable', 'string', 'max:10'],
             'chat_type' => ['nullable', 'string', 'max:32'],
+            'chat_id' => ['nullable', 'string', 'max:64'],
             'from_name' => ['nullable', 'string', 'max:128'],
             'from_username' => ['nullable', 'string', 'max:64'],
+            'bot_mentioned' => ['nullable', 'boolean'],
+            'reply_to_bot' => ['nullable', 'boolean'],
+            'quoted_text' => ['nullable', 'string', 'max:2000'],
         ]);
 
         $reply = $this->adapter->handleInbound(

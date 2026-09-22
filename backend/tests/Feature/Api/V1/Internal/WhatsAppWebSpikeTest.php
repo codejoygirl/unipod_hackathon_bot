@@ -43,6 +43,10 @@ class WhatsAppWebSpikeTest extends TestCase
     public function test_spike_ask_returns_cited_reply(): void
     {
         Http::fake([
+            '*/conversation/classify' => Http::response([
+                'intent' => 'knowledge',
+                'link_mode' => 'none',
+            ], 200),
             '*/retrieval/grounded-answer' => Http::response([
                 'query' => 'When is clinic open?',
                 'detected_language' => 'en',
@@ -109,7 +113,7 @@ class WhatsAppWebSpikeTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.channel', 'whatsapp_web_spike')
-            ->assertJsonPath('data.reply', 'Saturday 9am [E1].'."\n\n".'(Clinic, VERIFIED)');
+            ->assertJsonPath('data.reply', 'Saturday 9am.'."\n\n".'(From clinic hours notes.)');
     }
 
     public function test_spike_export_creates_draft(): void
@@ -126,6 +130,7 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
             'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
             'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.admin_phones' => ['15551234567'],
         ]);
 
         $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
@@ -143,6 +148,269 @@ class WhatsAppWebSpikeTest extends TestCase
             'lifecycle_status' => 'draft',
             'name' => 'WA Web spike forward',
         ]);
+    }
+
+    public function test_non_admin_import_is_denied(): void
+    {
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => $user->id,
+        ]);
+
+        config([
+            'whatsapp_web_spike.enabled' => true,
+            'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
+            'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
+            'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.admin_phones' => ['2348011111111'],
+        ]);
+
+        $deny = app(\App\Services\Channels\ChannelCommandAccess::class)->adminOnlyDenial('whatsapp');
+
+        foreach (['/import should not work for members', '/export should not work for members'] as $text) {
+            $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+                'from' => '15551234567',
+                'text' => $text,
+            ], [
+                'X-Spike-Secret' => 'spike-test-secret',
+            ])
+                ->assertOk()
+                ->assertJsonPath('data.reply', $deny);
+        }
+
+        $this->assertDatabaseMissing('knowledge_documents', [
+            'community_id' => $community->id,
+            'name' => 'WA Web spike forward',
+        ]);
+    }
+
+    public function test_group_silent_without_mention(): void
+    {
+        config([
+            'whatsapp_web_spike.enabled' => true,
+            'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
+            'whatsapp_web_spike.bot_aliases' => ['zak'],
+            'whatsapp_web_spike.group_listen' => 'mention_or_command',
+        ]);
+
+        $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '15551234567',
+            'text' => 'random group chatter',
+            'chat_type' => 'group',
+            'is_group' => true,
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.reply', null);
+    }
+
+    public function test_group_listens_on_mention(): void
+    {
+        Http::fake([
+            '*/conversation/classify' => Http::response([
+                'intent' => 'knowledge',
+                'link_mode' => 'none',
+            ], 200),
+            '*/conversation/reply' => Http::response([
+                'reply' => "Sorry, I can't help with that one yet. Ask about community schedules anytime.",
+            ], 200),
+            '*/retrieval/grounded-answer' => Http::response([
+                'query' => 'hours?',
+                'detected_language' => 'en',
+                'execution_time_ms' => 1.0,
+                'total_chunks_retrieved' => 0,
+                'validated_payload' => [
+                    'state' => 'INSUFFICIENT',
+                    'answer' => '',
+                    'confidence_score' => 0.1,
+                    'needs_escalation' => true,
+                    'escalation_reason' => 'no sources',
+                    'citations' => [],
+                    'conflicts' => [],
+                ],
+            ], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => $user->id,
+        ]);
+
+        config([
+            'whatsapp_web_spike.enabled' => true,
+            'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
+            'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
+            'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.bot_aliases' => ['zak'],
+            'whatsapp_web_spike.group_listen' => 'mention_or_command',
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+        ]);
+
+        $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '15551234567',
+            'text' => '@zak hours?',
+            'chat_type' => 'group',
+            'is_group' => true,
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.channel', 'whatsapp_web_spike');
+
+        $reply = $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '15551234567',
+            'text' => '@zak hours?',
+            'chat_type' => 'group',
+            'is_group' => true,
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])->json('data.reply');
+
+        $this->assertNotNull($reply);
+        $this->assertNotSame('', $reply);
+    }
+
+    public function test_group_listens_when_bot_mentioned_flag_set(): void
+    {
+        Http::fake([
+            '*/conversation/classify' => Http::response([
+                'intent' => 'knowledge',
+                'link_mode' => 'none',
+            ], 200),
+            '*/conversation/reply' => Http::response([
+                'reply' => "Sorry, I can't help with that one yet. Ask about community schedules anytime.",
+            ], 200),
+            '*/retrieval/grounded-answer' => Http::response([
+                'query' => 'meetings today?',
+                'detected_language' => 'en',
+                'execution_time_ms' => 1.0,
+                'total_chunks_retrieved' => 0,
+                'validated_payload' => [
+                    'state' => 'INSUFFICIENT',
+                    'answer' => '',
+                    'confidence_score' => 0.1,
+                    'needs_escalation' => true,
+                    'escalation_reason' => 'no sources',
+                    'citations' => [],
+                    'conflicts' => [],
+                ],
+            ], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => $user->id,
+        ]);
+
+        config([
+            'whatsapp_web_spike.enabled' => true,
+            'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
+            'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
+            'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.bot_aliases' => ['zak_bot'],
+            'whatsapp_web_spike.group_listen' => 'mention_or_command',
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+        ]);
+
+        $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '15551234567',
+            'text' => '@100696296808461 What are the meetings scheduled for today?',
+            'chat_type' => 'group',
+            'is_group' => true,
+            'bot_mentioned' => true,
+            'bot_lid' => '100696296808461',
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])
+            ->assertOk();
+
+        $reply = $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '15551234567',
+            'text' => '@100696296808461 What are the meetings scheduled for today?',
+            'chat_type' => 'group',
+            'is_group' => true,
+            'bot_mentioned' => true,
+            'bot_lid' => '100696296808461',
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])->json('data.reply');
+
+        $this->assertNotNull($reply);
+        $this->assertNotSame('', $reply);
+    }
+
+    public function test_bare_bot_lid_quote_reply_is_not_silenced(): void
+    {
+        Http::fake([
+            '*/conversation/classify' => Http::response([
+                'intent' => 'knowledge',
+                'link_mode' => 'none',
+            ], 200),
+            '*/conversation/reply' => Http::response([
+                'reply' => 'Social',
+            ], 200),
+            '*/retrieval/grounded-answer' => Http::response([
+                'query' => 'When did the hackathon start?',
+                'detected_language' => 'en',
+                'execution_time_ms' => 1.0,
+                'total_chunks_retrieved' => 1,
+                'validated_payload' => [
+                    'state' => 'GROUNDED',
+                    'answer' => 'The hackathon started on Monday.',
+                    'confidence_score' => 0.9,
+                    'needs_escalation' => false,
+                    'escalation_reason' => null,
+                    'citations' => [],
+                    'conflicts' => [],
+                ],
+            ], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => $user->id,
+        ]);
+
+        config([
+            'whatsapp_web_spike.enabled' => true,
+            'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
+            'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
+            'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.bot_lid' => '100696296808461',
+            'whatsapp_web_spike.bot_aliases' => ['zak_bot'],
+            'whatsapp_web_spike.group_listen' => 'mention_or_command',
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+        ]);
+
+        $reply = $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '265721070268441',
+            'text' => '@100696296808461',
+            'chat_type' => 'group',
+            'is_group' => true,
+            'bot_mentioned' => true,
+            'bot_lid' => '100696296808461',
+            'quoted_text' => 'When did the hackathon start?',
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])
+            ->assertOk()
+            ->json('data.reply');
+
+        $this->assertNotNull($reply);
+        $this->assertNotSame('', $reply);
+        $this->assertStringContainsString('hackathon', mb_strtolower((string) $reply));
     }
 
     public function test_spike_join_token_and_link(): void
@@ -179,5 +447,85 @@ class WhatsAppWebSpikeTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.reply', 'Linked to community '.$community->id.'. Ask me a question about community knowledge.');
+    }
+
+    public function test_admin_swipe_reply_to_escalation_card_delivers_answer(): void
+    {
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Demo Community',
+        ]);
+        User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => User::query()->where('email', 'demo@zak.test')->value('id'),
+        ]);
+
+        config([
+            'whatsapp_web_spike.enabled' => true,
+            'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
+            'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
+            'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.bot_number' => '2347041131371',
+            'whatsapp_web_spike.admin_phones' => ['2347041131371', '2348117084647'],
+            'whatsapp_web_spike.outbound_url' => 'http://127.0.0.1:3101',
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+            'telegram_spike.default_user_email' => 'demo@zak.test',
+            'ai_service.base_url' => 'http://ai.test',
+            'ai_service.hmac_secret' => 'test-secret',
+        ]);
+        $this->app->forgetInstance(\App\Services\AI\AiServiceClient::class);
+
+        Http::fake([
+            '127.0.0.1:3101/*' => Http::response(['ok' => true], 200),
+            'http://ai.test/*' => Http::response([
+                'source_id' => 'ai-src-1',
+                'version_id' => 'ai-ver-1',
+            ], 200),
+        ]);
+
+        $escId = '01ADMINSWIPECARD1';
+        $ref = '9D5GWS';
+        \Illuminate\Support\Facades\Cache::put('spike_escalation:'.$escId, [
+            'id' => $escId,
+            'type' => 'ask',
+            'ref' => $ref,
+            'question' => "Who's @80599524048943 ?",
+            'from' => '265721070268441',
+            'from_phone' => '2348011111111',
+            'from_name' => 'Abdulsamad',
+            'community_id' => $community->id,
+            'community_name' => $community->name,
+            'reason' => 'insufficient_evidence',
+            'channel' => 'whatsapp_web_spike',
+        ], now()->addDay());
+        \Illuminate\Support\Facades\Cache::put('spike_escalation_ref:'.$ref, $escId, now()->addDay());
+
+        $card = "*Zak Bot needs a quick hand.*\n\nRequest ID: {$ref}\n\nName: Abdulsamad\n\n"
+            ."Member ID: 265721070268441\n\nHow to act\nSwipe-reply to this card";
+
+        $response = $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '265721070268441',
+            'text' => 'Joy is a member of the group',
+            'chat_type' => 'private',
+            'is_group' => false,
+            'reply_to_bot' => true,
+            'quoted_text' => $card,
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])->assertOk();
+
+        $reply = (string) $response->json('data.reply');
+        $this->assertStringContainsString('sent that to', $reply);
+        $this->assertStringNotContainsString('Zak Bot needs a quick hand', $reply);
+        $this->assertStringNotContainsString("don't have a solid answer", $reply);
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '127.0.0.1:3101/send')
+                && $request['to'] === '2348011111111'
+                && str_contains((string) $request['text'], 'Joy is a member of the group')
+                && str_contains((string) $request['text'], "Who's @80599524048943");
+        });
     }
 }

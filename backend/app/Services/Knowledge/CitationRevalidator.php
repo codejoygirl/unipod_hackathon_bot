@@ -10,6 +10,7 @@ use App\Enums\AnswerState;
 use App\Enums\KnowledgeLifecycleStatus;
 use App\Models\KnowledgeSource;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
 
 final class CitationRevalidator
 {
@@ -19,18 +20,27 @@ final class CitationRevalidator
     public function revalidate(User $user, GroundedAnswerDTO $answer): GroundedAnswerDTO
     {
         $accessibleCommunityIds = $user->accessibleCommunityIds();
-        $allowedUris = KnowledgeSource::query()
+        $sources = KnowledgeSource::query()
             ->where('lifecycle_status', KnowledgeLifecycleStatus::Published)
             ->whereIn('community_id', $accessibleCommunityIds)
-            ->pluck('uri')
-            ->all();
+            ->get(['id', 'uri']);
 
-        $allowedLookup = array_fill_keys($allowedUris, true);
+        $allowedLookup = array_fill_keys(
+            $sources->pluck('uri')->filter()->map(fn ($u) => (string) $u)->all(),
+            true,
+        );
+        $allowedIds = array_fill_keys(
+            $sources->pluck('id')->map(fn ($id) => (string) $id)->all(),
+            true,
+        );
 
         $filtered = array_values(array_filter(
             $answer->citations,
-            fn (CitationDTO $citation): bool => isset($allowedLookup[$citation->sourceUri])
-                || $this->uriLooksPublic($citation->sourceUri)
+            fn (CitationDTO $citation): bool => $this->citationIsAccessible(
+                $citation->sourceUri,
+                $allowedLookup,
+                $allowedIds,
+            )
         ));
 
         if ($filtered === $answer->citations) {
@@ -38,6 +48,15 @@ final class CitationRevalidator
         }
 
         if ($filtered === [] && $answer->answer !== '') {
+            Log::warning('citation.revalidation.blocked', [
+                'citation_uris' => array_values(array_unique(array_map(
+                    fn (CitationDTO $c): string => $c->sourceUri,
+                    $answer->citations,
+                ))),
+                'allowed_uri_sample' => array_slice(array_keys($allowedLookup), 0, 5),
+                'answer_len' => mb_strlen($answer->answer),
+            ]);
+
             return new GroundedAnswerDTO(
                 query: $answer->query,
                 detectedLanguage: $answer->detectedLanguage,
@@ -68,9 +87,37 @@ final class CitationRevalidator
         );
     }
 
-    private function uriLooksPublic(string $uri): bool
+    /**
+     * @param  array<string, true>  $allowedLookup
+     * @param  array<string, true>  $allowedIds
+     */
+    private function citationIsAccessible(string $uri, array $allowedLookup, array $allowedIds): bool
     {
-        // Allow empty-uri citations only when no local source row exists yet (dev mocks).
-        return $uri === '' || str_starts_with($uri, 'mock://');
+        if (isset($allowedLookup[$uri])) {
+            return true;
+        }
+
+        // Empty / mock: retrieval already scoped by community_id.
+        if ($uri === '' || str_starts_with($uri, 'mock://')) {
+            return true;
+        }
+
+        // Chunked ingest: AI stores `{base}/part-N` while Laravel keeps `{base}`.
+        foreach (array_keys($allowedLookup) as $allowed) {
+            if ($allowed === '') {
+                continue;
+            }
+            $base = rtrim($allowed, '/');
+            if (str_starts_with($uri, $base.'/part-') || str_starts_with($uri, $base.'#')) {
+                return true;
+            }
+        }
+
+        // Legacy placeholder scheme — accept when id is a published accessible source.
+        if (preg_match('#^community://sources/([A-Za-z0-9_-]+)$#', $uri, $m) === 1) {
+            return isset($allowedIds[$m[1]]);
+        }
+
+        return false;
     }
 }

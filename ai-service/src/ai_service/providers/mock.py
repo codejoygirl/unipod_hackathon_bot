@@ -151,7 +151,25 @@ class MockLanguageDetector(LanguageDetectionModel):
         if any("\u1200" <= ch <= "\u137F" for ch in text):
             return "am"
 
+        # Arabic script (incl. Arabic Supplement / Presentation Forms)
+        if any(
+            ("\u0600" <= ch <= "\u06FF")
+            or ("\u0750" <= ch <= "\u077F")
+            or ("\u08A0" <= ch <= "\u08FF")
+            for ch in text
+        ):
+            return "ar"
+
         text_lower = text.lower()
+
+        # Latin-script community languages can be short and mixed with English
+        # nouns ("hackathon"). Use orthography only, not translated keyword lists.
+        # Return a sentinel instead of guessing the exact language code.
+        if (
+            any(ch in text_lower for ch in ("\u1eb9", "\u1ecd", "\u1e63"))
+            or any(ch in text for ch in ("\u0300", "\u0301", "\u0304", "\u0307", "\u0323"))
+        ):
+            return "non-en"
 
         spanish_cues = (
             "¿" in text

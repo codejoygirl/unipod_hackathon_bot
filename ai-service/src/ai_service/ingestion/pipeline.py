@@ -143,14 +143,48 @@ class IngestionPipeline:
         session.add(new_version)
         await session.flush()
 
-        # Step 6: Chunk Document (if text)
+        # Step 6: Chunk Document (if text).
+        # Chat-export windows are already sized for retrieval — keep them intact.
         final_chunk_tuples = []
         for p_chunk in processed_chunks:
-            sub_chunks = ContextualChunker.chunk(p_chunk["content"], max_tokens=self.chunk_size)
+            media_type = p_chunk.get("media_type", "text")
+            locator = p_chunk.get("locator", {})
+            if media_type == "chat_window":
+                crumbs = list(p_chunk.get("breadcrumbs") or ["chat"])
+                if p_chunk.get("export_type"):
+                    locator = {**locator, "export_type": p_chunk["export_type"]}
+                final_chunk_tuples.append(
+                    (p_chunk["content"], crumbs, locator, media_type)
+                )
+                continue
+
+            sub_chunks = ContextualChunker.chunk(
+                p_chunk["content"], max_tokens=self.chunk_size
+            )
             for sc in sub_chunks:
-                final_chunk_tuples.append((sc["content"], sc["breadcrumbs"], p_chunk.get("locator", {}), p_chunk.get("media_type", "text")))
+                final_chunk_tuples.append(
+                    (
+                        sc["content"],
+                        sc["breadcrumbs"],
+                        locator,
+                        media_type,
+                    )
+                )
 
         chunk_texts = [ct[0] for ct in final_chunk_tuples]
+        if not chunk_texts:
+            source.status = request.index_status
+            await session.commit()
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            return IngestionResponse(
+                source_id=source.id,
+                version_id=new_version.id,
+                status=IngestionStatus.COMPLETED,
+                content_sha256=content_hash,
+                chunks_created=0,
+                message="No indexable content remained after normalization.",
+                execution_time_ms=round(elapsed_ms, 2),
+            )
 
         # Step 7: Embeddings
         embeddings = await self.embedder.embed(chunk_texts)

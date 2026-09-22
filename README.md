@@ -158,4 +158,6 @@ Phase 0–2 foundation on `develop`: Sanctum tenancy, knowledge lifecycle, RAG A
 - Keep `.env` files out of Git. Only `.env.example` templates are tracked.
 - Never put server secrets in `NEXT_PUBLIC_*` variables.
 - Tenant and community isolation must be enforced in Laravel (and repeated in AI retrieval), not only in prompts.
-- WhatsApp Web automation under `infrastructure/whatsapp-web-spike/` is a **dev spike only** (`WHATSAPP_WEB_SPIKE=false` by default). Production channel path is WhatsApp Cloud API (Phase 4).
+- WhatsApp Web automation under `infrastructure/whatsapp-web-spike/` is a **dev spike only** (`WHATSAPP_WEB_SPIKE=false` by default).
+- Telegram bot under `infrastructure/telegram-spike/` is a **dev spike only** (`TELEGRAM_SPIKE=false` by default).
+- Official WhatsApp path is **Zavu** (`WHATSAPP_ZAVU`, webhook `/api/v1/webhooks/whatsapp-zavu`). All three are independently env-gated.
