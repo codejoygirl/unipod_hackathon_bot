@@ -12,7 +12,13 @@ from ai_service.core.security import multipart_canonical_payload
 from ai_service.ingestion.pipeline import IngestionPipeline
 from ai_service.models.source import KnowledgeSource
 from ai_service.providers.factory import ModelFactory
-from ai_service.schemas.ingestion import IngestionRequest, IngestionResponse
+from ai_service.ingestion.purge import purge_knowledge
+from ai_service.schemas.ingestion import (
+    IngestionRequest,
+    IngestionResponse,
+    PurgeKnowledgeRequest,
+    PurgeKnowledgeResponse,
+)
 from ai_service.schemas.retrieval import AuthorityTier
 
 logger = logging.getLogger(__name__)
@@ -49,6 +55,30 @@ async def sync_ingest_document(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing document ingestion.",
+        ) from exc
+
+
+@router.post(
+    "/purge",
+    response_model=PurgeKnowledgeResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_hmac)],
+    summary="Purge knowledge sources, chunks, and embeddings for a scope",
+)
+async def purge_knowledge_endpoint(
+    request: PurgeKnowledgeRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> PurgeKnowledgeResponse:
+    """Destructive ops wipe of the AI index (called by ``php artisan zak:purge-knowledge``)."""
+    try:
+        return await purge_knowledge(session=session, request=request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Failed to purge knowledge: %s", str(exc), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while purging knowledge.",
         ) from exc
 
 

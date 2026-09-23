@@ -165,4 +165,74 @@ class ProgramAssetRegistrarTest extends TestCase
         $this->assertFalse($result['ok']);
         $this->assertStringContainsString('Google Drive', $result['reply']);
     }
+
+    public function test_rejects_ellipsis_placeholder_folder_url(): void
+    {
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+
+        $result = app(ProgramAssetRegistrar::class)->registerFromCommand(
+            'whatsapp_web_spike',
+            '/asset other UNIPOD COMMUNITY RESOURCES https://drive.google.com/drive/folders/…',
+            $user,
+            $community,
+            'whatsapp',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('incomplete', $result['reply']);
+        $this->assertSame(0, KnowledgeSource::query()->where('community_id', $community->id)->count());
+    }
+
+    public function test_rejects_your_folder_id_placeholder(): void
+    {
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+
+        $result = app(ProgramAssetRegistrar::class)->registerFromCommand(
+            'whatsapp_web_spike',
+            '/asset other Resources https://drive.google.com/drive/folders/YOUR_FOLDER_ID',
+            $user,
+            $community,
+            'whatsapp',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('incomplete', $result['reply']);
+    }
+
+    public function test_publishes_full_folder_url_without_truncation(): void
+    {
+        $this->fakeAi();
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+
+        $folderId = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs';
+        $url = 'https://drive.google.com/drive/folders/'.$folderId.'?usp=sharing';
+        $result = app(ProgramAssetRegistrar::class)->registerFromCommand(
+            'whatsapp_web_spike',
+            '/asset other UNIPOD COMMUNITY RESOURCES '.$url,
+            $user,
+            $community,
+            'whatsapp',
+        );
+
+        $this->assertTrue($result['ok']);
+        $canonical = 'https://drive.google.com/drive/folders/'.$folderId;
+        $this->assertStringContainsString($canonical, $result['reply']);
+        $this->assertStringNotContainsString('folders/…', $result['reply']);
+        $this->assertStringNotContainsString('folders/...', $result['reply']);
+
+        $row = KnowledgeSource::query()
+            ->where('community_id', $community->id)
+            ->where('name', 'UNIPOD COMMUNITY RESOURCES')
+            ->first();
+        $this->assertNotNull($row);
+        $this->assertSame($canonical, $row->metadata['delivery_url'] ?? null);
+        $this->assertSame('gfolder:'.strtolower($folderId), $row->metadata['asset_identity'] ?? null);
+    }
 }

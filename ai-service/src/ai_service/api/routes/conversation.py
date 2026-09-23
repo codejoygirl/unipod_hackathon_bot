@@ -92,12 +92,17 @@ class ConversationClassifyResponse(BaseModel):
         default=False,
         description="True when the message continues/verifies the prior answer (any language).",
     )
+    link_focus: str = Field(
+        default="na",
+        description="one | many | na — model decides if the ask wants a single match or a list",
+    )
 
 
 _ALLOWED_INTENTS = frozenset(
     {"conversational", "knowledge", "out_of_scope", "clarify", "personal_help"}
 )
 _ALLOWED_LINK_MODES = frozenset({"none", "recordings", "meetings", "assets"})
+_ALLOWED_LINK_FOCUSES = frozenset({"one", "many", "na"})
 
 
 def _classify_system_prompt(community_name: str | None, community_scope: str | None) -> str:
@@ -110,17 +115,18 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
     )
     return (
         "You route messages for Zak, a private community chat assistant.\n"
-        "Return EXACTLY one line: INTENT|LINK_MODE|FOLLOW_UP\n"
+        "Return EXACTLY one line: INTENT|LINK_MODE|FOLLOW_UP|LINK_FOCUS\n"
         "INTENT is one of: conversational, knowledge, out_of_scope, clarify, personal_help\n"
         "LINK_MODE is one of: none, recordings, meetings, assets\n"
         "FOLLOW_UP is yes or no\n"
+        "LINK_FOCUS is one of: one, many, na\n"
         "No other words.\n\n"
         f"Community display name: {label}\n"
         f"{scope_line}\n\n"
         "STEP 1: Mentally understand what the member wants, in whatever language they used. "
         "Do not refuse because the language is unfamiliar. Do not rely on English keywords.\n"
         f"{_UNTRUSTED_SAFETY}\n"
-        "STEP 2: Map that meaning to INTENT and FOLLOW_UP.\n\n"
+        "STEP 2: Map that meaning to INTENT, FOLLOW_UP, and LINK_FOCUS.\n\n"
         "INTENT labels:\n"
         "- conversational: short social turns only (hello, thanks, ok, bye, who are you about Zak, "
         "tone feedback, frustration/insults aimed at Zak, 'do you speak X'). Any language. "
@@ -137,12 +143,17 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
         "Do NOT use personal_help for on-demand jokes, riddles, poems, romance, math, or world trivia.\n"
         "- out_of_scope: ONLY math, romance aimed at the bot, theology with no community angle, "
         "world trivia (World Cup, capitals), weather, jokes/poems/riddles on demand. "
-        "If unsure whether it is community-related, choose knowledge (never out_of_scope). "
+        "If unsure whether it is community-related, choose knowledge (never out_of_scope) "
+        "ONLY when the message clearly asks something a human would ask a community assistant. "
+        "If the message is opaque, accidental, or has no clear ask, choose clarify — never invent a topic.\n"
         "If unsure between personal_help and out_of_scope for a constructive growth ask, choose personal_help.\n"
-        "- clarify: the message seems community-related (or might match notes we keep) but is too vague "
-        "or oddly phrased to answer safely AND there is NO prior answer to continue from. "
-        "Examples of vague: 'when are we going home?', 'when do we leave?', 'what about that place?' "
-        "when it is unclear which trip/place/event they mean. Ask one short clarifying question instead of guessing. "
+        "- clarify: use when you should NOT answer yet — ask one short, warm clarifying question instead. "
+        "Includes: vague community-ish asks; opaque paste (codes, tokens, random strings, "
+        "clipboard junk, half-copied chat); messages that do not look directed at Zak as a real question; "
+        "garbled / meaningless text with no recoverable intent. "
+        "AND there is NO prior Zak answer to continue from. "
+        "Be smart, not dull: one friendly line that invites them to say what they need "
+        "(schedule, person, link, etc.) — do not lecture and do not guess. "
         "Never use clarify when the member is clearly referring to Zak's previous answer "
         "(confirming it, asking what it meant, asking to list/expand it) — that is knowledge|none|yes.\n\n"
         "FOLLOW_UP=yes when (any language): the member is continuing the previous community answer — "
@@ -163,16 +174,25 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
         "LINK_MODE (any language):\n"
         "- recordings: wants session recordings / replays / recorded videos\n"
         "- meetings: wants live meeting join / call links\n"
-        "- assets: wants other shared links (forms, docs, slides)\n"
+        "- assets: wants other shared links (forms, docs, slides, websites, "
+        "social / LinkedIn / GitHub / TikTok profiles, WhatsApp invites, registration sheets)\n"
         "- none: not asking for a URL list\n\n"
+        "LINK_FOCUS (any language — you decide from meaning, not keywords):\n"
+        "- one: they want a single best matching document/link/guide\n"
+        "- many: they want a list / several / all of that kind\n"
+        "- na: not a URL-list ask (LINK_MODE is none)\n\n"
         "Examples (learn the pattern; apply to ANY language — do not require these exact words):\n"
-        "User: Give me today's recap → knowledge|none|no\n"
-        "User: Donnez-moi le récapitulatif d'aujourd'hui. → knowledge|none|no\n"
-        "User: Fún mi ní àkótán àwọn ohun tó ṣẹlẹ̀ lónìí. → knowledge|none|no\n"
-        "User: Send recording links → knowledge|recordings|no\n"
-        "User: Liens vers les enregistrements → knowledge|recordings|no\n"
-        "User: أرسل لي تسجيلات جميع الجلسات → knowledge|recordings|no\n"
-        "User: Ekaro oo → conversational|none|no\n"
+        "User: Give me today's recap → knowledge|none|no|na\n"
+        "User: Donnez-moi le récapitulatif d'aujourd'hui. → knowledge|none|no|na\n"
+        "User: Fún mi ní àkótán àwọn ohun tó ṣẹlẹ̀ lónìí. → knowledge|none|no|na\n"
+        "User: Send recording links → knowledge|recordings|no|many\n"
+        "User: Liens vers les enregistrements → knowledge|recordings|no|many\n"
+        "User: أرسل لي تسجيلات جميع الجلسات → knowledge|recordings|no|many\n"
+        "User: What's our TikTok? → knowledge|assets|no|one\n"
+        "User: Social media handles / LinkedIn profiles → knowledge|assets|no|many\n"
+        "User: Give me the only hackathon guidelines document → knowledge|assets|no|one\n"
+        "User: UniPods Video Demo Guide link → knowledge|assets|no|one\n"
+        "User: Ekaro oo → conversational|none|no|na\n"
         "User: Gracias → conversational|none|no\n"
         "User: Are you dumb? → conversational|none|no\n"
         "User: You are mad → conversational|none|no\n"
@@ -180,6 +200,8 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
         "User: When is the hackathon ending? → knowledge|none|no\n"
         "User: When are we going home? → clarify|none|no\n"
         "User: Quand est-ce qu'on rentre ? → clarify|none|no\n"
+        "User: 8qa4RWev0a0ZdQFrMeSa zak-app → clarify|none|no\n"
+        "User: asdfjkl → clarify|none|no\n"
         "User: Who won the World Cup? → out_of_scope|none|no\n"
         "User: 2+2 → out_of_scope|none|no\n"
         "User: Tell me a joke → out_of_scope|none|no\n"
@@ -214,7 +236,10 @@ def _classify_user_prompt(
     parts = [
         "Classify the member message below.",
         "Remember: catch-up / daily summary / what happened today = knowledge|none|no "
-        "in every language. If unsure, prefer knowledge|none|no over out_of_scope|none|no.",
+        "in every language.",
+        "Prefer knowledge|none|no over out_of_scope|none|no when they clearly ask a community question. "
+        "Prefer clarify|none|no when the message is opaque, accidental, or has no clear ask — "
+        "do not retrieve or invent a topic.",
         "If the member is continuing / verifying / expanding Zak's previous answer "
         "(any language), return knowledge|none|yes — never clarify.",
         _UNTRUSTED_SAFETY,
@@ -265,6 +290,22 @@ def _parse_link_mode(raw: str) -> str:
         if mode in text.split():
             return mode
     return "none"
+
+
+def _parse_link_focus(raw: str) -> str:
+    text = (raw or "").strip().lower()
+    text = text.replace("\u2014", "-").replace("\u2013", "-")
+    if "|" in text:
+        parts = [p.strip() for p in text.split("|")]
+        if len(parts) >= 4:
+            token = (re.sub(r"[^a-z_]+", " ", parts[3]).strip().split() or [""])[0]
+            if token in _ALLOWED_LINK_FOCUSES:
+                return token
+    text = re.sub(r"[^a-z_]+", " ", text).strip()
+    for focus in ("one", "many"):
+        if focus in text.split():
+            return focus
+    return "na"
 
 
 def _parse_follow_up(raw: str) -> bool:
@@ -320,7 +361,10 @@ def _system_prompt(mode: str, community_name: str | None, community_scope: str |
         "In private/DM replies: do not address the member with @mentions or @handles; "
         "converse naturally. If you use their name, write it as plain text (no @). "
         "Do not force a name at the start of every reply. "
-        "In group replies: do not type @DisplayName yourself; the channel adds a real mention. "
+        "In group replies: do not type @DisplayName yourself; the channel adds a real mention for the asker. "
+        "When identifying who someone is from community knowledge or documents, use their real full display name. "
+        "When referencing a group member for tracking or Cc, write their plain name "
+        "(the channel converts known people to green @id mentions). "
         "Keep each reply focused on the current asker only. "
         "Write like a helpful person in the group: polite, clear, easy to skim on a phone. "
         "Tone: friendly and human, not stiff or corporate. "
@@ -331,13 +375,14 @@ def _system_prompt(mode: str, community_name: str | None, community_scope: str |
         "Do not use em dashes. "
         "Do not open with Hey, Hi, Hello, or Hi there. "
         "The channel already tags the member; start with the useful content. "
+        "Never mix an English greeting with a non-English body (one language for the whole reply). "
         "Vary your wording so you do not sound like a template. "
         "Keep replies short (2 to 4 short paragraphs or fewer). "
         "REPLY LANGUAGE (highest priority, non-negotiable): "
         "Reply only in the language of the member's latest message. "
         "English message → English reply. French → French. Yoruba → Yoruba. "
         "Amharic → Amharic. Spanish → Spanish. Any other language → that same language. "
-        "EVERY sentence must be in that language — including apologies, tips, and any /ask example. "
+        "EVERY sentence must be in that language — including greetings, apologies, tips, and any /ask example. "
         "Do not mix English into a non-English reply. Do not append English command help. "
         "Slash commands like /ask stay as /ask, but the words around them must match the member's language. "
         "If this message is English, every sentence of your reply must be English "
@@ -405,11 +450,16 @@ def _system_prompt(mode: str, community_name: str | None, community_scope: str |
     return (
         f"{base}\n\n"
         f"This is a social / tone / clarify turn (hello, thanks, who are you, feedback like "
-        f"'why aren't you friendly', short acks like 'ok', or a vague community ask) for {label}.{scope_note} "
-        f"Respond naturally and warmly. If useful, mention you help with {focus}. "
+        f"'why aren't you friendly', short acks like 'ok', a vague community ask, "
+        f"or an opaque / accidental paste with no clear question) for {label}.{scope_note} "
+        f"Respond naturally and warmly — brief, human, not dull or robotic. If useful, mention you help with {focus}. "
         "If their ask seems related to community notes but is unclear or oddly phrased, "
         "ask one short clarifying question (what topic, person, session, or deadline?) "
         "and invite them to answer so you can look it up. Do not refuse those. "
+        "If the message looks like an accidental paste, a code/token, clipboard junk, "
+        "or has no clear question for you, do NOT invent an answer from community notes. "
+        "One friendly line: you did not catch a clear question, and invite them to ask "
+        "what they need (schedule, person, link, update). Stay light — not a lecture. "
         "Mention briefly that they can ask in any language and you reply in the same one. "
         "If useful, note that when you can't answer yet you'll say so, pass it along, "
         "and follow up once you have an answer — no need for them to keep checking. "
@@ -560,12 +610,13 @@ async def conversation_classify(
                     ),
                 ],
                 temperature=0.0,
-                max_tokens=32,
+                max_tokens=40,
             )
         )
         intent = _parse_intent_label(response.content)
         link_mode = _parse_link_mode(response.content)
         follow_up = _parse_follow_up(response.content)
+        link_focus = _parse_link_focus(response.content)
         if intent is None:
             logger.warning(
                 "conversation classify returned unusable label (chars=%s)",
@@ -576,18 +627,27 @@ async def conversation_classify(
                 intent="knowledge",
                 link_mode="none",
                 follow_up=False,
+                link_focus="na",
             )
         if follow_up:
             # Follow-ups always continue community knowledge; never clarify/OOS.
             intent = "knowledge"
             link_mode = "none"
+            link_focus = "na"
         if intent != "knowledge":
             link_mode = "none"
             follow_up = False
+            link_focus = "na"
+        if link_mode == "none":
+            link_focus = "na"
+        elif link_focus == "na":
+            # Model omitted focus on a URL ask — default to a list, not a forced single.
+            link_focus = "many"
         return ConversationClassifyResponse(
             intent=intent,
             link_mode=link_mode,
             follow_up=follow_up,
+            link_focus=link_focus,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("conversation classify failed: %s", exc, exc_info=True)
@@ -595,6 +655,7 @@ async def conversation_classify(
             intent="knowledge",
             link_mode="none",
             follow_up=False,
+            link_focus="na",
         )
 
 

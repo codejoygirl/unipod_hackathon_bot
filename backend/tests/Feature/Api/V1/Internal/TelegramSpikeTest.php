@@ -353,9 +353,16 @@ class TelegramSpikeTest extends TestCase
 
         Http::fake(function (\Illuminate\Http\Client\Request $request) use ($joinUrl, $recordingUrl, $youtubeUrl, $legacyJoinUrl) {
             if (str_contains($request->url(), '/conversation/classify')) {
-                return Http::response(['intent' => 'knowledge', 'link_mode' => 'recordings'], 200);
+                return Http::response([
+                    'intent' => 'knowledge',
+                    'link_mode' => 'recordings',
+                    'follow_up' => false,
+                    'link_focus' => 'many',
+                ], 200);
             }
             if (str_contains($request->url(), '/retrieval/grounded-answer')) {
+                // Hollow / wrong-class draft: Laravel may fill from citations.
+                // A solid AI list must never be replaced by a citation corpus dump.
                 return Http::response([
                     'query' => 'Send me all the recording links',
                     'detected_language' => 'en',
@@ -363,7 +370,7 @@ class TelegramSpikeTest extends TestCase
                     'total_chunks_retrieved' => 2,
                     'validated_payload' => [
                         'state' => 'POSSIBLE',
-                        'answer' => "You can find recordings here:\n1. {$joinUrl}\n2. {$recordingUrl}",
+                        'answer' => "Recording links:\n1. {$joinUrl}\n2. {$legacyJoinUrl}",
                         'confidence_score' => 0.9,
                         'needs_escalation' => false,
                         'escalation_reason' => null,
@@ -418,6 +425,7 @@ class TelegramSpikeTest extends TestCase
             'telegram_spike.shared_secret' => 'tg-test-secret',
             'telegram_spike.default_user_email' => 'demo@zak.test',
             'telegram_spike.default_community_id' => $community->id,
+            'telegram_spike.process_sync' => true,
         ]);
 
         $reply = (string) $this->postJson('/api/v1/internal/telegram-spike/inbound', [
@@ -443,6 +451,103 @@ class TelegramSpikeTest extends TestCase
         $this->assertStringContainsString('MIT onboarding', $reply);
         $this->assertStringContainsString('Wadhwani Module 1 coaching/Q&A - 17 September', $reply);
         $this->assertMatchesRegularExpression('/1\. MIT onboarding\nhttps:\/\//', $reply);
+    }
+
+    public function test_telegram_spike_keeps_solid_ai_link_list_without_citation_dump(): void
+    {
+        $slides = 'https://drive.google.com/file/d/1jkYKc8xmP1Msh7jPGaC0lPsZceG_GkFh/view?usp=sharing';
+        $module2 = 'https://www.youtube.com/watch?v=C9gaW26GfWw';
+        $noiseDrive = 'https://drive.google.com/file/d/1Pcf4ZwhHWcdQXO8gMV27de3OoZjuLi_p/view?usp=sharing';
+        $noiseYt = 'https://youtu.be/-6G7LXiu47o';
+
+        Http::fake(function (\Illuminate\Http\Client\Request $request) use ($slides, $module2, $noiseDrive, $noiseYt) {
+            if (str_contains($request->url(), '/conversation/classify')) {
+                return Http::response([
+                    'intent' => 'knowledge',
+                    'link_mode' => 'assets',
+                    'follow_up' => false,
+                    'link_focus' => 'many',
+                ], 200);
+            }
+            if (str_contains($request->url(), '/retrieval/grounded-answer')) {
+                return Http::response([
+                    'query' => 'Send me the Wadhwani slides and the Module 2 recording',
+                    'detected_language' => 'en',
+                    'execution_time_ms' => 12.0,
+                    'total_chunks_retrieved' => 4,
+                    'validated_payload' => [
+                        'state' => 'POSSIBLE',
+                        'answer' => "Here are the Wadhwani slides and the Module 2 recording:\n\n"
+                            ."1. Wadhwani Ignite Module 1 and 2 slides\n{$slides}\n\n"
+                            ."2. Wadhwani Module 2 Part 1 class session recording\n{$module2}",
+                        'confidence_score' => 0.95,
+                        'needs_escalation' => false,
+                        'escalation_reason' => null,
+                        'citations' => [[
+                            'evidence_id' => 'E1',
+                            'chunk_id' => '72b079bc-25c2-4a0b-800f-8ee57de015c9',
+                            'source_name' => 'UniPods pack',
+                            'source_uri' => 'whatsapp://export/fake',
+                            'authority_tier' => 'community_discussion',
+                            'exact_quote' => "slides {$slides}\nmodule2 {$module2}\nhackathon {$noiseDrive}\ncoaching {$noiseYt}",
+                            'context_snippet' => "also {$noiseDrive} {$noiseYt}",
+                            'page_number' => null,
+                            'timestamp_seconds' => null,
+                            'is_verified' => true,
+                        ]],
+                        'conflicts' => [],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['reply' => ''], 500);
+        });
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => $user->id,
+        ]);
+
+        \App\Models\KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'UniPods pack',
+            'uri' => 'whatsapp://export/fake',
+            'source_type' => 'whatsapp',
+            'authority_tier' => 'community_discussion',
+            'lifecycle_status' => 'published',
+            'language' => 'en',
+            'content' => 'pack',
+            'content_sha256' => hash('sha256', 'pack'),
+            'published_at' => now(),
+        ]);
+
+        config([
+            'telegram_spike.enabled' => true,
+            'telegram_spike.shared_secret' => 'tg-test-secret',
+            'telegram_spike.default_user_email' => 'demo@zak.test',
+            'telegram_spike.default_community_id' => $community->id,
+            'telegram_spike.process_sync' => true,
+        ]);
+
+        $reply = (string) $this->postJson('/api/v1/internal/telegram-spike/inbound', [
+            'from' => '999013',
+            'text' => 'Send me the Wadhwani slides and the Module 2 recording',
+        ], [
+            'X-Spike-Secret' => 'tg-test-secret',
+        ])
+            ->assertOk()
+            ->json('data.reply');
+
+        $this->assertStringContainsString($slides, $reply);
+        $this->assertStringContainsString($module2, $reply);
+        $this->assertStringContainsString('Wadhwani Ignite Module 1 and 2 slides', $reply);
+        $this->assertStringNotContainsString($noiseDrive, $reply);
+        $this->assertStringNotContainsString($noiseYt, $reply);
+        $this->assertSame(2, preg_match_all('~https?://~i', $reply) ?: 0);
     }
 
     public function test_telegram_spike_french_recordings_reject_linkedin_noise(): void
@@ -514,6 +619,7 @@ class TelegramSpikeTest extends TestCase
             'telegram_spike.shared_secret' => 'tg-test-secret',
             'telegram_spike.default_user_email' => 'demo@zak.test',
             'telegram_spike.default_community_id' => $community->id,
+            'telegram_spike.process_sync' => true,
         ]);
 
         $reply = (string) $this->postJson('/api/v1/internal/telegram-spike/inbound', [
@@ -526,7 +632,7 @@ class TelegramSpikeTest extends TestCase
             ->json('data.reply');
 
         $this->assertStringContainsString($youtubeUrl, $reply);
-        $this->assertStringContainsString('Voici les enregistrements des sessions :', $reply);
+        $this->assertMatchesRegularExpression('/Voici les enregistrements des sessions\s*:/', $reply);
         $this->assertStringNotContainsString($linkedin, $reply);
         $this->assertStringNotContainsString($lectureHome, $reply);
         $this->assertStringNotContainsString('Here they are', $reply);

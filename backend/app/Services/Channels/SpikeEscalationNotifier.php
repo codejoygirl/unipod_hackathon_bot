@@ -690,7 +690,7 @@ final class SpikeEscalationNotifier
             trim((string) ($resolvedByPhone ?? '')),
         );
 
-        // WhatsApp: bare "Hi," + spike @mention. Telegram: keep display name when known.
+        // WhatsApp: bare text — spike inserts language-neutral @mention. Telegram: display name when known.
         $memberGreetingName = null;
         if ($style === 'telegram_html' && ! $inGroup && $name !== '') {
             $memberGreetingName = $name;
@@ -815,8 +815,8 @@ final class SpikeEscalationNotifier
         if ($channel === '' || $channel === 'telegram_spike') {
             $to = ($inGroup && $originChatId !== '') ? $originChatId : $memberChatId;
             if ($to === '') {
-                return false;
-            }
+            return false;
+        }
 
             return $this->notifyMember($to, $text, $messageId !== '' ? $messageId : null, 'telegram_html');
         }
@@ -1325,6 +1325,12 @@ final class SpikeEscalationNotifier
                     : $mentionJid.'@c.us';
             }
         }
+        // Every @digits in the card (Name, Cc:, Request body) needs a mentions[]
+        // JID or WhatsApp leaves them as plain numbers (not green).
+        $mentionJids = $this->whatsappMentionJidsFromText($text);
+        if ($mentionJid !== null && $mentionJid !== '' && ! in_array($mentionJid, $mentionJids, true)) {
+            array_unshift($mentionJids, $mentionJid);
+        }
         $any = false;
 
         foreach ($phones as $phone) {
@@ -1336,6 +1342,9 @@ final class SpikeEscalationNotifier
                 ];
                 if ($mentionJid !== null && $mentionJid !== '') {
                     $payload['mention'] = $mentionJid;
+                }
+                if ($mentionJids !== []) {
+                    $payload['mentions'] = $mentionJids;
                 }
                 $response = Http::timeout(20)->asJson()->post($base.'/send', $payload);
             } catch (\Throwable $e) {
@@ -1539,10 +1548,10 @@ final class SpikeEscalationNotifier
     }
 
     /**
-     * WhatsApp: "Name: @digits" so the outbound mention paints a green, tappable contact
-     * when the member is a real WhatsApp phone/LID. Never @-tag Telegram user ids —
-     * WhatsApp reformats them as fake international numbers (e.g. @+7 216…).
-     * Telegram/plain: keep @handle when present, otherwise the display name.
+     * WhatsApp Name line on admin cards: prefer a green-capable @mention (phone,
+     * then LID) so admins can tap/track the member. Full display names are for
+     * knowledge answers about people — not for forwarded admin cards.
+     * Never @-tag Telegram user ids as fake WhatsApp phones.
      *
      * @param  array<string, mixed>  $record
      * @param  'plain'|'whatsapp'  $style
@@ -1554,25 +1563,40 @@ final class SpikeEscalationNotifier
         $from = trim((string) ($record['from'] ?? ''));
         $fromDigits = preg_replace('/\D+/', '', preg_replace('/@.*/', '', $from) ?? $from) ?? '';
         $phoneDigits = preg_replace('/\D+/', '', (string) ($record['from_phone'] ?? '')) ?? '';
-        if ($phoneDigits !== '' && $fromDigits !== '' && $phoneDigits === $fromDigits) {
+
+        // LID echoed into from_phone is not a real MSISDN.
+        if (
+            $phoneDigits !== ''
+            && $this->looksLikeWhatsAppLidDigits($phoneDigits)
+            && ! $this->looksLikeE164PhoneDigits($phoneDigits)
+        ) {
+            if ($fromDigits === '') {
+                $fromDigits = $phoneDigits;
+            }
             $phoneDigits = '';
         }
+
         $channel = trim((string) ($record['channel'] ?? ''));
         $telegramMember = $channel === 'telegram_spike'
             || ($phoneDigits === '' && $fromDigits !== '' && ! $this->looksLikeWhatsAppLidDigits($fromDigits)
                 && ! $this->looksLikeE164PhoneDigits($fromDigits));
 
         if ($style === 'whatsapp') {
-            // Only @-mention real WhatsApp peers (phone or LID) — never Telegram chat ids.
             if (! $telegramMember) {
                 $tag = '';
-                if ($phoneDigits !== '' && ($this->looksLikeE164PhoneDigits($phoneDigits) || $this->looksLikeWhatsAppLidDigits($phoneDigits))) {
+                if ($phoneDigits !== '' && $this->looksLikeE164PhoneDigits($phoneDigits)) {
                     $tag = $phoneDigits;
-                } elseif ($fromDigits !== '' && ($this->looksLikeE164PhoneDigits($fromDigits) || $this->looksLikeWhatsAppLidDigits($fromDigits))) {
+                } elseif ($fromDigits !== '' && $this->looksLikeE164PhoneDigits($fromDigits)) {
                     $tag = $fromDigits;
+                } elseif ($fromDigits !== '' && $this->looksLikeWhatsAppLidDigits($fromDigits)) {
+                    $tag = $fromDigits;
+                } elseif ($phoneDigits !== '' && (
+                    $this->looksLikeE164PhoneDigits($phoneDigits)
+                    || $this->looksLikeWhatsAppLidDigits($phoneDigits)
+                )) {
+                    $tag = $phoneDigits;
                 }
                 if ($tag !== '') {
-                    // WA replaces @digits with the contact name when mentions[] is set.
                     return 'Name: @'.$tag;
                 }
             }
@@ -1609,6 +1633,33 @@ final class SpikeEscalationNotifier
             '' => '',
             default => trim($channel),
         };
+    }
+
+    /**
+     * Collect @digit tags from admin-card / outbound text → WhatsApp JIDs.
+     *
+     * @return list<string>
+     */
+    private function whatsappMentionJidsFromText(string $text): array
+    {
+        $jids = [];
+        if (preg_match_all('/@(\d{6,})\b/u', $text, $matches) < 1) {
+            return [];
+        }
+        foreach ($matches[1] as $digits) {
+            $digits = preg_replace('/\D+/', '', (string) $digits) ?? '';
+            if ($digits === '') {
+                continue;
+            }
+            $jid = $this->looksLikeWhatsAppLidDigits($digits)
+                ? $digits.'@lid'
+                : $digits.'@c.us';
+            if (! in_array($jid, $jids, true)) {
+                $jids[] = $jid;
+            }
+        }
+
+        return $jids;
     }
 
     private function looksLikeE164PhoneDigits(string $digits): bool
@@ -1716,16 +1767,16 @@ final class SpikeEscalationNotifier
                     'knowledge_id' => $knowledgeId,
                     'decision' => $decision,
                     'error' => $e->getMessage(),
-                ]);
+            ]);
 
-                return [
-                    'ok' => false,
+            return [
+                'ok' => false,
                     'reply' => "I couldn't ".($approve ? 'publish' : 'reject').' that note: '.$e->getMessage(),
-                ];
-            }
+            ];
+        }
 
             $resolved = array_merge($record, [
-                'resolved_at' => now()->toIso8601String(),
+            'resolved_at' => now()->toIso8601String(),
                 'admin_decision' => $approve ? 'approved' : 'declined',
             ]);
             if ($resolvedBy !== null && trim($resolvedBy) !== '') {
@@ -1756,8 +1807,8 @@ final class SpikeEscalationNotifier
         }
 
         if ($approve) {
-            return [
-                'ok' => true,
+        return [
+            'ok' => true,
                 'reply' => 'Approved. That note is published. '
                     .app(ChannelConversationService::class)->botDisplayName().' can use it in answers now.',
             ];
@@ -1881,7 +1932,8 @@ final class SpikeEscalationNotifier
                 $tagDigits = (strlen($fromDigits) >= 10 && strlen($fromDigits) <= 13) ? $fromDigits : '';
             }
             if ($tagDigits !== '') {
-                $memberText = 'Hi @'.$tagDigits.",\n\n".ltrim(preg_replace('/^Hi[^\n]*\n\n/u', '', $memberText) ?? $memberText);
+                $memberText = '@'.$tagDigits.",\n\n".ltrim(preg_replace('/^(?:Hi\s+)?@[^\n]*\n\n/u', '', $memberText) ?? $memberText);
+                $memberText = ltrim(preg_replace('/^Hi[^\n]*\n\n/u', '', $memberText) ?? $memberText);
             }
         }
 
@@ -1911,8 +1963,8 @@ final class SpikeEscalationNotifier
     }
 
     /**
-     * Admin-facing label for the member who raised a request.
-     * WhatsApp: @phone so the client can paint a tappable contact.
+     * Admin-facing label for the member who raised a request (a reference, not
+     * an identity line). Prefer a green-capable WhatsApp @tag (phone, then LID).
      * Telegram / plain: @handle when present, else display name.
      *
      * @param  array<string, mixed>  $record
@@ -1925,16 +1977,32 @@ final class SpikeEscalationNotifier
         $from = trim((string) ($record['from'] ?? ''));
         $fromDigits = preg_replace('/\D+/', '', preg_replace('/@.*/', '', $from) ?? $from) ?? '';
         $phoneDigits = preg_replace('/\D+/', '', (string) ($record['from_phone'] ?? '')) ?? '';
-        if ($phoneDigits !== '' && $fromDigits !== '' && $phoneDigits === $fromDigits) {
+
+        // LID echoed into from_phone is not a real MSISDN — keep it as the LID id.
+        if (
+            $phoneDigits !== ''
+            && $this->looksLikeWhatsAppLidDigits($phoneDigits)
+            && ! $this->looksLikeE164PhoneDigits($phoneDigits)
+        ) {
+            if ($fromDigits === '') {
+                $fromDigits = $phoneDigits;
+            }
             $phoneDigits = '';
         }
 
         if ($style === 'whatsapp') {
             $tag = '';
-            if ($phoneDigits !== '' && strlen($phoneDigits) >= 10 && strlen($phoneDigits) <= 13) {
+            if ($phoneDigits !== '' && $this->looksLikeE164PhoneDigits($phoneDigits)) {
                 $tag = $phoneDigits;
-            } elseif ($fromDigits !== '' && strlen($fromDigits) >= 10 && strlen($fromDigits) <= 13) {
+            } elseif ($fromDigits !== '' && $this->looksLikeE164PhoneDigits($fromDigits)) {
                 $tag = $fromDigits;
+            } elseif ($fromDigits !== '' && $this->looksLikeWhatsAppLidDigits($fromDigits)) {
+                $tag = $fromDigits;
+            } elseif ($phoneDigits !== '' && (
+                $this->looksLikeE164PhoneDigits($phoneDigits)
+                || $this->looksLikeWhatsAppLidDigits($phoneDigits)
+            )) {
+                $tag = $phoneDigits;
             }
             if ($tag !== '') {
                 return '@'.$tag;

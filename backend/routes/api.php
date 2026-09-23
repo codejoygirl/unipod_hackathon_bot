@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\Internal\WhatsAppWebSpikeController;
 use App\Http\Controllers\Api\V1\Internal\WhatsAppZavuController;
 use App\Http\Controllers\Api\V1\KnowledgeSourceController;
 use App\Http\Controllers\Api\V1\TenantController;
+use App\Http\Controllers\Api\V1\WebChatController;
 use App\Http\Controllers\Api\V1\Webhooks\WhatsAppZavuWebhookController;
 use App\Http\Middleware\EnsureTelegramSpikeEnabled;
 use App\Http\Middleware\EnsureWhatsAppWebSpikeEnabled;
@@ -30,6 +31,9 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
 
     Route::post('/auth/register', [AuthController::class, 'register'])->name('auth.register');
     Route::post('/auth/login', [AuthController::class, 'login'])->name('auth.login');
+
+    Route::get('/web-chat/bootstrap', [WebChatController::class, 'bootstrap'])->name('web_chat.bootstrap');
+    Route::post('/web-chat/ask', [WebChatController::class, 'ask'])->name('web_chat.ask');
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/auth/logout', [AuthController::class, 'logout'])->name('auth.logout');

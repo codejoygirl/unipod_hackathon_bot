@@ -186,12 +186,20 @@ class HybridRetrievalService:
             expanded_queries = [question]
 
         link_mode = (request.link_mode or "").strip().lower()
-        wants_url_recall = link_mode in {"recordings", "meetings", "assets"} or bool(
-            _LINK_ASK_RE.search(question)
-        )
+        # Link asks need URL-bearing recall so chat noise about the topic does not
+        # bury the actual Drive/Docs/recording URLs. Assets use host-filtered recall
+        # (not every URL in the community).
+        if link_mode in {"recordings", "meetings", "assets"}:
+            wants_url_recall = True
+        else:
+            wants_url_recall = bool(_RECORDING_ASK_RE.search(question)) or bool(
+                re.search(r"\b(meeting|meetings|join link|zoom|teams\.microsoft)\b", question, re.I)
+            )
+
         recordings_only = link_mode == "recordings" or (
             link_mode not in {"meetings", "assets"} and bool(_RECORDING_ASK_RE.search(question))
         )
+        assets_only = link_mode == "assets"
 
         # Search with each expanded query and merge by chunk id (best RRF wins).
         merged: dict[str, object] = {}
@@ -220,12 +228,19 @@ class HybridRetrievalService:
                 tenant_id=request.tenant_id,
                 community_ids=request.community_ids,
                 recordings_only=recordings_only,
+                assets_only=assets_only,
+                query=question,
                 limit=max(request.top_k, 40),
             )
             for candidate in url_chunks:
                 key = str(candidate.chunk_id)
                 if key not in merged:
                     merged[key] = candidate
+                else:
+                    # Prefer URL-bearing twin when hybrid already found the chunk.
+                    existing = merged[key]
+                    if candidate.rrf_score > existing.rrf_score:  # type: ignore[attr-defined]
+                        merged[key] = candidate
 
         fused = sorted(merged.values(), key=lambda c: c.rrf_score, reverse=True)  # type: ignore[attr-defined]
 
@@ -246,7 +261,7 @@ class HybridRetrievalService:
                 top_n=rerank_top_n,
             )
 
-        # For link/recording asks, keep any URL-bearing chunks the reranker dropped.
+        # For meetings/recordings asks, keep URL-bearing chunks the reranker dropped.
         if wants_url_recall:
             kept_ids = {str(c.chunk_id) for c in reranked}
             url_extras = [
@@ -255,6 +270,54 @@ class HybridRetrievalService:
                 if str(c.chunk_id) not in kept_ids and "http" in (c.content or "").lower()
             ]
             reranked = list(reranked) + url_extras[:20]
+
+        # Asset/doc asks: chat noise often outranks the Drive/Docs row. Promote
+        # URL-bearing asset chunks that mention ask tokens so synthesis sees them.
+        if assets_only:
+            ask_tokens = [
+                t
+                for t in re.findall(r"[a-zA-Z0-9']{4,}", question.lower())
+                if t
+                not in {
+                    "send",
+                    "give",
+                    "please",
+                    "link",
+                    "links",
+                    "file",
+                    "files",
+                    "document",
+                    "documents",
+                    "with",
+                    "from",
+                    "this",
+                    "that",
+                    "have",
+                    "need",
+                    "want",
+                    "just",
+                    "only",
+                }
+            ][:6]
+
+            def _asset_pref_score(chunk: object) -> int:
+                content = (getattr(chunk, "content", None) or "").lower()
+                if not (
+                    "drive.google.com" in content
+                    or "docs.google.com" in content
+                    or "forms.gle" in content
+                    or "forms.office.com" in content
+                ):
+                    return -1
+                return sum(1 for tok in ask_tokens if tok in content)
+
+            preferred = [c for c in reranked if _asset_pref_score(c) > 0]
+            preferred.sort(key=_asset_pref_score, reverse=True)
+            if preferred:
+                pref_ids = {str(c.chunk_id) for c in preferred}  # type: ignore[attr-defined]
+                rest = [c for c in reranked if str(c.chunk_id) not in pref_ids]  # type: ignore[attr-defined]
+                reranked = preferred + rest
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         return RetrievalResponse(

@@ -159,6 +159,7 @@ class SpikeEscalationNotifierTest extends TestCase
                 && $request['to'] === '2348117084647'
                 && str_contains((string) $request['text'], 'Are we going to India?')
                 && str_contains((string) $request['text'], 'Name: @276694879498269')
+                && ! str_contains((string) $request['text'], 'Name: Abdulsamad Balogun')
                 && ($request['mention'] ?? null) === '276694879498269@lid';
         });
         Http::assertNotSent(function ($request) {
@@ -477,6 +478,90 @@ class SpikeEscalationNotifierTest extends TestCase
         $this->assertStringNotContainsString('the group', $decision['reply']);
     }
 
+    public function test_feature_admin_ack_uses_lid_mention_when_phone_missing(): void
+    {
+        Cache::flush();
+        $community = Community::factory()->create(['name' => 'Demo Community']);
+
+        config([
+            'whatsapp_web_spike.outbound_url' => 'http://wa-out.test',
+            'whatsapp_web_spike.shared_secret' => 'spike-secret',
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+        ]);
+
+        Http::fake([
+            'http://wa-out.test/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $notifier = app(SpikeEscalationNotifier::class);
+        $notify = $notifier->notifyFeatureRequest(
+            channel: 'whatsapp_web_spike',
+            from: '265721070268441',
+            content: 'Add voice notes',
+            communityId: $community->id,
+            fromName: 'Abdulsamad Balogun',
+            fromPhone: null,
+            chatType: 'group',
+            chatId: '120363411674252738@g.us',
+        );
+
+        $decision = $notifier->tryAdminCommand('/approve '.$notify['ref']);
+        $this->assertTrue($decision['ok']);
+        $this->assertStringContainsString('@265721070268441', $decision['reply']);
+        $this->assertStringNotContainsString('Abdulsamad Balogun', $decision['reply']);
+        $this->assertStringNotContainsString('the group', $decision['reply']);
+    }
+
+    public function test_whatsapp_admin_card_name_uses_mention_and_cc_mentions_array(): void
+    {
+        Cache::flush();
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Demo Community',
+        ]);
+
+        config([
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+            'whatsapp_web_spike.shared_secret' => 'spike-secret',
+            'whatsapp_web_spike.outbound_url' => 'http://127.0.0.1:3101',
+            'whatsapp_web_spike.bot_number' => '2347041131371',
+            'whatsapp_web_spike.admin_phones' => ['2348117084647'],
+        ]);
+
+        Http::fake([
+            '127.0.0.1:3101/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $result = (new SpikeEscalationNotifier)->notifyFeatureRequest(
+            channel: 'whatsapp_web_spike',
+            from: '265721070268441',
+            content: 'we would like voice replies. Cc: @80599524048943',
+            communityId: $community->id,
+            communityName: $community->name,
+            fromName: 'Abdulsamad Balogun',
+            fromPhone: null,
+            chatType: 'group',
+            chatId: '120363411674252738@g.us',
+        );
+
+        $this->assertTrue($result['notified']);
+        Http::assertSent(function ($request) {
+            $text = (string) ($request['text'] ?? '');
+            $mentions = $request['mentions'] ?? null;
+
+            return str_contains($request->url(), '127.0.0.1:3101/send')
+                && str_contains($text, 'Name: @265721070268441')
+                && ! str_contains($text, 'Name: Abdulsamad Balogun')
+                && str_contains($text, 'Cc: @80599524048943')
+                && is_array($mentions)
+                && in_array('265721070268441@lid', $mentions, true)
+                && in_array('80599524048943@lid', $mentions, true);
+        });
+    }
+
     public function test_feature_request_decline_notifies_member(): void
     {
         Cache::flush();
@@ -720,7 +805,8 @@ class SpikeEscalationNotifierTest extends TestCase
                 && is_array($data['mentions'] ?? null)
                 && in_array('2348117084647@c.us', $data['mentions'], true)
                 && ! in_array('2348011111111@c.us', $data['mentions'], true)
-                && str_starts_with(ltrim($text), 'Hi,')
+                && str_starts_with(ltrim($text), '*You asked:*')
+                && ! str_starts_with(ltrim($text), 'Hi,')
                 && str_contains($text, 'Is the clinic open Friday?')
                 && str_contains($text, 'Yes, open until 4pm.')
                 && str_contains($text, "*Here's an update from an admin* (@2348117084647):")
@@ -852,7 +938,8 @@ class SpikeEscalationNotifierTest extends TestCase
                 && is_array($data['mentions'] ?? null)
                 && in_array('2348011111111@c.us', $data['mentions'], true)
                 && in_array('2348117084647@c.us', $data['mentions'], true)
-                && str_starts_with(ltrim($text), 'Hi,')
+                && str_starts_with(ltrim($text), '*You asked:*')
+                && ! str_starts_with(ltrim($text), 'Hi,')
                 && str_contains($text, "Who's Joy?")
                 && str_contains($text, 'Joy is a METI member.')
                 && str_contains($text, "*Here's an update from an admin* (@2348117084647):")

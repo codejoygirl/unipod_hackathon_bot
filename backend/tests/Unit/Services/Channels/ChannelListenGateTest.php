@@ -51,6 +51,10 @@ class ChannelListenGateTest extends TestCase
         $this->assertTrue($gate->shouldListen('group', '@zak when is clinic?', ['zak']));
         $this->assertTrue($gate->shouldListen('group', '/ask open hours?', ['zak']));
         $this->assertTrue($gate->shouldListen('group', 'zak help please', ['zak']));
+        $this->assertTrue($gate->shouldListen('group', '/publish latest', ['zak']));
+        $this->assertTrue($gate->shouldListen('group', '/knowledge drafts', ['zak']));
+        $this->assertTrue($gate->shouldListen('group', '/features open', ['zak']));
+        $this->assertTrue($gate->startsWithRecognizedCommand('/kb'));
     }
 
     public function test_group_listens_on_at_username_mention(): void

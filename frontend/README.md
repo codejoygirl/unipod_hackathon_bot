@@ -39,7 +39,15 @@ npm install
 npm run dev
 ```
 
-App: http://localhost:3000
+App (dev only): http://localhost:3000 — set `NEXT_PUBLIC_API_URL=http://localhost` in `.env.local`.
+
+**Production / same domain as Laravel:** leave `NEXT_PUBLIC_API_URL` empty and run:
+
+```bash
+npm run build:laravel
+```
+
+That writes the static UI into `backend/public/` so `https://your-domain/` serves chat and `/api/v1` stays on the same host.
 
 Never put Laravel, AI, or database secrets in `NEXT_PUBLIC_*` variables.
 

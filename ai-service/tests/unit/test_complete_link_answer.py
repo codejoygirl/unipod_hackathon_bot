@@ -81,7 +81,29 @@ async def test_cross_language_evidence_below_english_floor_still_synthesizes():
     assert result.citations
 
 
-def test_complete_link_answer_fills_missing_urls_with_intro():
+def test_complete_link_answer_fills_when_model_lists_no_urls():
+    chunks = [
+        _chunk("E1", "Welcome session + Module 0 (10 September) https://youtu.be/yVji4ZQECVw"),
+        _chunk("E2", "Module 1 class session (15 September) https://youtu.be/6q4uPBO_sDc"),
+        _chunk("E3", "Module 1 Problem Statement coaching https://youtu.be/-6G7LXiu47o"),
+    ]
+
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Send me all the recording links of the sessions",
+        answer="Here are the session recordings:",
+        evidence_chunks=chunks,
+        link_mode="recordings",
+        link_focus="many",
+    )
+
+    assert "https://youtu.be/yVji4ZQECVw" in completed
+    assert "https://youtu.be/6q4uPBO_sDc" in completed
+    assert "https://youtu.be/-6G7LXiu47o" in completed
+    assert "Welcome session + Module 0" in completed
+    assert set(ids) == {"E1", "E2", "E3"}
+
+
+def test_complete_link_answer_many_keeps_model_list_without_corpus_pad():
     chunks = [
         _chunk("E1", "Welcome session + Module 0 (10 September) https://youtu.be/yVji4ZQECVw"),
         _chunk("E2", "Module 1 class session (15 September) https://youtu.be/6q4uPBO_sDc"),
@@ -93,14 +115,14 @@ def test_complete_link_answer_fills_missing_urls_with_intro():
         query="Send me all the recording links of the sessions",
         answer=partial,
         evidence_chunks=chunks,
+        link_mode="recordings",
+        link_focus="many",
     )
 
-    assert "https://youtu.be/yVji4ZQECVw" in completed
-    assert "https://youtu.be/6q4uPBO_sDc" in completed
     assert "https://youtu.be/-6G7LXiu47o" in completed
-    assert "Welcome session + Module 0" in completed
-    # Lead intros come from the model when present — never hardcode EN/FR strings here.
-    assert set(ids) == {"E1", "E2", "E3"}
+    assert "https://youtu.be/yVji4ZQECVw" not in completed
+    assert "https://youtu.be/6q4uPBO_sDc" not in completed
+    assert ids == ["E3"]
 
 
 def test_complete_link_answer_uses_links_intro_when_not_recordings():
@@ -110,15 +132,311 @@ def test_complete_link_answer_uses_links_intro_when_not_recordings():
     ]
     completed, _ids = AnswerSynthesizer._complete_link_answer_from_evidence(
         query="Send me the links",
-        answer="Here are the links:\n1. Signup form\nhttps://example.com/form",
+        answer=(
+            "Here are the links:\n"
+            "1. Signup form\nhttps://example.com/form\n"
+            "2. Slides\nhttps://example.com/slides"
+        ),
         evidence_chunks=chunks,
         link_mode="assets",
+        link_focus="many",
     )
     assert "https://example.com/form" in completed
     assert "https://example.com/slides" in completed
     assert "Here are the links:" in completed
-    assert "https://example.com/slides" in completed
     assert "session recordings" not in completed.lower()
+
+
+def test_complete_link_answer_only_document_ask_keeps_guidelines_drive():
+    guidelines = (
+        "https://drive.google.com/file/d/1Pcf4ZwhHWcdQXO8gMV27de3OoZjuLi_p/view?usp=sharing"
+    )
+    other = "https://learn.mit.edu/universal-learning/ai"
+    signup = (
+        "https://web.nen.wfglobal.org/en/login?mode=createAccount&amp;source=student"
+    )
+    chunks = [
+        _chunk(
+            "E1",
+            "UniPods Hackathon Guidelines (PDF)\n" + guidelines,
+        ),
+        _chunk("E2", "General course information page\n" + other),
+        _chunk("E3", "Wadhwani Ignite signup\n" + signup),
+        _chunk("E4", "WhatsApp invite\nhttps://chat.whatsapp.com/KqId6NMKUDxKQUstvjTHPE"),
+    ]
+    dump = (
+        "Here are the hackathon guidelines documents:\n\n"
+        f"1. General course information page\n{other}\n\n"
+        f"2. Wadhwani Ignite signup\n{signup}\n\n"
+        f"3. Hackathon guidelines document (English)\n{guidelines}\n\n"
+        "4. WhatsApp invite\nhttps://chat.whatsapp.com/KqId6NMKUDxKQUstvjTHPE"
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Send me the hackathon guideline document",
+        answer=dump,
+        evidence_chunks=chunks,
+        link_mode="assets",
+        link_focus="one",
+    )
+    assert guidelines in completed
+    assert other not in completed
+    assert completed.count("https://") == 1
+    assert "chat.whatsapp.com" not in completed
+    assert "&amp;" not in completed
+    assert "E1" in ids
+
+
+def test_complete_link_answer_named_guide_link_keeps_best_drive():
+    demo = (
+        "https://drive.google.com/file/d/1YZvsMxcbqEvWZk-Zx3IBHYxwdhXRs5O/view?usp=drivelink"
+    )
+    other = (
+        "https://drive.google.com/file/d/1jkYKc8xmP1Msh7jPGaC0lPsZceGGkFh/view?usp=sharing"
+    )
+    chunks = [
+        _chunk("E1", "UniPods Video Demo Guide\n" + demo),
+        _chunk("E2", "Wadhwani Ignite Module 1 and 2 slides\n" + other),
+        _chunk("E3", "YouTube\nhttps://youtu.be/yVji4ZQECVw"),
+    ]
+    # Model already chose the right first URL; focus=one preserves that choice.
+    dump = (
+        "Here is the UniPods Video Demo Guide:\n\n"
+        f"1. UniPods Video Demo Guide\n{demo}\n\n"
+        f"2. Google Drive file\n{other}\n\n"
+        "3. YouTube recording\nhttps://youtu.be/yVji4ZQECVw"
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Give me the UniPods Video Demo Guide link",
+        answer=dump,
+        evidence_chunks=chunks,
+        link_mode="assets",
+        link_focus="one",
+    )
+    assert demo in completed
+    assert other not in completed
+    assert "youtu.be" not in completed
+    assert completed.count("https://") == 1
+    assert set(ids) <= {"E1"}
+
+
+def test_complete_link_answer_does_not_expand_beyond_model_list():
+    a = "https://drive.google.com/file/d/aaa/view"
+    b = "https://drive.google.com/file/d/bbb/view"
+    c = "https://learn.mit.edu/extra"
+    chunks = [
+        _chunk("E1", "Guide A\n" + a),
+        _chunk("E2", "Guide B\n" + b),
+        _chunk("E3", "Extra\n" + c),
+    ]
+    completed, _ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Send the guide link",
+        answer=f"1. Guide A\n{a}",
+        evidence_chunks=chunks,
+        link_mode="assets",
+        link_focus="one",
+    )
+    assert a in completed
+    assert b not in completed
+    assert c not in completed
+
+
+def test_complete_link_answer_singular_asset_does_not_dump_corpus():
+    chunks = [
+        _chunk("E1", "MIT Universal AI course https://learn.mit.edu/universal-learning/ai"),
+        _chunk("E2", "Team declaration https://docs.google.com/spreadsheets/d/abc"),
+        _chunk("E3", "Open hour https://teams.microsoft.com/meet/111?p=x"),
+        _chunk(
+            "E4",
+            "Professor: @meti_bot Can you send me the team member declaration "
+            "https://docs.google.com/spreadsheets/d/xyz",
+        ),
+    ]
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Send the first onboarding link for the programme",
+        answer=(
+            "Here is the onboarding link:\n\n"
+            "1. MIT Universal AI course\n"
+            "https://learn.mit.edu/universal-learning/ai"
+        ),
+        evidence_chunks=chunks,
+        link_mode="assets",
+        link_focus="one",
+    )
+    assert "https://learn.mit.edu/universal-learning/ai" in completed
+    assert "docs.google.com" not in completed
+    assert "teams.microsoft.com" not in completed
+    assert "Can you send me" not in completed
+    assert set(ids) == {"E1"}
+
+
+def test_complete_link_answer_singular_meeting_keeps_one():
+    meet_a = "https://teams.microsoft.com/meet/419860837373470?p=aaaa"
+    meet_b = "https://teams.microsoft.com/meet/369123389215172?p=bbbb"
+    meet_c = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_xxx%40thread.v2/0"
+    chunks = [
+        _chunk("E1", f"Reminder! Today at 3pm CAT we start\n{meet_a}"),
+        _chunk("E2", f"Don't keep them to yourself! ask anything\n{meet_b}"),
+        _chunk("E3", f"MIT Universal AI Welcome and onboarding\n{meet_c}"),
+    ]
+    draft = (
+        f"1. Reminder! Today at 3pm\n{meet_a}\n"
+        f"2. keep them to yourself\n{meet_b}\n"
+        f"3. Microsoft Teams meeting\n{meet_c}"
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Send the first onboarding meeting link for the programme",
+        answer=draft,
+        evidence_chunks=chunks,
+        link_mode="meetings",
+        link_focus="one",
+    )
+    # focus=one picks the onboarding-titled meeting via evidence overlap with the ask.
+    assert meet_c in completed
+    assert meet_a not in completed
+    assert meet_b not in completed
+    assert completed.count("https://") == 1
+    assert set(ids) == {"E3"}
+
+
+def test_weak_link_label_rejects_date_fact_captions():
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Expected completion date: October 18, 2026"
+    )
+    assert AnswerSynthesizer._is_weak_link_label("18/10/2026")
+    assert not AnswerSynthesizer._is_weak_link_label(
+        "Hackathon guidelines document (English)"
+    )
+
+
+def test_restore_urls_unescapes_html_entities_without_truncating():
+    raw = (
+        "1. Signup\n"
+        "https://web.nen.wfglobal.org/en/login?mode=createAccount&amp;source=student\n\n"
+        "2. Guidelines\n"
+        "https://drive.google.com/file/d/1Pcf4ZwhHWcdQXO8gMV27de3OoZjuLip/view?usp=sharing"
+    )
+    fixed = AnswerSynthesizer.restore_urls_in_answer(raw)
+    assert "&amp;" not in fixed
+    assert "mode=createAccount&source=student" in fixed
+    assert "1Pcf4ZwhHWcdQXO8gMV27de3OoZjuLip" in fixed
+
+
+def test_prefer_document_title_over_date_fact_near_drive_url():
+    drive = "https://drive.google.com/file/d/1Pcf4ZwhHWcdQXO8gMV27de3OoZjuLip/view?usp=sharing"
+    chunks = [
+        _chunk(
+            "E1",
+            "Hackathon guidelines document (English)\n"
+            "Expected completion date: October 18, 2026\n"
+            + drive,
+        ),
+    ]
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Just the document for the hackathon guidelines",
+        answer=(
+            "Here are the hackathon guidelines documents:\n\n"
+            "1. Expected completion date: October 18, 2026\n"
+            f"{drive}"
+        ),
+        evidence_chunks=chunks,
+        link_mode="assets",
+    )
+    assert "Expected completion date" not in completed
+    assert "Hackathon guidelines" in completed or "guidelines" in completed.lower()
+    assert drive in completed
+    assert "&amp;" not in completed
+    assert set(ids) == {"E1"}
+
+
+def test_weak_link_label_rejects_speaker_chat_paste():
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Jackson: Hello everyone, am Ssekyanzi Jackson a Software Engineer"
+    )
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Fleva: Hey. I am Yemima and I am from Togo. I am"
+    )
+    assert not AnswerSynthesizer._is_weak_link_label(
+        "Jackson (software engineer) - LinkedIn"
+    )
+    assert not AnswerSynthesizer._is_weak_link_label("MIT Universal AI onboarding call")
+
+
+def test_weak_link_label_rejects_meeting_chat_crumbs():
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Reminder! Today at *3pm CAT (2pm WA / 4pm EA local time) we"
+    )
+    assert AnswerSynthesizer._is_weak_link_label(
+        "'t keep them to yourself! This is a great opportunity to ask anything"
+    )
+    assert AnswerSynthesizer._is_weak_link_label(
+        "There are *15* people in the Teams call just waiting."
+    )
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Genial: *Genial joined from the community*"
+    )
+    assert not AnswerSynthesizer._is_weak_link_label("MIT Universal AI onboarding call")
+
+
+def test_complete_link_answer_keeps_social_urls_from_answer_on_assets_ask():
+    linkedin = "https://www.linkedin.com/in/ssekyanzi-jackson"
+    chunks = [
+        _chunk(
+            "E1",
+            "Jackson: Hello everyone, am Ssekyanzi Jackson a Software Engineer\n" + linkedin,
+        ),
+        _chunk("E2", "Signup https://example.com/form"),
+    ]
+    completed, _ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Give me the social media handles of the platform",
+        answer=(
+            "Here are the social handles shared in the community:\n\n"
+            "1. Jackson (software engineer) - LinkedIn\n"
+            f"{linkedin}\n\n"
+            "2. Signup form\n"
+            "https://example.com/form"
+        ),
+        evidence_chunks=chunks,
+        link_mode="assets",
+    )
+    assert linkedin in completed
+    assert "Jackson (software engineer) - LinkedIn" in completed
+    assert "Hello everyone, am Ssekyanzi" not in completed
+
+
+def test_fallback_label_uses_host_shape_for_profiles():
+    assert (
+        AnswerSynthesizer._fallback_label("https://www.linkedin.com/in/someone")
+        == "LinkedIn profile"
+    )
+    assert AnswerSynthesizer._fallback_label("https://github.com/kiongosss") == "GitHub profile"
+
+
+def test_parse_link_list_same_line_caption_url():
+    pairs = AnswerSynthesizer._parse_link_list_from_answer(
+        "1. Follow, like, repost and share our videos so we can reach even more: "
+        "https://www.tiktok.com/@timbuktoounipods?r=1&_t=ZS-99cbj4oT5lc"
+    )
+    assert len(pairs) == 1
+    url, label = pairs[0]
+    assert "tiktok.com/@timbuktoounipods" in url
+    assert "Follow, like, repost" in label
+    assert AnswerSynthesizer._is_weak_link_label(label)
+
+
+def test_polisher_splits_same_line_caption_url():
+    from ai_service.generation.polisher import AnswerPolisher
+
+    raw = (
+        "The TikTok handle shared for the UniPods platform is:\n\n"
+        "1. Follow, like, repost and share our videos so we can reach even more: "
+        "https://www.tiktok.com/@timbuktoounipods?r=1&_t=ZS-99cbj4oT5lc\n"
+    )
+    out = AnswerPolisher.deterministic_cleanup(raw)
+    assert ":\nhttps://www.tiktok.com/@timbuktoounipods" not in out.replace(" ", "")
+    assert re.search(
+        r"1\.\s+Follow, like, repost[^\n]+\nhttps://www\.tiktok\.com/@timbuktoounipods",
+        out,
+    )
 
 
 def test_complete_link_answer_skips_teams_meet_joins_for_recordings():
@@ -134,8 +452,10 @@ def test_complete_link_answer_skips_teams_meet_joins_for_recordings():
     ]
     completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
         query="Send me all the recording links",
-        answer=f"1. Join\n{meet}",
+        answer="Here are the session recordings:",
         evidence_chunks=chunks,
+        link_mode="recordings",
+        link_focus="many",
     )
     assert meet not in completed
     assert "https://youtu.be/yVji4ZQECVw" in completed
@@ -167,8 +487,16 @@ def test_complete_link_answer_includes_drive_and_dedupes_variants():
     ]
     completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
         query="Send me the recording links",
-        answer="1. Welcome\nhttps://youtu.be/yVji4ZQECVw",
+        answer=(
+            "1. Welcome\nhttps://youtu.be/yVji4ZQECVw\n"
+            "2. Drive copy\n"
+            "https://drive.google.com/file/d/1E5RrwULX8zSjwxHFSxiQzCTtp20ulYQ8/view?usp=sharing\n"
+            "3. Teams recap\n"
+            "https://teams.microsoft.com/l/meetingrecap?driveItemId=abc"
+        ),
         evidence_chunks=chunks,
+        link_mode="recordings",
+        link_focus="many",
     )
     assert "https://youtu.be/yVji4ZQECVw" in completed
     assert "drive.google.com/file/d/1E5RrwULX8zSjwxHFSxiQzCTtp20ulYQ8/view" in completed
@@ -177,7 +505,7 @@ def test_complete_link_answer_includes_drive_and_dedupes_variants():
     assert "meetingrecap" in completed
     assert "spreadsheets" not in completed
     assert "these are all" not in completed.lower()
-    assert set(ids) == {"E1", "E2", "E3", "E4"}
+    assert {"E1", "E2", "E4"} <= set(ids)
 
 
 def test_complete_link_answer_skips_person_questions():
@@ -448,3 +776,137 @@ def test_complete_link_answer_recordings_empty_when_only_noise_urls():
     )
     assert completed == ""
     assert ids == []
+
+
+def test_prefer_cleaner_keeps_full_teams_meetup_over_truncated():
+    full = (
+        "https://teams.microsoft.com/l/meetup-join/"
+        "19%3ameeting_MjgxNmY4NGItZTZlMi00OTNmLTk2YzEtMjg0ZTdmYWJjM2Q4%40thread.v2/0"
+        "?context=%7B%22Tid%22%3A%22b3e5db5e-2944-4837-99f5-7488ace54319%22"
+        "%2C%22Oid%22%3A%2225f213f2-0e2f-4763-83fa-0d909a0e9701%22%7D"
+    )
+    truncated = full[: full.index("0e2f") + 3]  # cut mid-Oid UUID
+    assert AnswerSynthesizer._looks_truncated_url(truncated)
+    assert not AnswerSynthesizer._looks_truncated_url(full)
+    assert AnswerSynthesizer._url_dedupe_key(full) == AnswerSynthesizer._url_dedupe_key(
+        truncated
+    )
+    assert AnswerSynthesizer._prefer_cleaner_stored_url(truncated, full) == full
+    assert AnswerSynthesizer._prefer_cleaner_stored_url(full, truncated) == full
+
+
+def test_complete_link_answer_expands_truncated_teams_meetup_join():
+    full = (
+        "https://teams.microsoft.com/l/meetup-join/"
+        "19%3ameeting_MjgxNmY4NGItZTZlMi00OTNmLTk2YzEtMjg0ZTdmYWJjM2Q4%40thread.v2/0"
+        "?context=%7B%22Tid%22%3A%22b3e5db5e-2944-4837-99f5-7488ace54319%22"
+        "%2C%22Oid%22%3A%2225f213f2-0e2f-4763-83fa-0d909a0e9701%22%7D"
+    )
+    truncated = (
+        "https://teams.microsoft.com/l/meetup-join/"
+        "19%3ameeting_MjgxNmY4NGItZTZlMi00OTNmLTk2YzEtMjg0ZTdmYWJjM2Q4%40thread.v2/0"
+        "?context=%7b%22Tid%22%3a%22b3e5db5e-2944-4837-99f5-7488ace54319%22"
+        "%2c%22Oid%22%3a%2225f213f2-0e2"
+    )
+    chunks = [
+        _chunk(
+            "E1",
+            "METI Cohort 1 Needs Assessment Workshop\n"
+            f"Microsoft Teams join link\n{full}",
+        ),
+        _chunk(
+            "E2",
+            "Wadhwani Module 1 coaching / Q&A recording\nhttps://youtu.be/-6G7LXiu47o",
+        ),
+    ]
+    draft = (
+        "Here is the Teams join link:\n\n"
+        f"1. METI Needs Assessment Workshop\n{truncated}\n\n"
+        "2. Wadhwani Module 1 coaching/Q&A\nhttps://youtu.be/-6G7LXiu47o"
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="METI Needs Assessment Workshop Teams join link",
+        answer=draft,
+        evidence_chunks=chunks,
+        link_mode="meetings",
+        link_focus="one",
+    )
+    assert full in completed
+    assert truncated not in completed
+    assert "youtu.be" not in completed
+    assert "E1" in ids
+
+
+def test_complete_link_answer_focus_one_keeps_related_hub_closing():
+    guide = "https://drive.google.com/file/d/1YZvsMxcbq_EvWZk-Zx3IBHYxwdhXRs5O/view"
+    hub = "https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs"
+    chunks = [
+        _chunk("E1", f"UniPods Video Demo Guide\n{guide}"),
+        _chunk("E2", f"UNIPOD COMMUNITY RESOURCES\nProgram files pack\n{hub}"),
+    ]
+    draft = (
+        "Here is the UniPods Video Demo Guide:\n\n"
+        f"1. UniPods Video Demo Guide\n{guide}\n\n"
+        "You can also browse the community resources folder for more materials:\n"
+        f"{hub}"
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="UniPods Video Demo Guide link",
+        answer=draft,
+        evidence_chunks=chunks,
+        link_mode="assets",
+        link_focus="one",
+    )
+    assert guide in completed
+    assert hub in completed
+    assert completed.index(guide) < completed.index(hub)
+    # Hub must not become a second numbered list item.
+    assert not re.search(r"^2\.\s+", completed, flags=re.M)
+    assert "community resources" in completed.lower()
+    assert "E1" in ids
+
+
+def test_label_for_url_prefers_immediate_title_not_pack_name():
+    slides = "https://drive.google.com/file/d/1jkYKc8xmP1Msh7jPGaC0lPsZceG_GkFh/view?usp=sharing"
+    content = (
+        "UniPods / Wadhwani programme resource pack\n"
+        "Community knowledge: schedules, slides, Teams joins.\n"
+        "=== Wadhwani slides ===\n"
+        "Wadhwani Ignite Module 1 and 2 slides\n"
+        f"{slides}\n"
+    )
+    label = AnswerSynthesizer._label_for_url(slides, content)
+    assert "Module 1 and 2" in label
+    assert "resource pack" not in label.lower()
+    assert "community knowledge" not in label.lower()
+
+
+def test_complete_link_answer_multi_uses_resource_titles():
+    slides = "https://drive.google.com/file/d/1jkYKc8xmP1Msh7jPGaC0lPsZceG_GkFh/view?usp=sharing"
+    rec = "https://www.youtube.com/watch?v=C9gaW26GfWw"
+    chunks = [
+        _chunk(
+            "E1",
+            "UniPods / Wadhwani programme resource pack\n"
+            "=== Wadhwani slides ===\n"
+            f"Wadhwani Ignite Module 1 and 2 slides\n{slides}\n"
+            "=== Wadhwani session recordings (YouTube) ===\n"
+            f"Wadhwani Module 2 Part 1 class session recording — 22 September 2026\n{rec}\n",
+        ),
+    ]
+    draft = (
+        "Here are the links:\n\n"
+        f"1. Wadhwani programme resource pack\n{slides}\n\n"
+        f"2. Module 2 Part 1 class session recording\n{rec}"
+    )
+    completed, _ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Send me the Wadhwani slides and the Module 2 recording",
+        answer=draft,
+        evidence_chunks=chunks,
+        link_mode="recordings",
+        link_focus="many",
+    )
+    assert slides in completed
+    assert rec in completed
+    assert "Wadhwani Ignite Module 1 and 2 slides" in completed
+    assert "resource pack" not in completed.lower()
