@@ -5,6 +5,10 @@ from typing import Any
 import uuid
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# A "sentence" in a chat export can run to thousands of characters; the drawer gets a
+# readable window instead of the whole block.
+MAX_EVIDENCE_SNIPPET_CHARS = 600
+
 
 class AuthorityTier(StrEnum):
     """Source authority weighting tiers for evidence scoring."""
@@ -83,6 +87,25 @@ class EnrichedCitation(BaseModel):
     )
     locator: dict[str, Any] = Field(default_factory=dict)
     relevance_score: float | None = None
+
+    @field_validator("evidence_snippet")
+    @classmethod
+    def present_evidence_safely(cls, value: str) -> str:
+        """Redact PII and cap length before the snippet can leave the service.
+
+        Enforced on the model rather than at each call site, so every path that builds a
+        citation is covered. Chat exports put members' phone numbers inline with the text,
+        and a "sentence" in one can run to thousands of characters — both would otherwise
+        reach the Evidence Drawer verbatim.
+        """
+        from ai_service.security.sanitizer import mask_pii
+
+        cleaned = mask_pii(value or "").strip()
+
+        if len(cleaned) > MAX_EVIDENCE_SNIPPET_CHARS:
+            cleaned = cleaned[:MAX_EVIDENCE_SNIPPET_CHARS].rstrip() + "…"
+
+        return cleaned or "…"
 
 
 class ConflictDetail(BaseModel):

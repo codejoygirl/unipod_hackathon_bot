@@ -5,18 +5,18 @@ export function ConflictList({ conflicts }: { conflicts: AnswerConflict[] }) {
   if (conflicts.length === 0) return null;
 
   return (
-    <section className="border-t border-rule pt-5">
+    <section>
       <h3 className="zak-label text-amber">
         Sources disagree
         <span className="ml-2">{conflicts.length}</span>
       </h3>
 
-      <ul className="mt-4 space-y-5">
+      <ul className="mt-3 space-y-4">
         {conflicts.map((conflict) => (
           <li key={conflict.topic}>
             <p className="text-[0.9375rem] leading-6 font-medium text-ink">{conflict.topic}</p>
 
-            <ul className="mt-2 space-y-2">
+            <ul className="mt-2 space-y-1.5">
               {conflict.claims.map((claim) => (
                 <li
                   key={claim}
@@ -27,7 +27,7 @@ export function ConflictList({ conflicts }: { conflicts: AnswerConflict[] }) {
               ))}
             </ul>
 
-            <p className="mt-2 text-xs leading-5 text-ink-soft">
+            <p className="mt-1.5 text-xs leading-5 text-ink-soft">
               Recommended action: {conflict.action}
             </p>
           </li>

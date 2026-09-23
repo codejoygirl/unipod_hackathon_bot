@@ -701,7 +701,7 @@ class AnswerSynthesizer:
 
     @staticmethod
     def _ensure_section_spacing(answer: str) -> str:
-        """Keep replies readable: blank line after lead, no jam-packed blocks."""
+        """Keep replies readable: blank line after lead, no jam-packed blocks, no markdown."""
         text = (answer or "").replace("\r\n", "\n").strip()
         if not text:
             return ""
@@ -712,6 +712,13 @@ class AnswerSynthesizer:
             r"\1\n\n\2",
             text,
         )
+        # The prompt forbids markdown emphasis and the model emits it anyway ("*15 September*").
+        # Clients render these replies as plain text, so the markers reach the member as
+        # literal asterisks. Strip the pairs (no DOTALL: matches stay within a line) and
+        # turn any asterisk bullet into a real one.
+        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+        text = re.sub(r"\*(.+?)\*", r"\1", text)
+        text = re.sub(r"(?m)^\*\s+", "• ", text)
         return text.strip()
 
     def _normalize_candidates_to_evidence(
@@ -755,6 +762,7 @@ class AnswerSynthesizer:
         temperature: float = 0.0,
         link_mode: str | None = None,
         language_hint: str | None = None,
+        response_style: str | None = None,
     ) -> ValidatedAnswerPayload:
         """Execute end-to-end evidence synthesis and validation."""
         
@@ -798,6 +806,7 @@ class AnswerSynthesizer:
             query=query,
             evidence_xml=evidence_xml,
             target_language=target_language,
+            response_style=response_style,
         )
 
         chat_request = ChatRequest(

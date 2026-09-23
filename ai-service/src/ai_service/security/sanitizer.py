@@ -38,6 +38,20 @@ _PII_PATTERNS = [
     ),
 ]
 
+# Chat exports are full of phone numbers (`+250 783 188 655`, `223 74 42 77 59`), which
+# identify members. The character class is deliberately broad so it catches the many
+# spacing conventions, which also makes it eager — so the digit count is checked before
+# masking, keeping dates, times, prices and quantities intact.
+_PHONE_CANDIDATE = re.compile(r"(?<![\d])\+?\d[\d\s().\-]{6,}\d(?![\d])")
+_MIN_PHONE_DIGITS = 9
+
+
+def _mask_phone(match: re.Match[str]) -> str:
+    candidate = match.group(0)
+    if len(re.sub(r"\D", "", candidate)) < _MIN_PHONE_DIGITS:
+        return candidate
+    return "[PHONE REDACTED]"
+
 
 def strip_control_chars(text: str) -> str:
     if not text:
@@ -63,7 +77,7 @@ def mask_pii(text: str) -> str:
     out = text
     for pattern, mask in _PII_PATTERNS:
         out = pattern.sub(mask, out)
-    return out
+    return _PHONE_CANDIDATE.sub(_mask_phone, out)
 
 
 def fence_untrusted(label: str, text: str, *, max_chars: int = 8000, escape_xml: bool = True) -> str:

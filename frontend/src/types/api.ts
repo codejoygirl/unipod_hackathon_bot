@@ -206,18 +206,76 @@ export type AskMeta = {
   chunks_evaluated: number;
   tenant_id: string;
   community_ids: string[];
+  /** Thread this turn was written to. A new one is created when none was sent. */
+  conversation_id: string;
 };
 
 export type AskPayload = {
   query: string;
-  /** ULIDs. All must belong to one tenant, or the API returns 422. */
-  community_ids: string[];
+  /**
+   * Optional narrowing only. Omit it to scope to everything the member can read — the
+   * server resolves that from the session, so the UI never asks for a community.
+   */
+  community_ids?: string[];
   target_language?: string | null;
+  /** Continue an existing thread. Omit to start a new one. */
+  conversation_id?: string | null;
 };
 
 export type AskResponse = {
   data: GroundedAnswer;
   meta: AskMeta;
+};
+
+/* --------------------------------------------------------- conversations */
+
+export type ChatRole = "user" | "assistant";
+
+/** One turn. Assistant turns keep the grounded answer so citations survive a reload. */
+export type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  content: string;
+  answer: GroundedAnswer | null;
+  created_at: string | null;
+};
+
+/** A sidebar row: metadata only, no messages. */
+export type ConversationSummary = {
+  id: string;
+  title: string | null;
+  tenant_id: string;
+  last_message_at: string | null;
+  created_at: string | null;
+};
+
+export type Conversation = ConversationSummary & {
+  messages: ChatMessage[];
+};
+
+/* ----------------------------------------------------------- resources */
+
+export type ResourceCategory = "recordings" | "meetings" | "documents" | "code" | "other";
+
+/**
+ * A real `https://` link found inside published knowledge.
+ *
+ * Distinct from `EvidenceCitation.source_uri`, which uses internal schemes
+ * (`whatsapp://…`, `doc://…`) that no browser can open.
+ */
+export type ResourceLink = {
+  url: string;
+  domain: string;
+  category: ResourceCategory;
+  source_name: string;
+};
+
+export type ResourceLinkResponse = {
+  data: ResourceLink[];
+  meta: {
+    total: number;
+    sources_scanned: number;
+  };
 };
 
 /* ----------------------------------------------------------------- health */

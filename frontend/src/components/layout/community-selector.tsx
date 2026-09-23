@@ -1,5 +1,7 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+
 import { useActiveCommunity } from "@/features/communities/hooks/active-community";
 
 const SELECT =
@@ -8,6 +10,11 @@ const SELECT =
 export function CommunitySelector() {
   const { tenants, communities, tenantId, communityId, setCommunity, isLoading } =
     useActiveCommunity();
+  const pathname = usePathname();
+
+  // Chat is no longer scoped to one chosen community, so the picker would be noise there
+  // and read as a requirement. The knowledge surfaces still need it.
+  if (pathname?.startsWith("/conversations")) return null;
 
   if (tenants.length === 0) return null;
 

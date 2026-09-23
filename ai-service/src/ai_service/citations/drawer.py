@@ -1,7 +1,28 @@
 """Formats verified citations for Web PWA Evidence Drawer and messaging channels."""
 
 from collections.abc import Sequence
+
 from ai_service.schemas.evidence import EnrichedCitation
+from ai_service.security.sanitizer import mask_pii
+
+# A "sentence" in a chat export can run to thousands of characters, so the drawer gets a
+# readable window rather than the whole block.
+MAX_QUOTE_CHARS = 600
+
+
+def _presentable(text: str) -> str:
+    """Citation text as a member should see it: PII-masked and length-capped.
+
+    Chat exports carry members' phone numbers inline with the message body. This is the
+    single point where citations leave the service, so cleaning here covers every path
+    that produces them (validator and verifier alike).
+    """
+    cleaned = mask_pii(text or "").strip()
+
+    if len(cleaned) > MAX_QUOTE_CHARS:
+        cleaned = cleaned[:MAX_QUOTE_CHARS].rstrip() + "…"
+
+    return cleaned
 
 
 class EvidenceDrawerFormatter:
@@ -58,8 +79,8 @@ class EvidenceDrawerFormatter:
                     "sourceName": c.source_name,
                     "sourceUri": c.source_uri,
                     "mediaType": c.media_type,
-                    "exactQuote": c.evidence_snippet,
-                    "contextSnippet": c.evidence_snippet,
+                    "exactQuote": _presentable(c.evidence_snippet),
+                    "contextSnippet": _presentable(c.evidence_snippet),
                     "pageNumber": c.locator.get("page_number"),
                     "timestamp": c.locator.get("timestamp_seconds"),
                 }

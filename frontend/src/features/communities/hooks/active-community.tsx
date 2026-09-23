@@ -17,10 +17,6 @@ type ActiveCommunityValue = {
   communityName: string | null;
   isLoading: boolean;
   error: unknown;
-  /** True when a question can be scoped to a community. */
-  isReady: boolean;
-  /** Why a question cannot be asked yet, when it cannot. Null once ready. */
-  blockedReason: string | null;
   setCommunity: (tenantId: string, communityId: string) => void;
 };
 
@@ -73,14 +69,6 @@ export function ActiveCommunityProvider({ children }: { children: ReactNode }) {
 
   const isLoading = communitiesQuery.isPending;
 
-  const blockedReason = useMemo(() => {
-    if (tenants.length === 0) return "You are not a member of a community yet.";
-    if (isLoading) return "Loading your communities";
-    if (communities.length === 0) return "No communities are visible to you here.";
-    if (!communityId) return "Choose a community";
-    return null;
-  }, [tenants.length, isLoading, communities.length, communityId]);
-
   const value = useMemo<ActiveCommunityValue>(() => {
     const active = communities.find((community) => community.id === communityId) ?? null;
 
@@ -92,8 +80,6 @@ export function ActiveCommunityProvider({ children }: { children: ReactNode }) {
       communityName: active?.name ?? null,
       isLoading,
       error: communitiesQuery.error,
-      isReady: Boolean(tenantId && communityId),
-      blockedReason,
       setCommunity: (nextTenantId, nextCommunityId) => {
         const params = new URLSearchParams(searchParams);
         params.set("tenant", nextTenantId);
@@ -107,7 +93,6 @@ export function ActiveCommunityProvider({ children }: { children: ReactNode }) {
     tenantId,
     communityId,
     isLoading,
-    blockedReason,
     communitiesQuery.error,
     searchParams,
     pathname,

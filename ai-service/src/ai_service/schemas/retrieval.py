@@ -158,6 +158,14 @@ class GroundedAnswerRequest(BaseModel):
         max_length=20,
         description="Optional URL-list intent from classifier: none|recordings|meetings|assets.",
     )
+    response_style: str | None = Field(
+        default=None,
+        max_length=20,
+        description=(
+            "Optional length directive. 'concise' asks for the signal only (one line plus a "
+            "few bullets); omit for the complete channel-style answer."
+        ),
+    )
 
 
 class GroundedAnswerResponse(BaseModel):

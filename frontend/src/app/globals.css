@@ -380,3 +380,22 @@
     animation: none;
   }
 }
+
+/* Thin, theme-aware scrollbars for the chat rail and message thread. */
+.zak-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+
+.zak-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.zak-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.zak-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--rule-strong);
+  border-radius: 9999px;
+}

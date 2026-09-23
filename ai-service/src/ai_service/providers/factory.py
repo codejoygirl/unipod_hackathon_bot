@@ -29,13 +29,28 @@ class ModelFactory:
 
     @staticmethod
     def _create_provider(provider_name: str):
-        """Instantiate the requested provider."""
+        """Instantiate the requested provider, with its models read from Settings.
+
+        Constructing a provider with no arguments makes it fall back to its own hardcoded
+        defaults, which silently ignores every model name in `.env`. Pass them explicitly
+        so `CHAT_MODEL_NAME` / `EMBEDDING_MODEL_NAME` / `EMBEDDING_DIMENSION` mean something.
+
+        Note `CHAT_MODEL_NAME` is shared across providers: it must name a model belonging to
+        whichever provider `LLM_PROVIDER` selects.
+        """
 
         if provider_name == "openai":
-            return OpenAIProvider()
+            return OpenAIProvider(
+                chat_model=settings.CHAT_MODEL_NAME,
+                embedding_model=settings.EMBEDDING_MODEL_NAME,
+                embedding_dimension=settings.EMBEDDING_DIMENSION,
+            )
 
         if provider_name == "gemini":
-            return GeminiProvider()
+            return GeminiProvider(
+                chat_model=settings.CHAT_MODEL_NAME,
+                embedding_model=settings.EMBEDDING_MODEL_NAME,
+            )
 
         raise ValueError(
             f"Unsupported AI provider: '{provider_name}'. "

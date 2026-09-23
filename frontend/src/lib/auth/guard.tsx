@@ -1,8 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "./session";
 
@@ -16,28 +13,20 @@ function LoadingShell() {
 }
 
 /**
- * Guards authenticated routes on the client.
+ * Waits for the automatic session before rendering a surface that needs one.
  *
- * The session is a first-party cookie owned by Laravel on another origin, so a Next
- * server component cannot read it. Redirecting on the client is the trade-off; the
- * loading shell keeps a signed-in member from seeing a login flash.
+ * There is no sign-in route to redirect to any more, so a failure is reported in place
+ * rather than bounced to a form that cannot help.
  */
 export function RequireSession({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const { isLoading, isAnonymous, error } = useSession();
-
-  useEffect(() => {
-    if (isAnonymous) router.replace("/login");
-  }, [isAnonymous, router]);
+  const { isLoading, error } = useSession();
 
   if (error) {
-    // An unreachable API is not "signed out". Sending someone to a login form that cannot
-    // submit would be a lie about what went wrong.
     return (
       <div className="mx-auto w-full max-w-2xl px-6 py-16">
         <div className="zak-card rounded-sm p-6">
           <h1 className="text-[0.9375rem] leading-6 font-medium text-ink">
-            Cannot reach the API
+            Cannot start a session
           </h1>
           <p className="mt-2 text-[0.9375rem] leading-6 text-ink-soft">
             {error instanceof Error ? error.message : "Unknown error."}
@@ -50,10 +39,10 @@ export function RequireSession({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (isLoading || isAnonymous) {
+  if (isLoading) {
     return (
       <div role="status" aria-live="polite">
-        <span className="sr-only">Checking your session</span>
+        <span className="sr-only">Starting your session</span>
         <LoadingShell />
       </div>
     );

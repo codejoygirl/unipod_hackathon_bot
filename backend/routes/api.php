@@ -3,11 +3,13 @@
 use App\Http\Controllers\Api\V1\AssistantController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\CommunityController;
+use App\Http\Controllers\Api\V1\ConversationController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\Internal\TelegramSpikeController;
 use App\Http\Controllers\Api\V1\Internal\WhatsAppWebSpikeController;
 use App\Http\Controllers\Api\V1\Internal\WhatsAppZavuController;
 use App\Http\Controllers\Api\V1\KnowledgeSourceController;
+use App\Http\Controllers\Api\V1\ResourceLinkController;
 use App\Http\Controllers\Api\V1\TenantController;
 use App\Http\Controllers\Api\V1\Webhooks\WhatsAppZavuWebhookController;
 use App\Http\Middleware\EnsureTelegramSpikeEnabled;
@@ -50,6 +52,13 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         Route::post('/knowledge-sources/{knowledgeSource}/submit-review', [KnowledgeSourceController::class, 'submitReview'])->name('knowledge.submit-review');
         Route::post('/knowledge-sources/{knowledgeSource}/publish', [KnowledgeSourceController::class, 'publish'])->name('knowledge.publish');
         Route::post('/knowledge-sources/{knowledgeSource}/reject', [KnowledgeSourceController::class, 'reject'])->name('knowledge.reject');
+
+        Route::get('/conversations', [ConversationController::class, 'index'])->name('conversations.index');
+        Route::post('/conversations', [ConversationController::class, 'store'])->name('conversations.store');
+        Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
+        Route::delete('/conversations/{conversation}', [ConversationController::class, 'destroy'])->name('conversations.destroy');
+
+        Route::get('/resources', [ResourceLinkController::class, 'index'])->name('resources.index');
 
         Route::post('/assistant/ask', [AssistantController::class, 'ask'])->name('assistant.ask');
     });

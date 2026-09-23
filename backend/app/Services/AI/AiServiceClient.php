@@ -42,11 +42,15 @@ class AiServiceClient
         ?string $targetLanguage = null,
         bool $enableConflictDetection = true,
         string $linkMode = 'none',
+        ?string $responseStyle = null,
     ): GroundedAnswerDTO {
         $allowedLink = ['none', 'recordings', 'meetings', 'assets'];
         if (! in_array($linkMode, $allowedLink, true)) {
             $linkMode = 'none';
         }
+
+        $allowedStyle = ['concise'];
+        $responseStyle = in_array($responseStyle, $allowedStyle, true) ? $responseStyle : null;
 
         $payloadArray = [
             'query' => trim($query),
@@ -56,6 +60,7 @@ class AiServiceClient
             'enable_conflict_detection' => $enableConflictDetection,
             'temperature' => 0.0,
             'link_mode' => $linkMode,
+            'response_style' => $responseStyle,
         ];
 
         $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);

@@ -1,18 +1,22 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { CalendarClock, Clock, Megaphone } from "lucide-react";
+import Image from "next/image";
+import { useMemo, useState } from "react";
 
-import { ApiError } from "@/lib/api/client";
-import { ChatComposer } from "./chat-composer";
-import { CitedAnswer } from "./cited-answer";
+import { ThinkingOrb } from "thinking-orbs";
+
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAsk } from "@/features/chat/hooks/use-ask";
+import { useConversation } from "@/features/chat/hooks/use-conversation";
+import { ApiError } from "@/lib/api/client";
 import type { GroundedAnswer } from "@/types/api";
+import { ChatComposer } from "./chat-composer";
+import { CitedAnswer } from "./cited-answer";
+import { AssistantTurn, UserTurn } from "./turn";
 
-type Turn =
-  | { id: number; question: string; status: "pending" }
-  | { id: number; question: string; status: "answered"; answer: GroundedAnswer }
-  | { id: number; question: string; status: "failed"; message: string };
+/** Diagnostics trace at the API boundary too; see `lib/api/assistant.ts`. Dev only. */
+const DEV = process.env.NODE_ENV !== "production";
 
 /** Turns the API's status codes into something a member can act on. */
 function describeFailure(error: unknown): string {
@@ -21,7 +25,9 @@ function describeFailure(error: unknown): string {
       case 401:
         return "Your session has ended. Sign in again to keep asking.";
       case 403:
-        return "None of the selected communities are ones you can read. Pick another community.";
+        return "Your account is not in any community yet, so there is nothing to answer from.";
+      case 404:
+        return "That conversation no longer exists. Start a new chat.";
       case 422:
         return "The selected communities must all belong to the same tenant.";
       case 0:
@@ -34,108 +40,211 @@ function describeFailure(error: unknown): string {
   return "The question could not be answered.";
 }
 
+const SUGGESTIONS = [
+  { label: "When does the community clinic open?", Icon: Clock },
+  { label: "What deadlines are coming up?", Icon: CalendarClock },
+  { label: "Summarize the latest announcements", Icon: Megaphone },
+];
+
 type ChatThreadProps = {
-  /** ULIDs, all from one tenant: the API rejects a cross-tenant request with 422. */
-  communityIds: string[];
-  scope: string;
-  blockedReason?: string | null;
+  /** Continue this thread. Null starts a new one on the first question. */
+  conversationId: string | null;
+  /** Called with the id the API assigned, so the URL can catch up. */
+  onConversationCreated?: (id: string) => void;
 };
 
-export function ChatThread({ communityIds, scope, blockedReason }: ChatThreadProps) {
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const nextId = useRef(1);
+/**
+ * The full-height chat column: a scrollable message area with the composer pinned at the
+ * bottom. Messages come from the server record, never component state.
+ */
+export function ChatThread({ conversationId, onConversationCreated }: ChatThreadProps) {
+  const conversation = useConversation(conversationId);
+  const [pending, setPending] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ question: string; message: string } | null>(null);
   const ask = useAsk();
 
-  function handleAsk(query: string) {
-    const id = nextId.current++;
+  const messages = conversation.data?.messages;
 
-    setTurns((prev) => [...prev, { id, question: query, status: "pending" }]);
+  // The API stores a question and its answer as adjacent rows, so render them paired.
+  const pairs = useMemo(() => {
+    const out: { key: string; question: string; answer: GroundedAnswer | null }[] = [];
+    const rows = messages ?? [];
+
+    for (let i = 0; i < rows.length; i += 1) {
+      const message = rows[i];
+      if (message.role !== "user") continue;
+
+      const next = rows[i + 1];
+      out.push({
+        key: message.id,
+        question: message.content,
+        answer: next && next.role === "assistant" ? next.answer : null,
+      });
+    }
+
+    return out;
+  }, [messages]);
+
+  function handleAsk(query: string) {
+    setFailure(null);
+    setPending(query);
+
+    if (DEV) {
+      console.log("[zak:thread] submit", {
+        query,
+        chars: query.length,
+        conversationId: conversationId ?? "(new thread)",
+      });
+    }
 
     ask.mutate(
-      { query, community_ids: communityIds },
+      // No scope is sent: the server answers from everything the member can read.
+      { query, conversation_id: conversationId },
       {
         onSuccess: (response) => {
-          setTurns((prev) =>
-            prev.map((turn) =>
-              turn.id === id
-                ? { id, question: query, status: "answered", answer: response.data }
-                : turn,
-            ),
-          );
+          setPending(null);
+
+          const created = response.meta.conversation_id;
+
+          if (DEV) {
+            console.log("[zak:thread] settled", {
+              state: response.data.state,
+              citations: response.data.evidence_drawer.length,
+              conversationId: created,
+              startedNewThread: !conversationId,
+            });
+          }
+
+          if (!conversationId && created) onConversationCreated?.(created);
         },
         onError: (error) => {
-          setTurns((prev) =>
-            prev.map((turn) =>
-              turn.id === id
-                ? { id, question: query, status: "failed", message: describeFailure(error) }
-                : turn,
-            ),
-          );
+          setPending(null);
+          setFailure({ question: query, message: describeFailure(error) });
+
+          if (DEV) {
+            console.error("[zak:thread] failed", {
+              message: describeFailure(error),
+              error,
+            });
+          }
         },
       },
     );
   }
 
+  // A fresh thread has no id, so a disabled query still counts as resolved.
+  const isThreadResolved = conversationId === null || !conversation.isPending;
+  const isEmpty = isThreadResolved && pairs.length === 0 && pending === null && failure === null;
+
   return (
-    <div className="space-y-6">
-      <ChatComposer onAsk={handleAsk} isPending={ask.isPending} blockedReason={blockedReason} />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="zak-scroll min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+          {conversation.isPending && conversationId ? (
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
+          ) : null}
 
-      {turns.length === 0 ? (
-        <div className="rounded-sm border border-dashed border-rule-strong px-5 py-8">
-          <p className="text-[0.9375rem] leading-6 font-medium text-ink">No questions yet</p>
-          <p className="mt-2 max-w-[60ch] text-[0.9375rem] leading-6 text-ink-soft">
-            Ask about anything documented in {scope}. Every answer shows the sources it used, and
-            anything outside {scope} is refused rather than guessed.
-          </p>
-        </div>
-      ) : null}
+          {isEmpty ? <EmptyState onAsk={handleAsk} /> : null}
 
-      <ol className="space-y-6">
-        {turns.map((turn) => (
-          <li key={turn.id}>
-            {turn.status === "answered" ? (
-              <CitedAnswer
-                question={turn.question}
-                state={turn.answer.state}
-                answer={turn.answer.answer}
-                evidence={turn.answer.evidence_drawer}
-                conflicts={turn.answer.conflicts}
-                confidence={turn.answer.confidence}
-                detectedLanguage={turn.answer.detected_language}
-                needsEscalation={turn.answer.needs_escalation}
-                escalationReason={turn.answer.escalation_reason}
-                scope={scope}
-              />
-            ) : (
-              <div className="zak-card rounded-sm p-5 sm:p-6">
-                <div className="flex gap-3">
-                  <span aria-hidden="true" className="zak-label mt-1 shrink-0 text-ink-soft">
-                    Q
-                  </span>
-                  <p className="zak-question text-balance">{turn.question}</p>
-                </div>
-
-                {turn.status === "pending" ? (
-                  <div className="mt-5 border-t border-rule pt-5">
-                    <p className="zak-label text-ink-soft">Searching your communities</p>
-                    <div className="mt-3 space-y-2">
-                      <Skeleton className="h-4 w-3/4" />
-                      <Skeleton className="h-4 w-1/2" />
-                    </div>
-                  </div>
+          <ol className="space-y-6">
+            {pairs.map((pair) => (
+              <li key={pair.key}>
+                {pair.answer ? (
+                  <CitedAnswer
+                    question={pair.question}
+                    state={pair.answer.state}
+                    answer={pair.answer.answer}
+                    evidence={pair.answer.evidence_drawer}
+                    conflicts={pair.answer.conflicts}
+                    confidence={pair.answer.confidence}
+                    detectedLanguage={pair.answer.detected_language}
+                    needsEscalation={pair.answer.needs_escalation}
+                    escalationReason={pair.answer.escalation_reason}
+                  />
                 ) : (
-                  <p
-                    role="alert"
-                    className="mt-5 border-t border-rule pt-5 text-[0.9375rem] leading-6 text-clay"
-                  >
-                    {turn.message}
-                  </p>
+                  <UserTurn>{pair.question}</UserTurn>
                 )}
-              </div>
-            )}
-          </li>
+              </li>
+            ))}
+          </ol>
+
+          {pending !== null ? (
+            <div className="mt-6 flex flex-col gap-6">
+              <UserTurn>{pending}</UserTurn>
+              <AssistantTurn>
+                <div
+                  className="flex items-center gap-2.5"
+                  role="status"
+                  aria-label="Zak is searching your communities"
+                >
+                  <ThinkingOrb state="searching" size={20} />
+                  <span aria-hidden="true" className="text-[0.9375rem] leading-6 text-ink-soft">
+                    Searching your communities
+                  </span>
+                </div>
+              </AssistantTurn>
+            </div>
+          ) : null}
+
+          {failure !== null ? (
+            <div className="mt-6 flex flex-col gap-6">
+              <UserTurn>{failure.question}</UserTurn>
+              <AssistantTurn>
+                <p role="alert" className="text-[0.9375rem] leading-6 text-clay">
+                  {failure.message}
+                </p>
+              </AssistantTurn>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="shrink-0 bg-paper">
+        <div className="mx-auto w-full max-w-3xl px-4 py-3 sm:px-6 sm:py-4">
+          <ChatComposer onAsk={handleAsk} isPending={ask.isPending} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ onAsk }: { onAsk: (query: string) => void }) {
+  return (
+    <div className="flex flex-col items-center px-2 pt-10 pb-8 text-center sm:pt-14">
+      <Image
+        src="/zak-mascot.png"
+        alt=""
+        aria-hidden="true"
+        width={44}
+        height={44}
+        className="size-11 rounded-2xl object-cover"
+      />
+
+      <h1 className="mt-5 font-display text-[1.5rem] leading-tight font-bold tracking-[-0.02em] text-ink sm:text-[1.75rem]">
+        What do you need to know?
+      </h1>
+
+      <p className="mt-2 max-w-[46ch] text-[0.9375rem] leading-6 text-ink-soft">
+        Ask anything. Zak answers in plain language and shows the sources behind every reply.
+      </p>
+
+      <div className="mt-6 flex flex-wrap justify-center gap-2">
+        {SUGGESTIONS.map(({ label, Icon }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => onAsk(label)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-rule bg-paper-raised px-3 py-1.5 text-xs leading-5 text-ink-soft transition-colors duration-200 hover:border-accent hover:text-ink"
+          >
+            <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+            {label}
+          </button>
         ))}
-      </ol>
+      </div>
     </div>
   );
 }

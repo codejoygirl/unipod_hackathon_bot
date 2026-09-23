@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(npm:*)",
+      "Shell(node -e \"const fs=require('fs');for(const p of ['typescript','@tailwindcss/postcss','tailwindcss','eslint','@types/node','@types/react','eslint-config-next']){try{const j=require('./node_modules/'+p+'/package.json');console.log('OK ',p,j.version)}catch(e){console.log('MISS ',p)}}\")",
+      "Shell(node -e const l=require('./frontend/package-lock.json');console.log('lockfileVersion',l.lockfileVersion);console.log('packages entries',Object.keys(l.packages||{}).length))",
+      "Shell(node -e \"const l=require('./package-lock.json');console.log('lockfileVersion',l.lockfileVersion);console.log('package entries',Object.keys(l.packages||{}).length)\")",
+      "Shell(node -e \"const l=require('./package-lock.json');const p=l.packages;const miss=Object.keys(p).filter(k=>k&&!require('fs').existsSync('./node_modules/'+k));console.log('missing from node_modules:',miss.length);console.log(miss.slice(0,25).join('\\n'))\")",
+      "Shell(git:*)",
+      "Shell(del:*)",
+      "Shell(node -e const l=require('./frontend/package-lock.json');console.log('restored lock entries:',Object.keys(l.packages||{}).length))",
+      "Shell(node -e \"for(const p of ['typescript','@tailwindcss/postcss','tailwindcss','eslint','eslint-config-next','clsx','tailwind-merge']){try{console.log('OK ',p,require('./node_modules/'+p+'/package.json').version)}catch(e){console.log('MISS ',p)}}\")",
+      "Shell(node -e \"const fs=require('fs'),path=require('path');const base='./node_modules/next/dist/compiled/@next/font/dist/google';let p=null;for(const c of ['font-data.json','font-data.js']){const t=path.join(base,c);if(fs.existsSync(t))p=t}if(!p){console.log('no font data at',base);}else{let raw=fs.readFileSync(p,'utf8');if(p.endsWith('.js'))raw=raw.replace(/^[^{]*/,'').replace(/;\\s*$/,'');let d;try{d=JSON.parse(raw)}catch(e){const m=raw.match(/\\{[\\s\\S]*\\}/);d=JSON.parse(m[0])}const keys=Object.keys(d);console.log('total fonts:',keys.length);for(const n of ['Newsreader','Noto_Naskh_Arabic','IBM_Plex_Sans_Arabic','Spectral','Source_Serif_4']){console.log(keys.includes(n)?'OK ':'MISS ',n)}}\")",
+      "Shell(node -e \"const fs=require('fs'),path=require('path');const base='./node_modules/next/dist/compiled/@next/font/dist/google';const p=path.join(base,'font-data.json');let d=JSON.parse(fs.readFileSync(p,'utf8'));const keys=Object.keys(d);console.log(keys.filter(k=>/arab/i.test(k)).join('\\n'))\")",
+      "Shell(npx next typegen)",
+      "Shell(npx tsc --noEmit)",
+      "Shell(npx eslint .)",
+      "Shell(node -e \"fetch('http://localhost:3000').then(async r=>{const t=await r.text();console.log('status',r.status,'bytes',t.length);for(const s of ['Zak','Design pod','blocked','يجتمع','Platform status']){console.log(t.includes(s)?'found ':'MISSING',s)}}).catch(e=>console.log('dev server not reachable:',e.message))\")",
+      "powershell",
+      "Shell(node -e \"for(const p of ['@tanstack/react-query','react-hook-form','zod','@hookform/resolvers','class-variance-authority','openapi-typescript','vitest','@vitejs/plugin-react','jsdom','@testing-library/react','typescript','tailwindcss','eslint']){try{console.log('OK ',p,require('./node_modules/'+p+'/package.json').version)}catch(e){console.log('MISS ',p)}}\")",
+      "Shell(npm install --include=dev -D --no-audit --no-fund openapi-typescript vitest @vitejs/plugin-react jsdom @testing-library/react @testing-library/jest-dom > \"%COMMANDCODE_SCRATCHPAD%\\npm-dev.log\" 2>&1)",
+      "Shell(node -e \" const routes = ['/', '/login', '/register', '/conversations', '/communities', '/knowledge']; const expect = { '/': ['Answers that show their sources', 'Open Zak', 'insufficient evidence', 'Phases 1 and 2'], '/login': ['Sign in', 'Email', 'Password', 'Create one'], '/register': ['Create an account', 'Repeat password'], '/conversations': ['Checking your session'], '/communities': ['Checking your session'], '/knowledge': ['Checking your session'] }; const wait = ms => new Promise(r => setTimeout(r, ms)); (async () => { for (let i = 0; i < 40; i++) { try { const r = await fetch('http://localhost:3000/'); if (r.ok) break; } catch {} await wait(1500); } for (const route of routes) { try { const res = await fetch('http://localhost:3000' + route); const html = await res.text(); const missing = expect[route].filter(s => !html.includes(s)); console.log(res.status, route.padEnd(15), missing.length ? 'MISSING: ' + missing.join(' | ') : 'ok'); } catch (e) { console.log('ERR ', route, e.message); } } })(); \")"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

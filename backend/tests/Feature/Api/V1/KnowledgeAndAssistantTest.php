@@ -203,6 +203,13 @@ class KnowledgeAndAssistantTest extends TestCase
 
     public function test_assistant_ask_rejects_foreign_community_and_revalidates(): void
     {
+        // Pin the production posture. Local `.env` turns citation revalidation off for demos,
+        // and this test exists precisely to prove the access filter still blocks.
+        config([
+            'ai_service.revalidate_citations' => true,
+            'ai_service.conversational_fallback' => false,
+        ]);
+
         Http::fake([
             '*/retrieval/grounded-answer' => Http::response([
                 'query' => 'When is clinic open?',

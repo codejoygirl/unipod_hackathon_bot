@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(Test-Path:*)",
+      "powershell",
+      "Shell(git:*)",
+      "Shell(kill:*)",
+      "Shell(set:*)",
+      "Shell(findstr:*)",
+      "Shell(dir:*)",
+      "Shell(git push --progress -u origin feature/frontend-phase-3-member-experience > \"C:\\Users\\alumb\\AppData\\Local\\Temp\\commandcode\\C--Users-alumb-onedrive-Desktop-projects-unipod-hackathon-bot-frontend\\662312cb-ace8-4eb7-ab8d-a09238ab9cef\\scratchpad\\push-out.txt\" 2>&1)",
+      "Shell(git merge-tree --write-tree HEAD origin/develop > nul 2>&1 & echo merge_rc=%errorlevel%)",
+      "Shell(del:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}
