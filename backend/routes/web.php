@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\WebChatController;
 use App\Support\SpaStatic;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -11,6 +12,13 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 */
 
 Route::get('/', fn (): BinaryFileResponse => SpaStatic::file('index.html'));
+
+/*
+| Some clients POST to /communities/{id}/assistant/ask (PRD-shaped URL) instead of
+| /api/v1/web-chat/ask. Without this, POST hits the SPA fallback (GET-only) → 405.
+*/
+Route::post('communities/{community}/assistant/ask', [WebChatController::class, 'askForCommunity'])
+    ->whereUlid('community');
 
 Route::fallback(function (Request $request): BinaryFileResponse {
     if ($request->is(

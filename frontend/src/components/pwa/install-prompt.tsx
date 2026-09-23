@@ -8,6 +8,13 @@ import { Tooltip } from "@/components/ui/tooltip";
 
 const INSTALL_PROMO_SESSION_KEY = "unipod_pwa_promo_shown_session_v1";
 
+/** High-contrast install pill — same visual weight as the install promo primary button */
+export const INSTALL_APP_BUTTON_CLASS =
+  "inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-zinc-300 bg-zinc-900 px-2.5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-zinc-800 active:scale-[0.98] dark:border-zinc-500 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white sm:px-3 sm:text-xs";
+
+/** @deprecated Use INSTALL_APP_BUTTON_CLASS — kept for globals.css fallback on login */
+export const INSTALL_PWA_PILL_CLASS = "install-pwa-pill";
+
 export function IosInstallModal() {
   const { showIosModal, setShowIosModal } = usePwa();
   const [isClosing, setIsClosing] = useState(false);
@@ -129,7 +136,7 @@ export function InstallHeaderButton() {
       <button
         type="button"
         onClick={() => void promptInstall()}
-        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-zinc-200/90 bg-zinc-50/90 px-2.5 text-xs font-semibold text-zinc-700 shadow-2xs transition hover:bg-zinc-100 hover:text-zinc-900 active:scale-[0.98] dark:border-zinc-700/90 dark:bg-zinc-800/90 dark:text-zinc-200 dark:hover:bg-zinc-700 dark:hover:text-zinc-50 cursor-pointer sm:px-3"
+        className={INSTALL_APP_BUTTON_CLASS}
         aria-label="Install app"
       >
         <svg
@@ -141,7 +148,7 @@ export function InstallHeaderButton() {
           strokeWidth="2.2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="shrink-0 text-emerald-600 dark:text-emerald-400"
+          className="shrink-0 text-emerald-300 dark:text-emerald-600"
         >
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="7 10 12 15 17 10" />

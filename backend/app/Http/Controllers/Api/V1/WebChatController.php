@@ -193,6 +193,20 @@ final class WebChatController extends Controller
         ]);
     }
 
+    /**
+     * Legacy / PRD-style path: POST …/communities/{community}/assistant/ask
+     * (same handler as web-chat ask; community must match configured default).
+     */
+    public function askForCommunity(Request $request, string $community): JsonResponse
+    {
+        $defaultCommunityId = $this->access->resolveDefaultCommunityId();
+        if ($community !== $defaultCommunityId) {
+            abort(404);
+        }
+
+        return $this->ask($request);
+    }
+
     public function ask(Request $request): JsonResponse
     {
         $queryValidated = $request->validate([

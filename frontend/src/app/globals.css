@@ -139,6 +139,61 @@ body,
   animation: blink 0.9s infinite;
 }
 
+/* PWA install pill — plain CSS so styles always apply (not reliant on Tailwind scanning JS constants) */
+.install-pwa-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(212 212 216);
+  background-color: rgb(244 244 245);
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+  color: rgb(39 39 42);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.06),
+    inset 0 0 0 1px rgb(255 255 255 / 0.5);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.1s ease;
+}
+
+.install-pwa-pill:hover {
+  background-color: rgb(228 228 231);
+  border-color: rgb(161 161 170);
+  color: rgb(9 9 11);
+}
+
+.install-pwa-pill:active {
+  transform: scale(0.98);
+}
+
+.dark .install-pwa-pill {
+  border-color: rgb(113 113 122);
+  background-color: rgb(244 244 245);
+  color: rgb(24 24 27);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
+.dark .install-pwa-pill:hover {
+  background-color: rgb(255 255 255);
+  border-color: rgb(161 161 170);
+  color: rgb(9 9 11);
+}
+
+.install-pwa-pill-icon {
+  flex-shrink: 0;
+  color: rgb(5 150 105);
+}
+
+.dark .install-pwa-pill-icon {
+  color: rgb(52 211 153);
+}
+
 /* Micro-animations with silky cubic-bezier curve */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }

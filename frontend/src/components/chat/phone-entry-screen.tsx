@@ -4,6 +4,7 @@ import { PlatformReachRow } from "@/components/branding/platform-reach";
 import { CircularLoader } from "@/components/ui/circular-loader";
 import { APP_LOGO_SRC, KENYA_PHONE_PLACEHOLDER } from "@/lib/branding";
 import { usePwa } from "@/lib/pwa/pwa-context";
+import { INSTALL_APP_BUTTON_CLASS } from "@/components/pwa/install-prompt";
 import { normalizePhone } from "@/lib/web-chat/phone";
 import { useWebChat } from "@/lib/web-chat/web-chat-context";
 import Image from "next/image";
@@ -62,7 +63,7 @@ export function PhoneEntryScreen() {
           <button
             type="button"
             onClick={() => void promptInstall()}
-            className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200/90 bg-zinc-50/80 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 transition shadow-2xs cursor-pointer dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            className={INSTALL_APP_BUTTON_CLASS}
             title="Install UniPod on your device"
           >
             <svg
@@ -74,7 +75,7 @@ export function PhoneEntryScreen() {
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="text-emerald-600 dark:text-emerald-400"
+              className="shrink-0 text-emerald-300 dark:text-emerald-600"
             >
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />

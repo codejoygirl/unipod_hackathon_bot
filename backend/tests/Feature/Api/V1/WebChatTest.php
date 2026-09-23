@@ -65,6 +65,20 @@ final class WebChatTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.state', 'INSUFFICIENT_EVIDENCE');
+
+        $this->postJson('/api/v1/communities/'.$community->id.'/assistant/ask', [
+            'phone' => $phone,
+            'query' => 'What is the syllabus?',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'INSUFFICIENT_EVIDENCE');
+
+        $this->postJson('/communities/'.$community->id.'/assistant/ask', [
+            'phone' => $phone,
+            'query' => 'What is the syllabus?',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'INSUFFICIENT_EVIDENCE');
     }
 
     public function test_social_query_returns_warm_reply(): void
