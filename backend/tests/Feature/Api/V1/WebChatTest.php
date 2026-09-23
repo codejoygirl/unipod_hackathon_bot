@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Api\V1;
 
+use App\Enums\KnowledgeAuthorityTier;
+use App\Enums\KnowledgeLifecycleStatus;
 use App\Enums\MembershipRole;
 use App\Models\Community;
+use App\Models\KnowledgeSource;
 use App\Models\Membership;
 use App\Models\Tenant;
 use App\Models\User;
@@ -57,6 +60,20 @@ final class WebChatTest extends TestCase
             ->assertJsonPath('data.community.id', $community->id);
 
         $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $phone,
+            'query' => 'What is the syllabus?',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'INSUFFICIENT_EVIDENCE');
+
+        $this->postJson('/api/v1/communities/'.$community->id.'/assistant/ask', [
+            'phone' => $phone,
+            'query' => 'What is the syllabus?',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'INSUFFICIENT_EVIDENCE');
+
+        $this->postJson('/communities/'.$community->id.'/assistant/ask', [
             'phone' => $phone,
             'query' => 'What is the syllabus?',
         ])
@@ -194,6 +211,75 @@ final class WebChatTest extends TestCase
         $memberAnswer = (string) $memberAsk->json('data.answer');
         $this->assertStringContainsString('admin-only', $memberAnswer);
         $this->assertStringNotContainsString('Zak!Dia#8318', $memberAnswer);
+    }
+
+    public function test_resources_endpoint_returns_published_community_resources(): void
+    {
+        [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
+
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        KnowledgeSource::query()->create([
+            'tenant_id' => $community->tenant_id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'UNIPOD COMMUNITY RESOURCES',
+            'uri' => 'community://'.$community->id.'/asset/gfolder:123',
+            'source_type' => 'markdown',
+            'authority_tier' => KnowledgeAuthorityTier::VerifiedResource,
+            'lifecycle_status' => KnowledgeLifecycleStatus::Published,
+            'content' => "UNIPOD COMMUNITY RESOURCES\n\nhttps://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs\n\nOfficial folder.",
+            'content_sha256' => hash('sha256', 'test'),
+            'published_at' => now(),
+            'metadata' => [
+                'asset_kind' => 'folder',
+                'asset_identity' => 'gfolder:123',
+                'delivery_url' => 'https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs',
+            ],
+        ]);
+
+        $res = $this->getJson('/api/v1/web-chat/resources?phone='.$phone)
+            ->assertOk()
+            ->assertJsonPath('data.community.id', $community->id);
+
+        $resources = $res->json('data.resources');
+        $this->assertCount(1, $resources);
+        $this->assertSame('UNIPOD COMMUNITY RESOURCES', $resources[0]['name']);
+        $this->assertSame('folder', $resources[0]['kind']);
+        $this->assertSame('https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs', $resources[0]['url']);
+    }
+
+    public function test_feature_request_stores_in_database_and_returns_ref(): void
+    {
+        [, $community] = $this->seedMember();
+
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 123]], 200),
+            'http://wa-out.test/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $payload = [
+            'title' => 'Export calendar events',
+            'description' => 'Allow members to sync Zoom sessions directly to Google Calendar.',
+            'user_type' => 'member',
+            'phone' => '+254712345678',
+            'name' => 'Fellow Jane',
+            'community_id' => $community->id,
+        ];
+
+        $response = $this->postJson('/api/v1/web-chat/feature-request', $payload)
+            ->assertStatus(201)
+            ->assertJsonPath('data.status', 'submitted');
+
+        $this->assertNotNull($response->json('data.ref'));
+        $this->assertDatabaseHas('feature_requests', [
+            'community_id' => $community->id,
+            'user_type' => 'member',
+            'title' => 'Export calendar events',
+            'user_phone' => '+254712345678',
+        ]);
     }
 
     /**

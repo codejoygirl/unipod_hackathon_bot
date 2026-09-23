@@ -1,7 +1,10 @@
 "use client";
 
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { apiFetch, ApiError } from "@/lib/api/client";
 import type { AssistantAskResponse } from "@/lib/api/types";
+import { APP_LOGO_SRC, APP_DISPLAY_NAME } from "@/lib/branding";
 import {
   loadChatHistory,
   saveChatHistory,
@@ -9,14 +12,16 @@ import {
   type StoredChatEntry,
 } from "@/lib/web-chat/storage";
 import { useWebChat } from "@/lib/web-chat/web-chat-context";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useSidebar } from "@/lib/sidebar/sidebar-context";
+import { insertChatCommand } from "@/lib/chat/commands-data";
 import { AssistantMessage } from "./assistant-message";
 import { ChatComposer } from "./chat-composer";
 import { ChatHeader } from "./chat-header";
 import { GrokThinkingLoader } from "./grok-thinking-loader";
 import { UserMessage } from "./user-message";
+import { Tooltip } from "@/components/ui/tooltip";
+import { chatSendingLabel } from "@/lib/ui/outbound-status";
 
-// Formats timestamp in user's browser local timezone (e.g. 5:39 AM)
 function formatTime(date: Date = new Date()): string {
   try {
     const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -31,25 +36,45 @@ function formatTime(date: Date = new Date()): string {
   }
 }
 
-// Grounded in the UniPods METI AI Program & community knowledge base
+// Starter prompt cards grounded in UniPods METI AI Programme
 const STARTER_PROMPTS = [
-  "What is the schedule for the UniPods METI AI Programme?",
-  "How will the training in Ethiopia and online courses work?",
-  "Where can I find the Wadhwani resource pack and documents?",
-  "Who are the programme coordinators from METI and UNDP?",
+  {
+    title: "Hackathon deadline",
+    prompt: "When is the hackathon deadline and submission requirements?",
+    icon: "🏆",
+  },
+  {
+    title: "Programme schedule",
+    prompt: "What is the schedule for the UniPods METI AI Programme?",
+    icon: "📅",
+  },
+  {
+    title: "Training & sessions",
+    prompt: "How will the training in Ethiopia and online courses work?",
+    icon: "🎓",
+  },
+  {
+    title: "Resources & handbook",
+    prompt: "Where can I find the UniPods handbook and Wadhwani resource pack?",
+    icon: "📚",
+  },
 ];
 
 export function ChatView() {
-  const { sessionId, memberPhone, community, adminToken } = useWebChat();
+  const { sessionId, memberPhone, community, adminToken, isAdmin } = useWebChat();
+  const { toggleSidebar } = useSidebar();
   const [entries, setEntries] = useState<StoredChatEntry[]>([]);
   const [pending, setPending] = useState(false);
+  const [pendingStatusLabel, setPendingStatusLabel] = useState("Asking Zak…");
   const [replyingTo, setReplyingTo] = useState<QuotedMessage | null>(null);
+  const [showScrollBottomButton, setShowScrollBottomButton] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
   const hydratedFor = useRef<string | null>(null);
 
-  // Reliable scroll-to-bottom that handles layout shifts and loader appearance
+  // Multi-frame robust scroll-to-bottom
   const scrollToBottom = useCallback((smooth = true) => {
     const performScroll = () => {
       if (bottomRef.current) {
@@ -63,10 +88,64 @@ export function ChatView() {
     };
 
     requestAnimationFrame(performScroll);
-    setTimeout(performScroll, 50);
-    setTimeout(performScroll, 160);
+    setTimeout(performScroll, 40);
+    setTimeout(performScroll, 150);
+    setTimeout(performScroll, 300);
   }, []);
 
+  const handleNewChat = useCallback(() => {
+    setEntries([]);
+    if (community && sessionId) {
+      saveChatHistory(community.id, sessionId, []);
+    }
+    scrollToBottom(false);
+  }, [community, sessionId, scrollToBottom]);
+
+  // Listen for "new-chat" event dispatched from Sidebar, Header, or hotkeys
+  useEffect(() => {
+    const onNewChatEvent = () => {
+      handleNewChat();
+    };
+    window.addEventListener("new-chat", onNewChatEvent);
+    return () => window.removeEventListener("new-chat", onNewChatEvent);
+  }, [handleNewChat]);
+
+  // Keyboard shortcut Ctrl+K to start new chat
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        handleNewChat();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleNewChat]);
+
+  // Check URL query parameters for ?prompt= or ?q=
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const initialPrompt = params.get("prompt") || params.get("q");
+    if (initialPrompt) {
+      insertChatCommand(initialPrompt);
+      // Clean query string
+      const url = new URL(window.location.href);
+      url.searchParams.delete("prompt");
+      url.searchParams.delete("q");
+      window.history.replaceState({}, "", url.pathname + (url.search ? url.search : ""));
+    }
+  }, []);
+
+  // Detect scroll position to show/hide "Scroll to bottom" button
+  const handleScroll = () => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    setShowScrollBottomButton(distanceFromBottom > 160);
+  };
+
+  // Hydrate chat entries for community & session
   useEffect(() => {
     if (!community || !sessionId) {
       return;
@@ -79,87 +158,98 @@ export function ChatView() {
     setEntries(loadChatHistory(community.id, sessionId));
   }, [community, sessionId]);
 
+  // Save chat entries
   useEffect(() => {
     if (!community || !sessionId) {
+      return;
+    }
+    if (hydratedFor.current !== `${community.id}:${sessionId}`) {
       return;
     }
     saveChatHistory(community.id, sessionId, entries);
   }, [community, sessionId, entries]);
 
-  // Scroll to latest message or loading state whenever feed or pending changes
-  useEffect(() => {
-    scrollToBottom();
-  }, [entries, pending, scrollToBottom]);
+  const handlePopulateQuery = useCallback(
+    (promptText: string) => {
+      insertChatCommand(promptText);
+      scrollToBottom(true);
+    },
+    [scrollToBottom]
+  );
 
-  // When AI starts thinking, ensure the loading indicator is smoothly scrolled into view
-  useEffect(() => {
-    if (pending) {
-      const scrollDown = () => {
-        if (loadingRef.current) {
-          loadingRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
-        } else {
-          scrollToBottom(true);
-        }
-      };
-      requestAnimationFrame(scrollDown);
-      setTimeout(scrollDown, 50);
-      setTimeout(scrollDown, 160);
-    }
-  }, [pending, scrollToBottom]);
+  const handleReaction = useCallback(
+    (entryId: string, reaction: "up" | "down") => {
+      setEntries((prev) =>
+        prev.map((e) => {
+          if (e.id !== entryId || e.role !== "assistant") return e;
+          return {
+            ...e,
+            reaction: e.reaction === reaction ? null : reaction,
+          };
+        })
+      );
+    },
+    []
+  );
 
   const sendMessage = useCallback(
     async (text: string, quote?: QuotedMessage) => {
-      if (!community || !sessionId) {
-        return;
-      }
+      if (!community) return;
 
-      const now = new Date();
-      const userId = crypto.randomUUID();
-      setEntries((prev) => [
-        ...prev,
-        { id: userId, role: "user", text, sentAt: formatTime(now), quote },
-      ]);
+      const userEntry: StoredChatEntry = {
+        id: crypto.randomUUID(),
+        role: "user",
+        text,
+        sentAt: formatTime(new Date()),
+        quote,
+      };
+
+      setEntries((prev) => [...prev, userEntry]);
+      setPendingStatusLabel(chatSendingLabel(isAdmin, text));
       setPending(true);
-      setReplyingTo(null);
 
-      // Instantly scroll down so the loading indicator is immediately in view
-      scrollToBottom();
+      // Auto-scroll immediately when user sends message
+      scrollToBottom(true);
 
       try {
-        const userTimezone =
-          typeof Intl !== "undefined"
-            ? Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Lagos"
-            : "Africa/Lagos";
+        const queryText = quote?.text
+          ? `[Replying to: "${quote.text}"]\n${text}`
+          : text;
 
-        const body: Record<string, string> = {
-          query: text,
-          phone: memberPhone ?? "",
-          timezone: userTimezone,
+        const payload = {
+          query: queryText,
+          phone: memberPhone ?? undefined,
+          session_id: sessionId ?? undefined,
         };
+
         const headers: Record<string, string> = {};
         if (adminToken) {
-          headers["X-Admin-Token"] = adminToken;
+          headers.Authorization = `Bearer ${adminToken}`;
         }
 
-        const response = await apiFetch<AssistantAskResponse>("/api/v1/web-chat/ask", {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-        });
-        setEntries((prev) => [
-          ...prev,
+        const res = await apiFetch<AssistantAskResponse>(
+          "/api/v1/web-chat/ask",
           {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            response,
-            sentAt: formatTime(new Date()),
-          },
-        ]);
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload),
+          }
+        );
+
+        const assistantEntry: StoredChatEntry = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          response: res,
+          sentAt: formatTime(new Date()),
+          quote,
+        };
+
+        setEntries((prev) => [...prev, assistantEntry]);
       } catch (err) {
         const message =
           err instanceof ApiError
             ? err.message
-            : "We're having trouble connecting right now. Please try again in a moment.";
+            : "Could not reach the assistant. Check your connection or try again in a moment.";
         setEntries((prev) => [
           ...prev,
           {
@@ -171,45 +261,72 @@ export function ChatView() {
         ]);
       } finally {
         setPending(false);
+        // Scroll once response arrives
+        scrollToBottom(true);
       }
     },
-    [community, memberPhone, sessionId, scrollToBottom],
+    [community, memberPhone, sessionId, adminToken, scrollToBottom, isAdmin]
   );
 
   return (
-    <div className="flex min-h-dvh flex-col bg-zinc-50/50">
-      <ChatHeader />
+    <div className="flex flex-1 flex-col h-full min-w-0 overflow-hidden relative bg-white dark:bg-[#0d0d0d] text-zinc-900 dark:text-zinc-100">
+      {/* Top Header */}
+      <ChatHeader
+        onToggleSidebar={toggleSidebar}
+        onInsertQuery={handlePopulateQuery}
+      />
 
+      {/* Scrollable Message Feed */}
       <div
         ref={scrollRef}
-        className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3.5 overflow-y-auto px-4 pb-28 pt-4"
+        onScroll={handleScroll}
+        className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto no-scrollbar px-4 pt-4 pb-36"
       >
-        {/* Welcome Empty State */}
+        {/* Welcome Screen / Empty State (ChatGPT Style) */}
         {entries.length === 0 ? (
-          <div className="my-auto flex flex-col items-center justify-center py-8 text-center">
-            <div className="rounded-3xl border border-zinc-200/80 bg-white p-6 sm:p-8 shadow-xs max-w-md w-full">
-              <h2 className="text-base font-semibold text-zinc-900 tracking-tight">
-                UniPod Community Assistant
-              </h2>
-              <p className="mt-1.5 text-xs leading-relaxed text-zinc-500">
-                Ask anything about the programme, sessions, resources, or community updates.
-              </p>
+          <div className="my-auto flex flex-col items-center justify-center py-10 text-center animate-fade-in select-none">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl overflow-hidden shadow-sm mb-4">
+              <Image
+                src={APP_LOGO_SRC}
+                alt="UniPod Logo"
+                width={56}
+                height={56}
+                className="h-full w-full object-contain rounded-2xl"
+              />
+            </div>
 
-              <div className="mt-6 space-y-2 text-left">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-                  Suggested topics:
-                </p>
-                {STARTER_PROMPTS.map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => void sendMessage(prompt)}
-                    className="w-full text-left rounded-xl border border-zinc-100 bg-zinc-50/70 px-3.5 py-2.5 text-xs text-zinc-700 hover:border-zinc-300 hover:bg-zinc-100/80 transition-all cursor-pointer"
-                  >
-                    &ldquo;{prompt}&rdquo;
-                  </button>
-                ))}
-              </div>
+            <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+              What would you like to know?
+            </h2>
+            <p className="mt-1.5 text-xs text-zinc-500 max-w-md dark:text-zinc-400 leading-relaxed">
+              Ask anything about the {community?.name ?? APP_DISPLAY_NAME}, schedules, hackathons, sessions, or resources.
+            </p>
+
+            {/* Starter Prompt Cards */}
+            <div className="mt-8 grid w-full max-w-lg grid-cols-1 gap-2.5 sm:grid-cols-2 text-left">
+              {STARTER_PROMPTS.map((item) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  onClick={() => handlePopulateQuery(item.prompt)}
+                  className="group flex flex-col justify-between rounded-2xl border border-zinc-200/80 bg-white p-3.5 text-xs text-zinc-700 shadow-2xs hover:border-zinc-300 hover:bg-zinc-50 hover:shadow-xs transition-all cursor-pointer dark:border-zinc-800 dark:bg-[#171717] dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-zinc-900 group-hover:text-zinc-950 dark:text-zinc-100 dark:group-hover:text-white">
+                      {item.title}
+                    </span>
+                    <span className="text-sm">{item.icon}</span>
+                  </div>
+                  <span className="mt-1.5 text-zinc-500 line-clamp-2 dark:text-zinc-400 text-[11px] leading-relaxed">
+                    {item.prompt}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Quick Command Hint Chip */}
+            <div className="mt-6 flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
+              <span>💡 Click on any card or command to populate it into your composer.</span>
             </div>
           </div>
         ) : null}
@@ -235,39 +352,66 @@ export function ChatView() {
                 id={entry.id}
                 response={entry.response}
                 sentAt={entry.sentAt}
+                reaction={entry.reaction}
+                quote={entry.quote}
                 onQuote={(q) => setReplyingTo(q)}
+                onReact={handleReaction}
+                onSuggestionClick={handlePopulateQuery}
               />
             );
           }
           return (
             <div
               key={entry.id}
-              className="self-center my-1 rounded-xl border border-rose-200 bg-rose-50/90 px-4 py-2.5 text-xs text-rose-800 shadow-xs max-w-md text-center"
+              className="self-center my-2 rounded-xl border border-rose-200 bg-rose-50/90 px-4 py-2.5 text-xs text-rose-800 shadow-xs max-w-md text-center dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
             >
               {entry.text}
             </div>
           );
         })}
 
-        {/* Grok Thinking / Retrieving Loader */}
-        {pending ? (
-          <div ref={loadingRef}>
-            <GrokThinkingLoader />
+        {/* Thinking / Retrieving Loader */}
+        {pending && (
+          <div ref={loadingRef} className="my-2">
+            <GrokThinkingLoader statusText={pendingStatusLabel} />
           </div>
-        ) : null}
+        )}
 
-        {/* Invisible Scroll Sentinel to guarantee auto-scrolling to the latest item */}
-        <div ref={bottomRef} className="h-2 w-full shrink-0" aria-hidden="true" />
+        {/* Bottom Sentinel */}
+        <div ref={bottomRef} className="h-6 w-full shrink-0" aria-hidden="true" />
       </div>
 
-      {/* Docked Composer with Voice & Reply Support (native WhatsApp/Telegram mobile dock) */}
-      <div className="fixed inset-x-0 bottom-0 z-30 pb-[env(safe-area-inset-bottom)] bg-white/95 backdrop-blur-md">
+      {/* Floating "Scroll to Bottom" Button (ChatGPT Style) */}
+      {showScrollBottomButton && (
+        <div className="absolute bottom-24 right-6 z-20 animate-fade-in">
+          <Tooltip content="Scroll to bottom" position="left">
+            <button
+              type="button"
+              onClick={() => scrollToBottom(true)}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-300 bg-white text-zinc-700 shadow-md transition hover:bg-zinc-50 hover:text-zinc-950 active:scale-95 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer"
+              aria-label="Scroll to latest message"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <polyline points="19 12 12 19 5 12" />
+              </svg>
+            </button>
+          </Tooltip>
+        </div>
+      )}
+
+      {/* Docked Composer - ChatGPT Style Floating Container */}
+      <div className="absolute inset-x-0 bottom-0 z-30 pb-[env(safe-area-inset-bottom)]">
         <ChatComposer
           disabled={pending || !community}
+          sending={pending}
+          sendingLabel={pendingStatusLabel}
+          isAdmin={isAdmin}
           onSend={(text, quote) => void sendMessage(text, quote)}
           quotedMessage={replyingTo}
           onClearQuote={() => setReplyingTo(null)}
           onFocus={() => scrollToBottom(true)}
+          onTyping={() => scrollToBottom(true)}
         />
       </div>
     </div>

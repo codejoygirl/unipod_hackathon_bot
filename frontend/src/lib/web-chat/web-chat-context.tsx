@@ -49,6 +49,7 @@ type WebChatContextValue = {
   submitMemberPhone: (phoneDigits: string) => void;
   submitAdminPassword: (password: string) => Promise<void>;
   backToPhoneEntry: () => void;
+  logOut: () => void;
   retry: () => void;
 };
 
@@ -143,12 +144,20 @@ export function WebChatProvider({ children }: { children: ReactNode }) {
 
     const phone = readPhoneFromUrl();
     if (!phone) {
-      setPhase("needs-phone");
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setPhase("needs-phone");
+        }
+      });
       return;
     }
 
-    setMemberPhone(phone);
-    setSessionId(sessionIdFromPhone(phone));
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setMemberPhone(phone);
+        setSessionId(sessionIdFromPhone(phone));
+      }
+    });
 
     void (async () => {
       if (cancelled) {
@@ -252,6 +261,7 @@ export function WebChatProvider({ children }: { children: ReactNode }) {
       submitMemberPhone,
       submitAdminPassword,
       backToPhoneEntry,
+      logOut: backToPhoneEntry,
       retry,
     }),
     [

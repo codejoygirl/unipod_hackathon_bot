@@ -4,9 +4,10 @@
   "private": true,
   "description": "Community Assistant Next.js PWA",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "build:laravel": "next build && node scripts/sync-to-laravel-public.mjs",
+    "dev": "python scripts/generate-brand-icons.py && next dev",
+    "icons": "python scripts/generate-brand-icons.py",
+    "build": "python scripts/generate-brand-icons.py && next build",
+    "build:laravel": "python scripts/generate-brand-icons.py && next build && node scripts/sync-to-laravel-public.mjs",
     "start": "next start",
     "lint": "eslint"
   },

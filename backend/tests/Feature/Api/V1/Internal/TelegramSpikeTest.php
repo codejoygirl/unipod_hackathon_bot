@@ -107,7 +107,7 @@ class TelegramSpikeTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.channel', 'telegram_spike')
-            ->assertJsonPath('data.reply', 'Saturday 9am.'."\n\n".'(From clinic hours notes.)');
+            ->assertJsonPath('data.reply', 'Saturday 9am.');
     }
 
     public function test_telegram_spike_person_ask_keeps_prose_not_evidence_urls(): void

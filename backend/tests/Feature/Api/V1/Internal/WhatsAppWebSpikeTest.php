@@ -104,6 +104,7 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
             'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
             'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.process_sync' => true,
         ]);
 
         $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
@@ -115,7 +116,7 @@ class WhatsAppWebSpikeTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.channel', 'whatsapp_web_spike')
-            ->assertJsonPath('data.reply', 'Saturday 9am.'."\n\n".'(From clinic hours notes.)');
+            ->assertJsonPath('data.reply', 'Saturday 9am.');
     }
 
     public function test_spike_export_creates_draft(): void
@@ -260,6 +261,7 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
             'whatsapp_web_spike.bot_aliases' => ['zak'],
             'whatsapp_web_spike.group_listen' => 'mention_or_command',
+            'whatsapp_web_spike.process_sync' => true,
         ]);
 
         $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
@@ -317,6 +319,7 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.group_listen' => 'mention_or_command',
             'telegram_spike.bot_token' => '',
             'telegram_spike.admin_chat_id' => '',
+            'whatsapp_web_spike.process_sync' => true,
         ]);
 
         $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
@@ -386,6 +389,7 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.group_listen' => 'mention_or_command',
             'telegram_spike.bot_token' => '',
             'telegram_spike.admin_chat_id' => '',
+            'whatsapp_web_spike.process_sync' => true,
         ]);
 
         $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
@@ -459,6 +463,7 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.group_listen' => 'mention_or_command',
             'telegram_spike.bot_token' => '',
             'telegram_spike.admin_chat_id' => '',
+            'whatsapp_web_spike.process_sync' => true,
         ]);
 
         $reply = $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [

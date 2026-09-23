@@ -1,70 +1,150 @@
 "use client";
 
+import React, { FormEvent, useEffect, useRef, useState } from "react";
 import type { QuotedMessage } from "@/lib/web-chat/storage";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { CircularLoader } from "@/components/ui/circular-loader";
+import { Tooltip } from "@/components/ui/tooltip";
+import { useTypewriterPlaceholder } from "./typewriter-placeholder";
+import { SlashCommandMenu } from "./slash-command-menu";
 
-type ChatComposerProps = {
+interface ChatComposerProps {
   disabled?: boolean;
+  /** True while the assistant request is in flight */
+  sending?: boolean;
+  /** Shown on the send control while `sending` (e.g. "Asking Zak…") */
+  sendingLabel?: string;
+  isAdmin?: boolean;
   onSend: (text: string, quote?: QuotedMessage) => void;
   quotedMessage?: QuotedMessage | null;
   onClearQuote?: () => void;
   onFocus?: () => void;
-};
+  onTyping?: () => void;
+}
 
 // Global type augmentation for Web Speech API
+interface SpeechRecognitionResultItem {
+  transcript: string;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  [index: number]: {
+    [index: number]: SpeechRecognitionResultItem;
+  };
+}
+
+interface SpeechRecognitionEventLike {
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+interface SpeechRecognitionConstructor {
+  new (): SpeechRecognitionInstance;
+}
+
 declare global {
   interface Window {
-    SpeechRecognition?: any;
-    webkitSpeechRecognition?: any;
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
   }
 }
 
 export function ChatComposer({
   disabled,
+  sending = false,
+  sendingLabel = "One moment…",
+  isAdmin = false,
   onSend,
   quotedMessage,
   onClearQuote,
   onFocus,
+  onTyping,
 }: ChatComposerProps) {
   const [value, setValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const recognitionRef = useRef<any>(null);
+  const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
+  const [slashFilter, setSlashFilter] = useState("");
+
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Allow clicking on inline command badges (like /help, /catchup, /summary) to fill input
+  // Typewriter animated placeholder with programme question examples
+  const isInputEmpty = value.length === 0;
+  const isMultiline = value.includes("\n") || value.length > 55;
+  const animatedPlaceholder = useTypewriterPlaceholder(undefined, {
+    paused: !isInputEmpty || isRecording,
+  });
+
+  // Adjust textarea height dynamically to content (ChatGPT style auto-resize)
+  const adjustHeight = () => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = "auto";
+      const newHeight = Math.min(el.scrollHeight, 180);
+      el.style.height = `${Math.max(24, newHeight)}px`;
+    }
+  };
+
   useEffect(() => {
-    const handleCommand = (e: CustomEvent<{ command: string }>) => {
-      if (e.detail?.command) {
-        setValue(e.detail.command + " ");
+    adjustHeight();
+  }, [value]);
+
+  // Listen for insert-chat-command custom event from anywhere (Modals, Help cards, Recents)
+  useEffect(() => {
+    const handleCommand = (e: Event) => {
+      const custom = e as CustomEvent<{ command?: string }>;
+      if (custom.detail?.command) {
+        setValue(custom.detail.command);
+        setIsSlashMenuOpen(false);
         setTimeout(() => {
-          textareaRef.current?.focus();
-        }, 10);
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            textareaRef.current.setSelectionRange(
+              custom.detail?.command?.length ?? 0,
+              custom.detail?.command?.length ?? 0
+            );
+          }
+          onTyping?.();
+        }, 15);
       }
     };
-    window.addEventListener("insert-chat-command" as any, handleCommand);
+    window.addEventListener("insert-chat-command", handleCommand);
     return () => {
-      window.removeEventListener("insert-chat-command" as any, handleCommand);
+      window.removeEventListener("insert-chat-command", handleCommand);
     };
-  }, []);
+  }, [onTyping]);
 
-  // Stop recording timer when recording stops
+  // Voice recording timer
   useEffect(() => {
-    if (isRecording) {
-      setRecordingSeconds(0);
-      timerRef.current = setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1);
-      }, 1000);
-    } else {
+    if (!isRecording) {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
+      return;
     }
+
+    timerRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1);
+    }, 1000);
+
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
   }, [isRecording]);
@@ -85,16 +165,18 @@ export function ChatComposer({
       recognition.lang = "en-US";
 
       recognition.onstart = () => {
+        setRecordingSeconds(0);
         setIsRecording(true);
       };
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionEventLike) => {
         let transcript = "";
         for (let i = 0; i < event.results.length; i++) {
           transcript += event.results[i][0].transcript;
         }
         if (transcript.trim()) {
           setValue(transcript);
+          onTyping?.();
         }
       };
 
@@ -152,8 +234,32 @@ export function ChatComposer({
     }
     onSend(trimmed, quotedMessage ?? undefined);
     setValue("");
+    setIsSlashMenuOpen(false);
     onClearQuote?.();
   }
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const text = e.target.value;
+    setValue(text);
+    onTyping?.();
+
+    // If starts with / or currently typing slash command, show menu
+    if (text.startsWith("/")) {
+      setIsSlashMenuOpen(true);
+      setSlashFilter(text);
+    } else {
+      setIsSlashMenuOpen(false);
+    }
+  };
+
+  const handleSlashSelect = (commandText: string) => {
+    setValue(commandText);
+    setIsSlashMenuOpen(false);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      onTyping?.();
+    }, 10);
+  };
 
   const formatRecordTime = (secs: number) => {
     const mins = Math.floor(secs / 60);
@@ -162,138 +268,238 @@ export function ChatComposer({
   };
 
   return (
-    <div className="border-t border-zinc-200/80 bg-white/95 backdrop-blur-md">
-      {/* WhatsApp-style quote reply preview banner */}
-      {quotedMessage ? (
-        <div className="mx-auto flex max-w-2xl items-center justify-between border-b border-zinc-100 bg-zinc-50/90 px-4 py-2">
-          <div className="flex items-center gap-2.5 min-w-0 border-l-3 border-emerald-500 pl-2.5">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-emerald-600 truncate">
-                {quotedMessage.sender}
-              </p>
-              <p className="text-xs text-zinc-500 truncate max-w-md">
-                {quotedMessage.text}
-              </p>
+    <div className="relative bg-gradient-to-t from-white via-white/95 to-transparent pt-2 pb-3 backdrop-blur-md dark:from-[#212121] dark:via-[#212121]/95">
+      <form onSubmit={handleSubmit} className="mx-auto max-w-3xl px-3 sm:px-4">
+        {/* Reply preview banner */}
+        {quotedMessage && (
+          <div className="mb-2 flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-zinc-50/95 px-3.5 py-2 shadow-2xs dark:border-zinc-700/80 dark:bg-zinc-800/90">
+            <div className="flex items-center gap-2.5 min-w-0 border-l-[3px] border-emerald-500 pl-2.5">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M9 14L4 9l5-5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v2" strokeLinecap="round" />
+                  </svg>
+                  <span>Replying to {quotedMessage.sender}</span>
+                </div>
+                <p className="text-xs text-zinc-600 dark:text-zinc-300 truncate max-w-lg mt-0.5">
+                  {quotedMessage.text}
+                </p>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={onClearQuote}
+              className="text-zinc-400 hover:text-zinc-700 p-1 rounded-full hover:bg-zinc-200/70 transition cursor-pointer dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+              title="Cancel reply"
+              aria-label="Cancel reply"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClearQuote}
-            className="text-zinc-400 hover:text-zinc-700 p-1 rounded-full cursor-pointer transition"
-            title="Cancel reply"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
-      ) : null}
+        )}
 
-      <form onSubmit={handleSubmit} className="px-3 pt-2.5 pb-4 sm:px-4 sm:pb-5">
-        <div className="mx-auto flex max-w-2xl items-center gap-2">
-          {isRecording ? (
-            /* Live Voice Recording UI (WhatsApp / Telegram style) */
-            <div className="flex flex-1 items-center justify-between rounded-full border border-rose-200 bg-rose-50/70 px-3.5 py-1.5 transition-all">
-              <div className="flex items-center gap-2.5">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600" />
-                </span>
-                <span className="text-xs font-medium text-rose-700">
-                  {formatRecordTime(recordingSeconds)}
-                </span>
-                <span className="text-xs text-zinc-500 italic truncate max-w-xs">
-                  {value || "Listening..."}
-                </span>
+        {/* Slash Command Autocomplete Menu */}
+        <div className="relative">
+          <SlashCommandMenu
+            isOpen={isSlashMenuOpen}
+            filterText={slashFilter}
+            isAdmin={isAdmin}
+            onSelect={handleSlashSelect}
+            onClose={() => setIsSlashMenuOpen(false)}
+          />
+        </div>
+
+        {isRecording ? (
+          /* Live Voice Recording UI - Sleek Capsule matching ChatGPT / modern voice aesthetic (no harsh red) */
+          <div className="flex items-center justify-between rounded-3xl border border-zinc-300/80 bg-white px-3.5 py-2 shadow-sm transition-all dark:border-zinc-700 dark:bg-[#2f2f2f]">
+            <div className="flex items-center gap-3 min-w-0">
+              {/* Animated audio wave indicator */}
+              <div className="flex items-center gap-0.5 h-6 px-1" aria-hidden="true">
+                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-1" />
+                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-2" />
+                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-3" />
+                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-4" />
+                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-5" />
               </div>
 
-              <div className="flex items-center gap-1.5">
+              {/* Timer */}
+              <span className="font-mono text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                {formatRecordTime(recordingSeconds)}
+              </span>
+
+              {/* Live transcript or status */}
+              <span className="text-xs text-zinc-500 dark:text-zinc-400 italic truncate max-w-[180px] sm:max-w-xs md:max-w-md">
+                {value ? `"${value}"` : "Listening to your question..."}
+              </span>
+            </div>
+
+            {/* Cancel & Send voice buttons */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Tooltip content="Cancel recording" position="top">
                 <button
                   type="button"
                   onClick={cancelVoiceRecording}
-                  className="rounded-full p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-100 transition cursor-pointer"
-                  title="Cancel recording"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition cursor-pointer"
+                  aria-label="Cancel recording"
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M19 6L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M4 6h16l-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6z" strokeLinecap="round" strokeLinejoin="round" />
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                 </button>
+              </Tooltip>
+
+              <Tooltip content="Send voice query" position="top">
                 <button
                   type="button"
                   onClick={handleSendVoice}
-                  className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 transition cursor-pointer"
-                  title="Send voice query"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200 shadow-xs transition active:scale-95 cursor-pointer"
+                  aria-label="Send voice"
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M5 12h14M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="12" y1="19" x2="12" y2="5" />
+                    <polyline points="5 12 12 5 19 12" />
                   </svg>
                 </button>
-              </div>
+              </Tooltip>
             </div>
-          ) : (
-            /* Unified chatbox pill: Speaker/Mic on LEFT, Input in MIDDLE, Send on RIGHT inside pill */
-            <div className="relative min-w-0 flex-1 flex items-center rounded-full border border-zinc-200/90 bg-zinc-50/80 px-2 py-1 focus-within:border-zinc-400 focus-within:bg-white transition-all shadow-xs">
-              {/* Left: Speaker / Microphone Button */}
-              <button
-                type="button"
-                onClick={startVoiceRecording}
-                disabled={disabled}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 transition cursor-pointer disabled:opacity-40"
-                title="Voice note / speak"
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" strokeLinecap="round" />
-                  <line x1="12" y1="19" x2="12" y2="22" strokeLinecap="round" />
-                </svg>
-              </button>
+          </div>
+        ) : (
+          /* ChatGPT Style Floating Pill Capsule Chatbox */
+          <div
+            className={`relative flex ${
+              isMultiline ? "items-end pb-1.5" : "items-center"
+            } rounded-3xl border border-zinc-300/80 bg-white px-2.5 py-1.5 shadow-sm transition-all focus-within:border-zinc-400 focus-within:shadow-md dark:border-zinc-700 dark:bg-[#2f2f2f] dark:focus-within:border-zinc-500`}
+          >
+            {/* Left: Plus (+) Button for Tools & Slash Commands (ChatGPT Style) */}
+            <div className={`shrink-0 ${isMultiline ? "self-end pb-0.5" : ""}`}>
+              <Tooltip content="Quick commands & tools" position="top" shortcut="/">
+                <button
+                  type="button"
+                  onClick={() => setIsSlashMenuOpen((prev) => !prev)}
+                  disabled={disabled}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 active:scale-95 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 cursor-pointer"
+                  aria-label="Toggle quick commands menu"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+              </Tooltip>
+            </div>
 
-              {/* Middle: Text input with concise placeholder */}
+            {/* Middle: Textarea with Animated Typewriter Placeholder - Vertically Centralized */}
+            <div className="relative min-w-0 flex-1 px-2.5">
               <label className="sr-only" htmlFor="chat-input">
-                Type a message
+                Ask UniPod Assistant anything
               </label>
+
               <textarea
                 ref={textareaRef}
                 id="chat-input"
                 rows={1}
                 value={value}
-                onChange={(e) => setValue(e.target.value)}
-                onFocus={onFocus}
+                onChange={handleTextChange}
+                onFocus={() => {
+                  onFocus?.();
+                  onTyping?.();
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
+                    // If slash menu is open, let menu handle Enter
+                    if (isSlashMenuOpen) {
+                      return;
+                    }
                     e.preventDefault();
                     handleSubmit(e);
                   }
                 }}
-                placeholder="Type a message..."
+                placeholder={animatedPlaceholder}
                 disabled={disabled}
-                className="max-h-32 min-h-[36px] flex-1 resize-none bg-transparent px-2.5 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-60"
+                className="w-full resize-none bg-transparent py-1 text-[14.5px] leading-5 text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-60 dark:text-zinc-100 dark:placeholder:text-zinc-500 max-h-44 block"
               />
-
-              {/* Right: Send Button INSIDE the chatbox */}
-              <button
-                type="submit"
-                disabled={disabled || !value.trim()}
-                className={`flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition shadow-xs active:scale-95 ${
-                  value.trim()
-                    ? "bg-zinc-900 text-white hover:bg-zinc-800"
-                    : "bg-zinc-200/70 text-zinc-400 cursor-not-allowed"
-                }`}
-                aria-label="Send message"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M5 12h14M13 6l6 6-6 6"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
             </div>
-          )}
-        </div>
+
+            {/* Right: ONLY Microphone Button and Send Button */}
+            <div className={`flex items-center gap-1 shrink-0 ${isMultiline ? "self-end pb-0.5" : ""}`}>
+              {/* Voice / Mic Button */}
+              <Tooltip content="Voice dictation" position="top">
+                <button
+                  type="button"
+                  onClick={startVoiceRecording}
+                  disabled={disabled}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 active:scale-95 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 cursor-pointer"
+                  aria-label="Voice input"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" strokeLinecap="round" />
+                    <line x1="12" y1="19" x2="12" y2="22" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </Tooltip>
+
+              {/* Send / in-flight status */}
+              {sending ? (
+                <span
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-zinc-200/95 px-3 text-xs font-medium text-zinc-800 dark:bg-zinc-600 dark:text-zinc-100"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <CircularLoader
+                    size="xs"
+                    className="border-zinc-400/40 border-t-zinc-800 dark:border-zinc-300/30 dark:border-t-zinc-100"
+                  />
+                  <span>{sendingLabel}</span>
+                </span>
+              ) : (
+                <Tooltip
+                  content={value.trim() ? "Send message" : "Send message"}
+                  position="top"
+                  shortcut={value.trim() ? "Enter" : undefined}
+                >
+                  <button
+                    type="submit"
+                    disabled={disabled || !value.trim()}
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all shadow-xs ${
+                      value.trim()
+                        ? "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200 active:scale-95 cursor-pointer"
+                        : "bg-zinc-100 text-zinc-300 dark:bg-zinc-800 dark:text-zinc-600 cursor-not-allowed"
+                    }`}
+                    aria-label="Send message"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="12" y1="19" x2="12" y2="5" />
+                      <polyline points="5 12 12 5 19 12" />
+                    </svg>
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ChatGPT Style Disclaimer */}
+        <p className="mt-2 text-center text-[11px] text-zinc-400 dark:text-zinc-500 select-none">
+          UniPod Assistant can make mistakes. Check important programme info &middot;{" "}
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent("open-notifications", { detail: { tab: "changelog" } })
+                );
+              }
+            }}
+            className="underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer transition-colors"
+          >
+            Changelog
+          </button>
+        </p>
       </form>
     </div>
   );

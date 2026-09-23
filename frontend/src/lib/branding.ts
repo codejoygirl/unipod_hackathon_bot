@@ -3,6 +3,14 @@ export const APP_DISPLAY_NAME = "UniPod Community Assistant";
 
 export const APP_LOGO_SRC = "/unipod-assistant-logo.png";
 
+/** Bust browser/PWA icon cache after favicon or logo changes. */
+export const APP_ICON_CACHE_VERSION = "5";
+
+export function appIconUrl(path: string): string {
+  const base = path.split("?")[0] ?? path;
+  return `${base}?v=${APP_ICON_CACHE_VERSION}`;
+}
+
 /** International format without + — Kenya country code 254. */
 export const KENYA_PHONE_PLACEHOLDER = "254712345678";
 
@@ -36,4 +44,4 @@ export function reachChannelsForSignIn(): ReachChannel[] {
     { id: "telegram", label: telegramLabel, url: telegramUrl || null },
   ];
 }
-
+

@@ -2865,7 +2865,7 @@ final class ChannelConversationService
         $channels = $this->channelsAccessBlock($style, $currentChannel, $chatType, $memberPhoneForWeb);
         $line = "I help with community schedules, updates, and what's been shared. "
             .$this->anyLanguageHint()
-            ."\nYou can send voice notes on Telegram or WhatsApp — I listen and reply in your language.";
+            ."\nYou can send voice notes on Telegram or WhatsApp. I listen and reply in your language.";
 
         if ($channels !== '') {
             $line .= "\n\n".$channels;

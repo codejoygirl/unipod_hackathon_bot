@@ -128,8 +128,22 @@ function firstValidationMessage(body: ApiErrorBody | null): string | null {
 }
 
 function looksTechnical(message: string): boolean {
-  return /laravel|sail|localhost|stack trace|sqlstate|exception|npm |docker|uvicorn|fastapi/i.test(
-    message,
+  return (
+    /laravel|sail|localhost|stack trace|traceback|sqlstate|queryexception|pdoexception|exception|npm |docker|uvicorn|fastapi|symfony|illuminate|pydantic|vendor\/|node_modules/i.test(
+      message,
+    ) ||
+    /method.*not supported|supported methods|route\b|syntax error|undefined (variable|index|property)|call to undefined|null pointer/i.test(
+      message,
+    ) ||
+    /\b(select|insert|update|delete|drop|alter)\b.*\b(from|into|table|where)\b/i.test(
+      message,
+    ) ||
+    /\.php|\.py|\.ts|\.js|line \d+/i.test(message) ||
+    // ULID or UUID pattern
+    /\b01[0-9a-hj-km-np-za-km-z]{24}\b/i.test(message) ||
+    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(
+      message,
+    )
   );
 }
 
@@ -143,20 +157,26 @@ function friendlyHttpMessage(status: number, body: ApiErrorBody | null): string 
   }
 
   if (status === 401 || status === 403) {
-    return "You're not allowed to use this chat right now. Please ask your admin for a new link.";
+    return "Session expired or access restricted. Please sign in with your phone number again.";
   }
   if (status === 404) {
-    return "We couldn't find that page. Please check your link or ask your admin for help.";
+    return "The requested information could not be found. Please try again.";
+  }
+  if (status === 405) {
+    return "This action is currently not supported. Please refresh and try again.";
+  }
+  if (status === 413) {
+    return "Your message or request is too long. Please shorten it and try again.";
   }
   if (status === 422) {
-    return "Something in that request didn't look right. Please try again.";
+    return "Some details in your request could not be processed. Please check your input and try again.";
   }
   if (status === 429) {
-    return "You're sending messages a bit quickly. Please wait a moment and try again.";
+    return "You're sending messages a bit too quickly. Please wait a few seconds and try again.";
   }
   if (status >= 500 || status === 0) {
-    return "Something went wrong on our side. Please try again in a moment.";
+    return "The assistant service is taking longer than usual to respond. Please try again in a moment.";
   }
 
-  return "We couldn't complete that request. Please try again.";
+  return "Something went wrong while processing your request. Please try again.";
 }
