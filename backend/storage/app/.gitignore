@@ -2,3 +2,6 @@
 !private/
 !public/
 !.gitignore
+# Temporary: WhatsApp exports for zak:import-knowledge-chats on deploy (remove when using private upload).
+!knowledge-import/
+!knowledge-import/**
