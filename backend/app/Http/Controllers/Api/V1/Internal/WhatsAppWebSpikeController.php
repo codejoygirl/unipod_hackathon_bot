@@ -8,6 +8,7 @@ use App\DTOs\Channels\InboundMessage;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessWhatsAppWebSpikeInbound;
 use App\Services\Channels\ChannelConversationService;
+use App\Services\Channels\ChannelListenGate;
 use App\Services\Channels\WhatsAppWebSpikeAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -67,8 +68,12 @@ final class WhatsAppWebSpikeController extends Controller
             $validated['chat_type'] = 'group';
         }
 
+        $listenGate = app(ChannelListenGate::class);
+        $processSync = (bool) config('whatsapp_web_spike.process_sync', true)
+            || $listenGate->spikeNeedsInlineReply($validated['text'], $validated);
+
         // Default sync so local spikes keep waiting for data.reply (no behavior break).
-        if ((bool) config('whatsapp_web_spike.process_sync', true)) {
+        if ($processSync) {
             try {
                 $reply = $this->adapter->handleInbound(
                     InboundMessage::fromSpikePayload($validated)

@@ -9,8 +9,10 @@ use App\Models\Community;
 use App\Services\AI\AiServiceClient;
 use App\Services\Assistant\GroundedQuestionService;
 use App\Services\Channels\AdminCredentialsService;
+use App\Services\Channels\AdminKnowledgeDesk;
 use App\Services\Channels\ChannelCommandAccess;
 use App\Services\Channels\ChannelConversationService;
+use App\Services\Channels\ProgramAssetRegistrar;
 use App\Services\Channels\SpikeEscalationNotifier;
 use App\Services\Knowledge\KnowledgeLifecycleService;
 use App\Services\WebChat\WebChatAccessService;
@@ -33,6 +35,8 @@ final class WebChatController extends Controller
         private readonly KnowledgeLifecycleService $lifecycle,
         private readonly AdminCredentialsService $adminCredentials,
         private readonly ChannelCommandAccess $commandAccess,
+        private readonly AdminKnowledgeDesk $knowledgeDesk,
+        private readonly ProgramAssetRegistrar $assetRegistrar,
     ) {}
 
     public function bootstrap(Request $request): JsonResponse
@@ -165,16 +169,83 @@ final class WebChatController extends Controller
             return $this->directAnswerResponse($reply, $community, $communityId);
         }
 
-        // Admin decision commands: /APPROVE, /DECLINE, /REJECT, /REPLY
-        if ($isAdmin && (
-            str_starts_with($upper, '/APPROVE') ||
-            str_starts_with($upper, '/DECLINE') ||
-            str_starts_with($upper, '/REJECT') ||
-            str_starts_with($upper, '/REPLY')
-        )) {
-            $result = $this->escalationNotifier->tryAdminCommand($query, 'web_chat', $adminName ?? $memberPhone, $memberPhone);
-            if ($result !== null) {
-                return $this->directAnswerResponse((string) ($result['reply'] ?? 'Done.'), $community, $communityId);
+        if ($isAdmin && $this->commandAccess->isAdminOnlyCommand($query)) {
+            $adminCmd = $this->escalationNotifier->tryAdminCommand(
+                $query,
+                'web_chat',
+                $adminName ?? $memberPhone,
+                $memberPhone,
+            );
+            if ($adminCmd !== null) {
+                return $this->directAnswerResponse((string) ($adminCmd['reply'] ?? 'Done.'), $community, $communityId);
+            }
+
+            if (str_starts_with($upper, 'IMPORT') || str_starts_with($upper, '/IMPORT')
+                || str_starts_with($upper, 'EXPORT') || str_starts_with($upper, '/EXPORT')) {
+                $body = $this->stripCommandPrefix($query, ['import', 'export']);
+                if ($body === '') {
+                    return $this->directAnswerResponse(
+                        'Usage: /import <pasted chat export text to ingest as a knowledge draft>',
+                        $community,
+                        $communityId,
+                    );
+                }
+
+                $source = $this->lifecycle->import($user, [
+                    'tenant_id' => $community->tenant_id,
+                    'community_id' => $community->id,
+                    'name' => $this->knowledgeDesk->suggestImportTitle($body),
+                    'uri' => 'web-chat://import/'.Str::ulid(),
+                    'source_type' => 'web_chat',
+                    'content' => $body,
+                    'metadata' => [
+                        'channel' => 'web_chat',
+                        'from' => $memberPhone,
+                        'origin' => 'admin_import',
+                    ],
+                ]);
+
+                return $this->directAnswerResponse(
+                    $this->knowledgeDesk->draftCreatedReply($source, 'whatsapp'),
+                    $community,
+                    $communityId,
+                );
+            }
+
+            if (str_starts_with($upper, 'ASSET') || str_starts_with($upper, '/ASSET')) {
+                $assetResult = $this->assetRegistrar->registerFromCommand(
+                    'web_chat',
+                    $query,
+                    $user,
+                    $community,
+                    'whatsapp',
+                );
+
+                return $this->directAnswerResponse(
+                    (string) ($assetResult['reply'] ?? 'Done.'),
+                    $community,
+                    $communityId,
+                );
+            }
+
+            if (str_starts_with($upper, 'PUBLISH') || str_starts_with($upper, '/PUBLISH')
+                || str_starts_with($upper, 'KNOWLEDGE') || str_starts_with($upper, '/KNOWLEDGE')
+                || str_starts_with($upper, 'KB') || str_starts_with($upper, '/KB')
+                || str_starts_with($upper, 'FEATURES') || str_starts_with($upper, '/FEATURES')) {
+                $desk = $this->knowledgeDesk->tryHandle($query, $user, $community, 'whatsapp');
+                if ($desk !== null) {
+                    return $this->directAnswerResponse(
+                        (string) ($desk['reply'] ?? 'Done.'),
+                        $community,
+                        $communityId,
+                    );
+                }
+
+                return $this->directAnswerResponse(
+                    'Try /publish, /knowledge, or /features.',
+                    $community,
+                    $communityId,
+                );
             }
         }
 
@@ -382,5 +453,22 @@ final class WebChatController extends Controller
     private function sessionCacheKey(string $communityId, string $sessionId): string
     {
         return 'web_chat_session:'.$communityId.':'.$sessionId;
+    }
+
+    /**
+     * @param  list<string>  $commands
+     */
+    private function stripCommandPrefix(string $text, array $commands): string
+    {
+        $body = trim($text);
+        foreach ($commands as $command) {
+            foreach (['/'.$command, $command] as $prefix) {
+                if (str_starts_with(strtoupper($body), strtoupper($prefix))) {
+                    return trim(substr($body, strlen($prefix)));
+                }
+            }
+        }
+
+        return $body;
     }
 }

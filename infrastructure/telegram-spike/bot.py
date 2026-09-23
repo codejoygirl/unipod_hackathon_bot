@@ -10,6 +10,7 @@ import asyncio
 import base64
 import os
 import re
+import traceback
 from html import escape as html_escape
 from pathlib import Path
 from typing import Any
@@ -208,7 +209,7 @@ async def call_laravel_inbound(
     reply_to_bot: bool = False,
     quoted_text: str | None = None,
     media: dict[str, Any] | None = None,
-) -> str | None:
+) -> tuple[str | None, str]:
     payload = {
         "from": from_id,
         "text": text,
@@ -248,9 +249,16 @@ async def call_laravel_inbound(
         raise RuntimeError(f"Laravel inbound {res.status_code}: {body}")
     data = body.get("data") or {}
     if data.get("queued") is True:
-        print(f"[zak] laravel queued=yes from={from_id} (worker will send)")
-        return None
-    return data.get("reply")
+        print(
+            f"[zak] laravel queued=yes from={from_id} status={res.status_code} "
+            "(channels worker must send reply via Bot API — check queue:work)"
+        )
+        return None, "queued"
+    reply = data.get("reply")
+    if reply:
+        return str(reply), "reply"
+    print(f"[zak] laravel empty reply from={from_id} status={res.status_code} body={body!r}")
+    return None, "empty"
 
 
 def _message_mentions_bot(message, bot_id: int | None, bot_username: str | None) -> bool:
@@ -371,7 +379,7 @@ async def send_via_laravel(
         f"{' media=' + str(media.get('kind')) if media else ''}: {preview}"
     )
     try:
-        reply = await call_laravel_inbound(
+        reply, delivery = await call_laravel_inbound(
             from_id=from_id,
             text=text,
             message_id=str(update.message.message_id),
@@ -385,19 +393,27 @@ async def send_via_laravel(
             quoted_text=quoted_text,
             media=media,
         )
+        if delivery == "queued":
+            return
         if not reply:
-            # Laravel returned null (silent / not directed at Zak) — do not nag.
-            print(f"[zak] silent from={from_id} chat={chat_type} media={bool(media)}")
+            print(
+                f"[zak] no inline reply from={from_id} chat={chat_type} "
+                f"delivery={delivery} media={bool(media)}"
+            )
             return
         print(
             f"[zak] laravel reply chars={len(reply)} "
             f"preview={reply[:160].replace(chr(10), ' ')!r}"
         )
         if len(reply) > 4000:
-            reply = reply[:3990] + "..."
+            cut = reply[:3990]
+            last_nl = cut.rfind("\n")
+            if last_nl > 500:
+                cut = cut[:last_nl]
+            reply = cut + "\n…"
         await reply_text_safe(update.message, reply)
     except Exception as exc:  # noqa: BLE001
-        print(f"[zak] error: {exc}")
+        print(f"[zak] error: {exc}\n{traceback.format_exc()}")
         await reply_text_safe(
             update.message,
             "Thanks — I've got your message 🙂\n\n"
@@ -454,22 +470,70 @@ async def share_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_via_laravel(update, context, f"SHARE {body}")
 
 
-async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin-only ingest — not the same as member /share."""
+def _full_slash_message(update: Update) -> str:
+    """Entire message text (keeps newlines). Telegram /commands only use line 1 in args."""
+    if update.message is None:
+        return ""
+    raw = (update.message.text or "").strip()
+    if raw:
+        return raw
+    return ""
+
+
+async def import_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin ingest — forward full message so title + URL on the next line reach Laravel."""
     if update.message is None:
         return
-    body = " ".join(context.args).strip() if context.args else ""
-    if not body and update.message.reply_to_message and update.message.reply_to_message.text:
-        body = update.message.reply_to_message.text.strip()
+    raw = _full_slash_message(update)
+    body = re.sub(r"^/import\b", "", raw, count=1, flags=re.I).strip()
+    if not body and update.message.reply_to_message:
+        quoted = (update.message.reply_to_message.text or "").strip()
+        if quoted:
+            raw = f"/import\n{quoted}"
+            body = quoted
     if not body:
         await reply_text_safe(
             update.message,
-            "Admins can ingest text like this:\n"
-            "/export Pasted announcement or notes\n\n"
-            "Members should use /share instead (goes to admin review).",
+            "Paste everything in one message, like:\n"
+            "/import Abaca entrepreneurs portal\n"
+            "https://my.abaca.app/entrepreneurs\n\n"
+            "Then send /publish latest (or reply publish to the draft card).",
         )
         return
-    await send_via_laravel(update, context, f"EXPORT {body}")
+    await send_via_laravel(update, context, raw)
+
+
+async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin-only ingest — alias of /import; not the same as member /share."""
+    if update.message is None:
+        return
+    raw = _full_slash_message(update)
+    body = re.sub(r"^/export\b", "", raw, count=1, flags=re.I).strip()
+    if not body and update.message.reply_to_message:
+        quoted = (update.message.reply_to_message.text or "").strip()
+        if quoted:
+            raw = f"/export\n{quoted}"
+            body = quoted
+    if not body:
+        await reply_text_safe(
+            update.message,
+            "Paste everything in one message, like:\n"
+            "/import Abaca entrepreneurs portal\n"
+            "https://my.abaca.app/entrepreneurs\n\n"
+            "(/export works the same.) Members should use /share.",
+        )
+        return
+    await send_via_laravel(update, context, raw)
+
+
+async def admin_laravel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Forward other admin slash commands verbatim (publish, asset, knowledge, …)."""
+    if update.message is None:
+        return
+    raw = _full_slash_message(update)
+    if not raw:
+        return
+    await send_via_laravel(update, context, raw)
 
 
 async def ask_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -546,8 +610,25 @@ def main() -> None:
     app.add_handler(CommandHandler("id", id_cmd))
     app.add_handler(CommandHandler("join", join_cmd))
     app.add_handler(CommandHandler("share", share_cmd))
+    app.add_handler(CommandHandler("import", import_cmd))
     app.add_handler(CommandHandler("export", export_cmd))
     app.add_handler(CommandHandler("ask", ask_cmd))
+    for admin_cmd in (
+        "asset",
+        "publish",
+        "knowledge",
+        "kb",
+        "features",
+        "approve",
+        "decline",
+        "reject",
+        "reply",
+        "blacklist",
+        "unblacklist",
+        "logins",
+        "loginas",
+    ):
+        app.add_handler(CommandHandler(admin_cmd, admin_laravel_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     print("[zak] Polling... message your bot in Telegram.")

@@ -100,8 +100,12 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
+    # Do NOT publish 6379 if the host already runs systemd redis-server
+    # (CloudPanel / apt). Publishing causes: "address already in use".
+    # Laravel should use REDIS_HOST=127.0.0.1 against that host Redis.
+    # ports:
+    #   - "127.0.0.1:6379:6379"
+    # If you need Docker Redis instead, stop host redis first, then uncomment ports.
 
   ai:
     image: zak-ai:latest
@@ -438,6 +442,60 @@ If you still see the Laravel “Let’s get started” page, the static UI was n
 
 ---
 
+## Every deploy (do not skip)
+
+`git pull` alone does **not** update the running AI container. Laravel PHP can look new while `zak-ai:latest` is still yesterday’s image — that is what caused “works on local, dumps on prod.”
+
+**As `zak-app`:**
+
+```bash
+cd /home/zak-app/htdocs/zak-app.xerotek.io
+git pull origin main
+
+cd frontend
+npm ci
+npm run build:laravel
+
+cd ../backend
+php artisan config:cache
+php artisan route:clear
+php artisan queue:restart
+pm2 restart zak-queue zak-telegram
+# optional: pm2 restart zak-whatsapp
+```
+
+**As `root` (required when `ai-service/` or AI Dockerfile changed — safest: every release):**
+
+```bash
+cd /home/zak-app/htdocs/zak-app.xerotek.io
+git pull origin main
+
+# Confirm new code is on disk (example: focused link trim)
+grep -n "_best_focus_one_item" ai-service/src/ai_service/generation/synthesizer.py | head
+
+cd ai-service
+docker build -t zak-ai .
+
+cd /opt/zak
+# Prefer AI-only recreate. Do NOT `docker compose up -d --force-recreate` blindly:
+# host Redis already owns 127.0.0.1:6379 (systemd). Docker Redis will fail to bind.
+docker compose up -d ai --no-deps --force-recreate
+curl -sS http://127.0.0.1:8001/health/live
+curl -sS http://127.0.0.1:8001/health/ready
+```
+
+Helper (same steps): `infrastructure/scripts/deploy-prod-ai.sh` (run as root from the repo).
+
+**Checklist before you call the release done:**
+
+1. `git log -1 --oneline` matches what you expect on the VPS  
+2. `docker images zak-ai` — `CREATED` is **just now**, not days old  
+3. `curl http://127.0.0.1:8001/health/live` → healthy  
+4. `pm2 status` → `zak-queue` / `zak-telegram` online with fresh uptime  
+5. Smoke: singular “hackathon guideline document” → **one** Drive PDF  
+
+---
+
 ## Done when
 
 1. `https://zak-app.xerotek.io/api/v1/health/live` works  
@@ -446,6 +504,7 @@ If you still see the Laravel “Let’s get started” page, the static UI was n
 4. Telegram `/help` replies in the same bot  
 5. Zavu webhook receives a WhatsApp message  
 6. `WHATSAPP_WEB_SPIKE` is still `false`  
+7. AI image was rebuilt this release (see **Every deploy**)  
 
 ## Day-2: wipe knowledge + embeddings
 
