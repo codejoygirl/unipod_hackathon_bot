@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated from Laravel's OpenAPI spec (npm run api:types)
+/src/types/generated/

@@ -1,26 +1,382 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-paper-sunk: var(--paper-sunk);
+  --color-paper-raised: var(--paper-raised);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-accent: var(--accent);
+  --color-accent-bright: var(--accent-bright);
+  --color-accent-wash: var(--accent-wash);
+  --color-amber: var(--amber);
+  --color-amber-wash: var(--amber-wash);
+  --color-clay: var(--clay);
+  --color-clay-wash: var(--clay-wash);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-geist-sans);
+  --font-serif: var(--font-newsreader);
+  --font-arabic: var(--font-noto-naskh);
+}
+
+/*
+ * Palette: cold porcelain neutrals with a single pine-green signal.
+ * The accent is the one "trusted" colour: verified answers, live services, and the
+ * moments a reader is asked to act. Amber is caution, clay is a refusal, and the
+ * neutrals are a shade of blue-graphite rather than a warm grey, so the whole
+ * surface reads as an instrument panel, not a marketing page.
+ */
+:root {
+  color-scheme: light;
+
+  --paper: oklch(0.978 0.003 250);
+  --paper-sunk: oklch(0.947 0.005 250);
+  --paper-raised: oklch(0.998 0.001 250);
+
+  --ink: oklch(0.205 0.012 255);
+  --ink-soft: oklch(0.455 0.014 255);
+
+  --rule: oklch(0.905 0.005 250);
+  --rule-strong: oklch(0.835 0.008 250);
+
+  --accent: oklch(0.5 0.115 160);
+  --accent-bright: oklch(0.58 0.125 160);
+  --accent-wash: oklch(0.952 0.03 160);
+
+  --amber: oklch(0.6 0.12 80);
+  --amber-wash: oklch(0.958 0.04 90);
+
+  --clay: oklch(0.47 0.095 315);
+  --clay-wash: oklch(0.946 0.028 315);
+
+  --elevation-card:
+    0 0 0 1px var(--rule),
+    0 1px 2px oklch(0.2 0.01 255 / 0.04),
+    0 12px 32px -16px oklch(0.2 0.01 255 / 0.16);
+
+  --elevation-raised:
+    0 0 0 1px var(--rule),
+    0 2px 4px oklch(0.2 0.01 255 / 0.05),
+    0 20px 48px -20px oklch(0.2 0.01 255 / 0.22);
+}
+
+/*
+ * Theme switch contract: an explicit data-theme wins, otherwise the system
+ * preference decides. The ThemeToggle client component only ever writes
+ * data-theme="light" or data-theme="dark".
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: oklch(0.19 0.01 255);
+  --paper-sunk: oklch(0.155 0.01 255);
+  --paper-raised: oklch(0.235 0.01 255);
+
+  --ink: oklch(0.95 0.004 250);
+  --ink-soft: oklch(0.76 0.01 250);
+
+  --rule: oklch(0.3 0.01 255);
+  --rule-strong: oklch(0.385 0.011 255);
+
+  --accent: oklch(0.74 0.11 160);
+  --accent-bright: oklch(0.8 0.12 160);
+  --accent-wash: oklch(0.27 0.04 160);
+
+  --amber: oklch(0.8 0.12 80);
+  --amber-wash: oklch(0.28 0.04 80);
+
+  --clay: oklch(0.72 0.09 315);
+  --clay-wash: oklch(0.27 0.04 315);
+
+  --elevation-card:
+    0 0 0 1px var(--rule),
+    0 1px 2px oklch(0 0 0 / 0.4),
+    0 12px 32px -16px oklch(0 0 0 / 0.6);
+
+  --elevation-raised:
+    0 0 0 1px var(--rule),
+    0 2px 4px oklch(0 0 0 / 0.45),
+    0 20px 48px -20px oklch(0 0 0 / 0.7);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --paper: oklch(0.19 0.01 255);
+    --paper-sunk: oklch(0.155 0.01 255);
+    --paper-raised: oklch(0.235 0.01 255);
+
+    --ink: oklch(0.95 0.004 250);
+    --ink-soft: oklch(0.76 0.01 250);
+
+    --rule: oklch(0.3 0.01 255);
+    --rule-strong: oklch(0.385 0.011 255);
+
+    --accent: oklch(0.74 0.11 160);
+    --accent-bright: oklch(0.8 0.12 160);
+    --accent-wash: oklch(0.27 0.04 160);
+
+    --amber: oklch(0.8 0.12 80);
+    --amber-wash: oklch(0.28 0.04 80);
+
+    --clay: oklch(0.72 0.09 315);
+    --clay-wash: oklch(0.27 0.04 315);
+
+    --elevation-card:
+      0 0 0 1px var(--rule),
+      0 1px 2px oklch(0 0 0 / 0.4),
+      0 12px 32px -16px oklch(0 0 0 / 0.6);
+
+    --elevation-raised:
+      0 0 0 1px var(--rule),
+      0 2px 4px oklch(0 0 0 / 0.45),
+      0 20px 48px -20px oklch(0 0 0 / 0.7);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--accent-wash);
+    color: var(--ink);
+  }
+
+  /* One focus treatment for the whole product, never overridden per component. */
+  :focus-visible {
+    outline: 2px dashed var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+}
+
+@utility zak-card {
+  background-color: var(--paper-raised);
+  box-shadow: var(--elevation-card);
+}
+
+@utility zak-card-raised {
+  background-color: var(--paper-raised);
+  box-shadow: var(--elevation-raised);
+}
+
+@utility zak-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+@utility zak-answer {
+  font-family: var(--font-newsreader), ui-serif, Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.62;
+  font-variation-settings: "opsz" 18;
+}
+
+@utility zak-question {
+  font-family: var(--font-newsreader), ui-serif, Georgia, serif;
+  font-size: 1.25rem;
+  line-height: 1.35;
+  font-variation-settings: "opsz" 28;
+}
+
+/* Clears the sticky header when an in-page anchor is followed. */
+@utility zak-section {
+  scroll-margin-top: 4.5rem;
+}
+
+/*
+ * Directional glow for the hero: a pool of accent light that drains away from the
+ * top-left corner, so the page reads as lit rather than flat-filled.
+ */
+@utility zak-glow {
+  background-image:
+    radial-gradient(ellipse 72% 58% at 12% 0%, var(--accent-wash), transparent 62%),
+    radial-gradient(ellipse 42% 40% at 94% 8%, oklch(0.9 0.03 315 / 0.35), transparent 70%);
+}
+
+/*
+ * Background plane for the hero: a rule grid that fades out before it reaches the
+ * content, so the paper reads as a drawn surface rather than a flat fill.
+ */
+@utility zak-grid-bg {
+  background-image:
+    linear-gradient(to right, var(--rule) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--rule) 1px, transparent 1px);
+  background-size: 4.5rem 4.5rem;
+  -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 0%, black 0%, transparent 100%);
+  mask-image: radial-gradient(ellipse 75% 60% at 50% 0%, black 0%, transparent 100%);
+  opacity: 0.5;
+}
+
+/*
+ * A product surface set into the page. Redefines the palette locally, so the same
+ * components (cards, badges, citations) render against dark values without a variant.
+ */
+@utility zak-dark {
+  color-scheme: dark;
+
+  --paper: oklch(0.19 0.01 255);
+  --paper-sunk: oklch(0.155 0.01 255);
+  --paper-raised: oklch(0.235 0.01 255);
+
+  --ink: oklch(0.95 0.004 250);
+  --ink-soft: oklch(0.76 0.01 250);
+
+  --rule: oklch(0.3 0.01 255);
+  --rule-strong: oklch(0.385 0.011 255);
+
+  --accent: oklch(0.74 0.11 160);
+  --accent-bright: oklch(0.8 0.12 160);
+  --accent-wash: oklch(0.27 0.04 160);
+
+  --amber: oklch(0.8 0.12 80);
+  --amber-wash: oklch(0.28 0.04 80);
+
+  --clay: oklch(0.72 0.09 315);
+  --clay-wash: oklch(0.27 0.04 315);
+
+  --elevation-card:
+    0 0 0 1px var(--rule),
+    0 1px 2px oklch(0 0 0 / 0.4),
+    0 12px 32px -16px oklch(0 0 0 / 0.6);
+
+  --elevation-raised:
+    0 0 0 1px var(--rule),
+    0 2px 4px oklch(0 0 0 / 0.45),
+    0 20px 48px -20px oklch(0 0 0 / 0.7);
+
+  background-color: var(--paper-sunk);
+  color: var(--ink);
+  box-shadow: var(--elevation-raised);
+}
+
+@keyframes zak-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes zak-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes zak-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.zak-rise {
+  animation: zak-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.zak-fade {
+  animation: zak-fade 0.4s ease-out both;
+}
+
+.zak-live {
+  animation: zak-pulse 2.6s ease-in-out infinite;
+}
+
+/*
+ * Scroll-driven entrance. Declared only where view timelines exist, and outside the
+ * reduced-motion media query, so an engine that lacks either renders the section plainly
+ * instead of holding it at opacity 0.
+ */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .zak-reveal {
+      animation: zak-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+      animation-timeline: view();
+      animation-range: entry 8% cover 32%;
+    }
+  }
+}
+
+/* Light on dark reads optically thinner: give it room and a little air. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    .zak-answer {
+      line-height: 1.7;
+      letter-spacing: 0.004em;
+    }
+
+    /*
+     * On a light page the panel is a dark slab. On a dark page that same slab reads as a hole
+     * in the layout, so lift it into a raised screen instead and push the cards inside it back
+     * down: the panel separates from the page, and the cards separate from the panel.
+     */
+    .zak-dark {
+      --paper: oklch(0.255 0.011 255);
+      --paper-sunk: oklch(0.205 0.01 255);
+      --paper-raised: oklch(0.222 0.01 255);
+      --rule: oklch(0.33 0.011 255);
+      --rule-strong: oklch(0.43 0.012 255);
+
+      background-color: var(--paper);
+    }
+  }
+}
+
+:root[data-theme="dark"] {
+  .zak-answer {
+    line-height: 1.7;
+    letter-spacing: 0.004em;
+  }
+
+  .zak-dark {
+    --paper: oklch(0.255 0.011 255);
+    --paper-sunk: oklch(0.205 0.01 255);
+    --paper-raised: oklch(0.222 0.01 255);
+    --rule: oklch(0.33 0.011 255);
+    --rule-strong: oklch(0.43 0.012 255);
+
+    background-color: var(--paper);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zak-rise {
+    animation: zak-fade 0.1s linear both;
+  }
+
+  .zak-fade {
+    animation-duration: 0.1s;
+  }
+
+  .zak-live {
+    animation: none;
+  }
 }
