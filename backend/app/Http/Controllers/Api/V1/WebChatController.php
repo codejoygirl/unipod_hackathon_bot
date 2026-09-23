@@ -131,8 +131,36 @@ final class WebChatController extends Controller
         $sources = KnowledgeSource::query()
             ->where('community_id', $communityId)
             ->where('lifecycle_status', KnowledgeLifecycleStatus::Published)
-            ->orderByDesc('published_at')
-            ->get();
+            ->get()
+            ->filter(function (KnowledgeSource $source) {
+                $metadata = is_array($source->metadata) ? $source->metadata : [];
+                // Exclude automatic chat message indexing from resource cards
+                if (($metadata['origin'] ?? '') === 'admin_auto_index') {
+                    return false;
+                }
+                if (str_starts_with(strtolower($source->name), 'admin update')) {
+                    return false;
+                }
+                // Must have either a delivery URL or a valid link in content
+                $url = $metadata['delivery_url'] ?? null;
+                if (! $url && preg_match('/https?:\/\/[^\s<>"\'\)]+/u', (string) $source->content, $m)) {
+                    $url = $m[0];
+                }
+
+                return ! empty($url);
+            })
+            ->sortBy(function (KnowledgeSource $source) {
+                $metadata = is_array($source->metadata) ? $source->metadata : [];
+                $url = (string) ($metadata['delivery_url'] ?? '');
+                $nameLower = strtolower($source->name);
+                $isRootFolder = ($metadata['asset_kind'] ?? '') === 'folder'
+                    || str_contains($nameLower, 'community resource')
+                    || str_contains(strtolower($url), 'drive.google.com/drive/folders');
+
+                // Primary Drive folder first (0), others second (1)
+                return $isRootFolder ? 0 : 1;
+            })
+            ->values();
 
         $resources = $sources->map(function (KnowledgeSource $source) {
             $metadata = is_array($source->metadata) ? $source->metadata : [];

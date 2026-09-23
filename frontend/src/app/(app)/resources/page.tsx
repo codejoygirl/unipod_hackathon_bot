@@ -75,6 +75,17 @@ function normalizeResource(res: CommunityResource): CommunityResource {
   };
 }
 
+function isRealResource(res: CommunityResource): boolean {
+  if (!res.url || !res.url.startsWith("http")) {
+    return false;
+  }
+  const nameLower = res.name.toLowerCase();
+  if (nameLower.startsWith("admin update") || nameLower.startsWith("chat update")) {
+    return false;
+  }
+  return true;
+}
+
 type CategoryFilter = "all" | "folder" | "handbook" | "slides" | "form" | "document";
 
 export default function ResourcesPage() {
@@ -114,7 +125,8 @@ export default function ResourcesPage() {
         `/api/v1/web-chat/resources?phone=${encodeURIComponent(memberPhone)}`,
       );
       if (res.data?.resources && res.data.resources.length > 0) {
-        setResources(res.data.resources.map(normalizeResource));
+        const clean = res.data.resources.filter(isRealResource).map(normalizeResource);
+        setResources(clean.length > 0 ? clean : FALLBACK_RESOURCES);
       } else {
         // Use curated UniPod community starter resources if DB has none yet
         setResources(FALLBACK_RESOURCES);
@@ -138,7 +150,8 @@ export default function ResourcesPage() {
         );
         if (!ignore) {
           if (res.data?.resources && res.data.resources.length > 0) {
-            setResources(res.data.resources.map(normalizeResource));
+            const clean = res.data.resources.filter(isRealResource).map(normalizeResource);
+            setResources(clean.length > 0 ? clean : FALLBACK_RESOURCES);
           } else {
             setResources(FALLBACK_RESOURCES);
           }
@@ -222,14 +235,30 @@ export default function ResourcesPage() {
 
   // Find the primary resource hub folder for spotlight
   const primaryHub = useMemo(() => {
-    return (
-      resources.find(
-        (r) =>
-          r.kind === "folder" ||
-          r.name.toLowerCase().includes("community resource") ||
-          (r.url && r.url.includes("/folders")),
-      ) || resources[0]
+    // 1. Look for the dedicated community root Drive folder
+    const officialHub = resources.find(
+      (r) =>
+        r.url &&
+        r.url.includes("drive.google.com/drive/folders") &&
+        (r.name.toLowerCase().includes("community resource") ||
+          r.name.toLowerCase().includes("unipod") ||
+          r.is_asset) &&
+        !r.name.toLowerCase().startsWith("admin update"),
     );
+    if (officialHub) return officialHub;
+
+    // 2. Look for any genuine Google Drive folder resource
+    const anyFolder = resources.find(
+      (r) =>
+        r.kind === "folder" &&
+        r.url &&
+        r.url.includes("drive.google.com/drive/folders") &&
+        !r.name.toLowerCase().startsWith("admin update"),
+    );
+    if (anyFolder) return anyFolder;
+
+    // 3. Fallback safely to the official UniPod community root Drive folder (never an arbitrary doc or chat post)
+    return FALLBACK_RESOURCES[0];
   }, [resources]);
 
   const totalPages = Math.max(1, Math.ceil(filteredResources.length / ITEMS_PER_PAGE));
