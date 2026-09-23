@@ -89,6 +89,38 @@ final class SpikeInboundQueueModeTest extends TestCase
         });
     }
 
+    public function test_telegram_slash_command_inline_even_when_async_config(): void
+    {
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        User::factory()->create(['email' => 'demo@zak.test']);
+
+        config([
+            'telegram_spike.enabled' => true,
+            'telegram_spike.shared_secret' => 'tg-secret',
+            'telegram_spike.default_user_email' => 'demo@zak.test',
+            'telegram_spike.default_community_id' => $community->id,
+            'telegram_spike.process_sync' => false,
+            'telegram_spike.admin_chat_id' => '',
+        ]);
+
+        $response = $this->postJson('/api/v1/internal/telegram-spike/inbound', [
+            'from' => '7216526143',
+            'chat_id' => '7216526143',
+            'text' => '/help',
+            'message_id' => 'help-inline-1',
+            'chat_type' => 'private',
+        ], [
+            'X-Spike-Secret' => 'tg-secret',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.accepted', true)
+            ->assertJsonPath('data.queued', false)
+            ->assertJsonPath('data.channel', 'telegram_spike');
+
+        $this->assertNotSame('', trim((string) $response->json('data.reply')));
+    }
+
     public function test_whatsapp_web_sync_still_returns_reply(): void
     {
         $tenant = Tenant::factory()->create();

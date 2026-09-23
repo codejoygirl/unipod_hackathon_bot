@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zak WhatsApp format preview</title>
+  <style>
+    :root {
+      --wa-green: #075e54;
+      --wa-teal: #128c7e;
+      --wa-light: #25d366;
+      --wa-chat: #e5ddd5;
+      --wa-bubble: #dcf8c6;
+      --wa-link: #027eb5;
+      --ink: #111b21;
+      --muted: #667781;
+      --panel: #fff;
+      --bg: #0b141a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: #e9edef;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(320px, 420px);
+      min-height: 100%;
+    }
+    @media (max-width: 860px) {
+      .app { grid-template-columns: 1fr; }
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    header .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--wa-light);
+      box-shadow: 0 0 0 4px rgba(37, 211, 102, 0.18);
+    }
+    h1 { font-size: 16px; margin: 0; font-weight: 650; }
+    .sub { color: #8696a0; font-size: 12px; margin: 4px 0 0; line-height: 1.4; }
+    .left, .right { padding: 18px; }
+    .left { border-right: 1px solid #233138; }
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
+      border: 1px solid #2a3942;
+      background: #111b21;
+      color: #e9edef;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font: 13.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    textarea:focus { outline: 2px solid #128c7e; border-color: #128c7e; }
+    .row {
+      display: flex;
+      gap: 8px;
+      margin: 10px 0 16px;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .primary { background: var(--wa-teal); color: #fff; }
+    .ghost { background: #202c33; color: #e9edef; }
+    .source-label {
+      font-size: 11px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #8696a0;
+      margin: 0 0 6px;
+    }
+    .source {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #111b21;
+      border: 1px solid #2a3942;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #d1d7db;
+      min-height: 120px;
+    }
+    .phone {
+      background: #0b141a;
+      border-radius: 28px;
+      border: 8px solid #1f2c33;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0,0,0,.45);
+      max-width: 380px;
+      margin: 0 auto;
+    }
+    .status {
+      background: var(--wa-green);
+      color: #fff;
+      padding: 10px 14px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: linear-gradient(135deg, #128c7e, #25d366);
+      display: grid; place-items: center;
+      font-weight: 700; font-size: 14px;
+    }
+    .status .name { font-size: 15px; font-weight: 650; }
+    .status .meta { font-size: 11px; opacity: .85; }
+    .chat {
+      background:
+        linear-gradient(rgba(8, 20, 18, .35), rgba(8, 20, 18, .35)),
+        url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"),
+        #0e1b17;
+      min-height: 520px;
+      padding: 14px 10px 18px;
+    }
+    .bubble {
+      background: var(--wa-bubble);
+      color: var(--ink);
+      border-radius: 8px 0 8px 8px;
+      padding: 7px 9px 6px;
+      max-width: 92%;
+      margin-left: auto;
+      box-shadow: 0 1px 0.5px rgba(0,0,0,.13);
+      position: relative;
+    }
+    .bubble::after {
+      content: "";
+      position: absolute;
+      top: 0; right: -8px;
+      border-width: 0 0 10px 8px;
+      border-style: solid;
+      border-color: transparent transparent transparent var(--wa-bubble);
+    }
+    .wa-text {
+      font-size: 14.2px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .wa-text b { font-weight: 700; }
+    .wa-text i { font-style: italic; }
+    .wa-text s { text-decoration: line-through; opacity: .85; }
+    .wa-text code, .wa-text pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+    }
+    .wa-text code {
+      background: rgba(0,0,0,.06);
+      padding: 0 3px;
+      border-radius: 3px;
+    }
+    .wa-text pre {
+      background: rgba(0,0,0,.06);
+      padding: 8px;
+      border-radius: 6px;
+      margin: 6px 0;
+      white-space: pre-wrap;
+    }
+    .wa-text a {
+      color: var(--wa-link);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: flex-end;
+      gap: 4px;
+      margin-top: 4px;
+      color: #667781;
+      font-size: 11px;
+    }
+    .ticks { color: #53bdeb; font-size: 13px; line-height: 1; }
+    .hint {
+      margin-top: 12px;
+      color: #8696a0;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .hint code { color: #d1d7db; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="left">
+      <header>
+        <span class="dot"></span>
+        <div>
+          <h1>Zak WhatsApp formatter</h1>
+          <p class="sub">Paste a bot draft. This runs the same cleanup Zak uses before sending on WhatsApp.</p>
+        </div>
+      </header>
+      <textarea id="input" placeholder="Paste a bot / markdown response…"></textarea>
+      <div class="row">
+        <button class="primary" type="button" id="sample">Load sample</button>
+        <button class="ghost" type="button" id="copy">Copy WhatsApp text</button>
+        <button class="ghost" type="button" id="clear">Clear</button>
+      </div>
+      <p class="source-label">What Zak would send</p>
+      <pre class="source" id="source"></pre>
+      <p class="hint">
+        WhatsApp only: <code>*bold*</code> <code>_italic_</code> <code>~strike~</code>
+        <code>```mono```</code>. Markdown <code>**bold**</code>, <code>[label](url)</code>,
+        and <code># headings</code> are converted. Bot commands like <code>/ask</code> become <code>*/ask*</code>.
+      </p>
+    </section>
+    <section class="right">
+      <div class="phone">
+        <div class="status">
+          <div class="avatar">Z</div>
+          <div>
+            <div class="name">Zak</div>
+            <div class="meta">online</div>
+          </div>
+        </div>
+        <div class="chat">
+          <div class="bubble">
+            <div class="wa-text" id="preview"></div>
+            <div class="meta-row">
+              <span id="clock"></span>
+              <span class="ticks">✓✓</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+    const COMMANDS = /\/(?:ask|share|feature|help|join|start|export|import|asset|publish|knowledge|kb|features|approve|decline|reply|blacklist|unblacklist)\b/iu;
+    const MD_BOLD = /\*\*(.+?)\*\*/gs;
+    const MD_LINK = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+    const MD_UNDER_BOLD = /__([^_\n]+?)__/g;
+    const MD_ITALIC = /(?<!\w)_(.+?)_(?!\w)/g;
+    const LIST_KV = /^(?<prefix>(?:\d+[\).\:\-]|[•\-])\s+)(?<label>[^:\n]{1,80}?)\s*:\s+(?<value>\S.*)$/;
+    const MIDWORD = /^(\d+[\).\:\-]\s+)([a-z][\w'’-]{0,12}\b.*)$/;
+    const SAME_LINE_CAPTION = /^(\d+[\).\:\-]\s+)((?:\S+\s+){3,}\S.*?)\s*:\s*(https?:\/\/\S+)\s*$/;
+    const EVIDENCE = /\s*\[\s*E\d+(?:\s*\([^)]*\))?(?:\s*,\s*E\d+(?:\s*\([^)]*\))?)*\s*\]/g;
+    const HEADING = /^(#{1,6})\s+(.+)$/;
+
+    const SAMPLE = `Here are the hackathon details:
+
+1. **Starts**: September 18, 2026
+2. Ends: September 24, 2026
+3. Prize: $5,000
+4. [MIT Universal AI](https://learn.mit.edu/universal-learning/ai)
+
+1. Follow, like, repost and share our videos so we can reach even more: https://www.tiktok.com/@timbuktoounipods
+
+Use /ask if you need another link.`;
+
+    function stripEmphasis(text) {
+      let t = (text || "").trim();
+      t = t.replace(/\*\*(.+?)\*\*/g, "$1");
+      t = t.replace(/^\*([^*]+)\*$/, "$1");
+      return t.trim();
+    }
+
+    function boldWhatsApp(text) {
+      const inner = stripEmphasis(text);
+      if (!inner || inner.startsWith("http://") || inner.startsWith("https://")) return inner;
+      return `*${inner}*`;
+    }
+
+    function formatListKeyValues(text) {
+      return text.split("\n").map((line) => {
+        const m = line.trim() ? line.trim().match(LIST_KV) : null;
+        if (!m || !m.groups) return line;
+        const label = stripEmphasis(m.groups.label);
+        let value = m.groups.value.trim();
+        if (value.startsWith("http://") || value.startsWith("https://")) {
+          return `${m.groups.prefix}${label}: ${value}`;
+        }
+        if (/^\*[^*\n]+\*$/.test(value) && !value.includes("**")) {
+          return `${m.groups.prefix}${label}: ${value}`;
+        }
+        return `${m.groups.prefix}${label}: ${boldWhatsApp(value)}`;
+      }).join("\n");
+    }
+
+    function collapseDuplicateParas(text) {
+      let paras = text.split(/\n{2,}/).filter((p) => p.trim() !== "");
+      let i = 0;
+      while (i < paras.length) {
+        let collapsed = false;
+        for (let length = paras.length - i; length > 0; length--) {
+          const run = paras.slice(i, i + length);
+          const nxt = paras.slice(i + length, i + 2 * length);
+          if (nxt.length === length && nxt.map((p) => p.trim()).join("\0") === run.map((p) => p.trim()).join("\0")) {
+            paras = paras.slice(0, i + length).concat(paras.slice(i + 2 * length));
+            collapsed = true;
+            break;
+          }
+        }
+        if (!collapsed) i++;
+      }
+      return paras.join("\n\n");
+    }
+
+    function deterministicCleanup(answer) {
+      let text = (answer || "").replace(/\r\n/g, "\n").trim();
+      if (!text) return "";
+
+      text = text.replace(EVIDENCE, "");
+      text = text.replace(MD_LINK, "$1\n$2");
+      text = text.split("\n").map((line) => {
+        const m = line.match(SAME_LINE_CAPTION);
+        return m ? `${m[1]}${m[2]}\n${m[3]}` : line;
+      }).join("\n");
+
+      text = text.replace(MD_BOLD, "*$1*");
+      text = text.replace(MD_UNDER_BOLD, "*$1*");
+      text = text.replace(/\*{4}/g, "");
+      text = text.replace(/\*(\s*)\*+/g, "*$1");
+      text = text.replace(/\*{3,}/g, "*");
+      text = text.replace(MD_ITALIC, "$1");
+
+      text = text.split("\n").map((line) => {
+        const heading = line.match(HEADING);
+        if (heading) return `*${heading[2].trim()}*`;
+        if (MIDWORD.test(line)) {
+          const m = line.match(/^(\d+[\).\:\-]\s+)/);
+          return `${m ? m[1] : ""}Shared link`;
+        }
+        const crumb = line.trim().match(/^(\d+[\).\:\-]\s+)(.+)$/);
+        if (crumb) {
+          const body = crumb[2].trim();
+          if (/^\[?\d{1,2}[/\-.]\d{1,2}/.test(body) || /^~\s*\S/.test(body)) {
+            return `${crumb[1]}Shared link`;
+          }
+        }
+        return line;
+      }).join("\n");
+
+      text = formatListKeyValues(text);
+      text = collapseDuplicateParas(text);
+      text = text.replace(/\n{3,}/g, "\n\n");
+      text = text.replace(/^([^\n\d][^\n]{0,140})\n(\d+[\).\:\-]\s+)/gm, "$1\n\n$2");
+      text = text.replace(/[ \t]+([.,;:!?])/g, "$1");
+      text = text.replace(/\*\*/g, "");
+      text = text.replace(/https?:\/\/[^\s<>"'()]+/g, (url) =>
+        url.replace(/&amp;/g, "&")
+      );
+      return text.trim();
+    }
+
+    function toWhatsAppFormatting(text) {
+      text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "$1\n$2");
+      text = text.replace(/\*\*(.+?)\*\*/gs, "*$1*");
+      text = text.replace(/__(.+?)__/gs, "*$1*");
+      return text;
+    }
+
+    function formatCommandsInText(text) {
+      if (!text) return text;
+      const pattern = /\*[^*]+\*|```[\s\S]*?```|<code>[\s\S]*?<\/code>|\/(?:ask|share|feature|help|join|start|export|import|asset|publish|knowledge|kb|features|approve|decline|reply|blacklist|unblacklist)\b/giu;
+      return text.replace(pattern, (token) => {
+        if (token.startsWith("*") || token.startsWith("```") || token.startsWith("<code>")) return token;
+        return `*${token}*`;
+      });
+    }
+
+    function zakFormat(raw) {
+      let text = deterministicCleanup(raw);
+      text = toWhatsAppFormatting(text);
+      return formatCommandsInText(text);
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    function renderInline(text) {
+      const parts = [];
+      const re = /```([\s\S]*?)```|`([^`]+)`|(https?:\/\/[^\s<>"'()]+)|(?<!\w)\*([^*\n]+)\*(?!\w)|(?<!\w)_([^_\n]+)_(?!\w)|(?<!\w)~([^~\n]+)~(?!\w)/g;
+      let last = 0;
+      let m;
+      while ((m = re.exec(text))) {
+        if (m.index > last) parts.push(escapeHtml(text.slice(last, m.index)));
+        if (m[1] != null) {
+          parts.push(`<pre>${escapeHtml(m[1])}</pre>`);
+        } else if (m[2] != null) {
+          parts.push(`<code>${escapeHtml(m[2])}</code>`);
+        } else if (m[3] != null) {
+          const href = m[3].replace(/[.,;:!?)]+$/, "");
+          const trail = m[3].slice(href.length);
+          parts.push(`<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(href)}</a>${escapeHtml(trail)}`);
+        } else if (m[4] != null) {
+          parts.push(`<b>${escapeHtml(m[4])}</b>`);
+        } else if (m[5] != null) {
+          parts.push(`<i>${escapeHtml(m[5])}</i>`);
+        } else if (m[6] != null) {
+          parts.push(`<s>${escapeHtml(m[6])}</s>`);
+        }
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) parts.push(escapeHtml(text.slice(last)));
+      return parts.join("");
+    }
+
+    const input = document.getElementById("input");
+    const source = document.getElementById("source");
+    const preview = document.getElementById("preview");
+    const clock = document.getElementById("clock");
+
+    function tickClock() {
+      const d = new Date();
+      clock.textContent = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+
+    function refresh() {
+      const formatted = zakFormat(input.value);
+      source.textContent = formatted || "—";
+      preview.innerHTML = formatted ? renderInline(formatted) : "<i>Paste a response to preview</i>";
+      tickClock();
+    }
+
+    input.addEventListener("input", refresh);
+    document.getElementById("sample").addEventListener("click", () => {
+      input.value = SAMPLE;
+      refresh();
+    });
+    document.getElementById("clear").addEventListener("click", () => {
+      input.value = "";
+      refresh();
+    });
+    document.getElementById("copy").addEventListener("click", async () => {
+      const text = zakFormat(input.value);
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById("copy");
+      const prev = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(() => { btn.textContent = prev; }, 1200);
+    });
+
+    refresh();
+  </script>
+</body>
+</html>

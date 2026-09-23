@@ -226,6 +226,30 @@ final class ChannelListenGate
     }
 
     /**
+     * Python/Twilio spikes wait on HTTP `data.reply`. Slash commands and swipe-replies
+     * must not rely on queue workers when process_sync=false.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function spikeNeedsInlineReply(string $text, array $payload): bool
+    {
+        if (filter_var($payload['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+            return true;
+        }
+
+        $trimmed = ltrim(trim($text));
+        if ($trimmed === '') {
+            return false;
+        }
+
+        if ($this->startsWithRecognizedCommand($trimmed)) {
+            return true;
+        }
+
+        return preg_match('/^(ASK|SHARE|FEATURE|IMPORT|EXPORT|JOIN)\b/iu', $trimmed) === 1;
+    }
+
+    /**
      * @return list<string>
      */
     public static function parseAliasList(?string $csv): array

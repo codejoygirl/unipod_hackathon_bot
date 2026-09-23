@@ -726,6 +726,15 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         ?InboundMessage $message = null,
     ): string {
         $chatType = $message !== null ? $this->chatType($message) : 'private';
+        if ($mode === 'social' && $this->conversation->isZakCapabilityAsk($text)) {
+            return $this->conversation->zakCapabilityReply(
+                'plain',
+                'telegram',
+                $chatType,
+                $this->memberPhoneForWeb($message),
+            );
+        }
+
         if ($mode === 'social' && $this->conversation->isChannelPresenceAsk($text)) {
             return $this->conversation->channelPresenceReply(
                 'plain',
@@ -981,6 +990,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             $linkMode,
             $linkFocus,
         );
+        $answer = $this->finalizeOpenableUrlsInAnswer($answer, $result);
         $answer = $this->ensureListHasIntro(
             $answer,
             $originalQuestion !== '' ? $originalQuestion : $result->query,
@@ -1159,7 +1169,9 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             }
             $fixed = $this->expandTruncatedUrlsFromEvidence($fixed, $evidenceModeUrls);
 
-            return $this->ensureReadableStructure($fixed);
+            return $this->ensureReadableStructure(
+                $this->replaceBrokenMemberUrls($fixed, $evidenceModeUrls)
+            );
         }
 
         // Hollow / wrong-class AI draft: light fill from evidence only (capped).
@@ -1229,12 +1241,164 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             if ($full === null || $full === $url) {
                 continue;
             }
-            if (strlen($full) > strlen($url)) {
+            if (strlen($full) > strlen($url) || $this->isBrokenMemberUrl($url)) {
                 $answer = str_replace($url, $full, $answer);
             }
         }
 
+        return $this->replaceBrokenMemberUrls($answer, $evidenceUrls);
+    }
+
+    /**
+     * Last pass: swap placeholder / ellipsis Drive URLs for real ones from citations.
+     */
+    private function finalizeOpenableUrlsInAnswer(string $answer, GroundedAnswerDTO $result): string
+    {
+        if ($answer === '') {
+            return $answer;
+        }
+
+        $evidenceUrls = [];
+        foreach ($result->citations as $citation) {
+            $chunk = $citation->exactQuote."\n".$citation->contextSnippet;
+            foreach ($this->extractHttpUrls($chunk) as $url) {
+                $evidenceUrls[] = $url;
+            }
+        }
+
+        $openable = $this->uniqueOpenableUrls($evidenceUrls, mode: 'assets');
+        if ($openable === []) {
+            $openable = $this->uniqueOpenableUrls($evidenceUrls, mode: 'default');
+        }
+
+        $answer = $this->expandTruncatedUrlsFromEvidence($answer, $openable);
+
+        return $this->replaceBrokenMemberUrls($answer, $openable);
+    }
+
+    /**
+     * Placeholder or truncated URLs must never reach members (e.g. folders/…, YOUR_FOLDER_ID).
+     */
+    private function isBrokenMemberUrl(string $url): bool
+    {
+        $url = rtrim(trim($url), ".,);]}>\"'");
+        if ($url === '' || mb_strlen($url) < 16) {
+            return true;
+        }
+        if (preg_match('/[…]/u', $url) === 1) {
+            return true;
+        }
+        if (preg_match('/YOUR_[A-Z0-9_]+/i', $url) === 1) {
+            return true;
+        }
+        if (preg_match('/\.{2,}(?:\/|$|\?|#)/u', $url) === 1) {
+            return true;
+        }
+        if (preg_match('#drive\.google\.com/drive/folders/([^/?]+)#i', $url, $matches) === 1) {
+            return ! $this->usableDriveResourceId($matches[1]);
+        }
+        if (preg_match('#drive\.google\.com/file/d/([^/?]+)#i', $url, $matches) === 1) {
+            return ! $this->usableDriveResourceId($matches[1]);
+        }
+        if (preg_match('#docs\.google\.com/(?:document|spreadsheets|presentation)/d/([^/?]+)#i', $url, $matches) === 1) {
+            return ! $this->usableDriveResourceId($matches[1]);
+        }
+
+        return false;
+    }
+
+    private function usableDriveResourceId(string $id): bool
+    {
+        $id = rawurldecode(trim($id));
+        if ($id === '' || preg_match('/[…]/u', $id) === 1 || preg_match('/\.{2,}/', $id) === 1) {
+            return false;
+        }
+        if (preg_match('/^(your_[a-z0-9_]+|xxx+|placeholder|<[^>]+>)$/i', $id) === 1) {
+            return false;
+        }
+
+        return preg_match('/^[a-zA-Z0-9_-]{5,}$/', $id) === 1;
+    }
+
+    /**
+     * @param  list<string>  $evidenceUrls
+     */
+    private function replaceBrokenMemberUrls(string $answer, array $evidenceUrls): string
+    {
+        if ($answer === '') {
+            return $answer;
+        }
+
+        $good = [];
+        foreach ($evidenceUrls as $url) {
+            if (! $this->isBrokenMemberUrl($url)) {
+                $good[$url] = true;
+            }
+        }
+        $goodList = array_keys($good);
+        if ($goodList === []) {
+            return $answer;
+        }
+
+        foreach ($this->extractHttpUrls($answer) as $bad) {
+            if (! $this->isBrokenMemberUrl($bad)) {
+                continue;
+            }
+
+            $replacement = $this->pickReplacementUrl($bad, $goodList);
+            if ($replacement !== null) {
+                $answer = str_replace($bad, $replacement, $answer);
+
+                continue;
+            }
+
+            $lines = preg_split("/\r\n|\n|\r/u", $answer) ?: [$answer];
+            $filtered = [];
+            foreach ($lines as $line) {
+                if (str_contains($line, $bad)) {
+                    continue;
+                }
+                $filtered[] = $line;
+            }
+            $answer = trim(implode("\n", $filtered));
+        }
+
         return $answer;
+    }
+
+    /**
+     * @param  list<string>  $goodList
+     */
+    private function pickReplacementUrl(string $broken, array $goodList): ?string
+    {
+        $brokenLower = strtolower($broken);
+
+        if (str_contains($brokenLower, 'drive.google.com/drive/folders')) {
+            foreach ($goodList as $candidate) {
+                if (preg_match('#drive\.google\.com/drive/folders/[^/?]+#i', $candidate) === 1) {
+                    return $candidate;
+                }
+            }
+        }
+
+        if (str_contains($brokenLower, 'drive.google.com/file/d')) {
+            foreach ($goodList as $candidate) {
+                if (preg_match('#drive\.google\.com/file/d/[^/?]+#i', $candidate) === 1) {
+                    return $candidate;
+                }
+            }
+        }
+
+        if (str_contains($brokenLower, 'drive.google.com') || str_contains($brokenLower, 'docs.google.com')) {
+            foreach ($goodList as $candidate) {
+                $lower = strtolower($candidate);
+                if (str_contains($lower, 'drive.google.com') || str_contains($lower, 'docs.google.com')) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return count($goodList) === 1 ? $goodList[0] : null;
     }
 
     /**
@@ -1565,6 +1729,9 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         if (preg_match('#drive\.google\.com/file/d/([^/]+)#i', $url, $matches) === 1) {
             return 'gdrive:'.strtolower($matches[1]);
         }
+        if (preg_match('#drive\.google\.com/drive/folders/([^/?]+)#i', $url, $matches) === 1) {
+            return 'gdrive-folder:'.strtolower($matches[1]);
+        }
         if (preg_match('#youtu\.be/([\w-]+)#i', $url, $matches) === 1) {
             return 'yt:'.strtolower($matches[1]);
         }
@@ -1624,7 +1791,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         $byKey = [];
         foreach ($urls as $url) {
             $url = rtrim($url, ".,);]}>\"'");
-            if ($url === '') {
+            if ($url === '' || $this->isBrokenMemberUrl($url)) {
                 continue;
             }
             if ($mode === 'meetings') {

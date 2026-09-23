@@ -1835,8 +1835,8 @@ final class ChannelConversationService
 
     public function voiceNoteFailedReply(): string
     {
-        return "I couldn't catch that voice note clearly 🎧\n\n"
-            .'Could you send it once more, or type the question?';
+        return "I do listen to voice notes 🎧 — I just couldn't read that one clearly.\n\n"
+            .'Try sending it again, or type your question in text.';
     }
 
     public function voiceNoteTooLongReply(): string
@@ -2864,13 +2864,87 @@ final class ChannelConversationService
         // Stacked label + URL (same as /help) — one-line "Also on: a · b · c" wraps badly on mobile.
         $channels = $this->channelsAccessBlock($style, $currentChannel, $chatType, $memberPhoneForWeb);
         $line = "I help with community schedules, updates, and what's been shared. "
-            .$this->anyLanguageHint();
+            .$this->anyLanguageHint()
+            ."\nYou can send voice notes on Telegram or WhatsApp — I listen and reply in your language.";
 
         if ($channels !== '') {
             $line .= "\n\n".$channels;
         }
 
         return $line;
+    }
+
+    /**
+     * Meta questions about what Zak is or can do (including voice notes).
+     */
+    public function isZakCapabilityAsk(string $text): bool
+    {
+        $t = mb_strtolower(trim($text));
+        if ($t === '') {
+            return false;
+        }
+
+        if (preg_match('/^(who are you|what (?:can|do) you do|what are you)\b/u', $t) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\b(voice note|voice message|voice notes|audio message|send voice)\b/u', $t) === 1
+            && preg_match('/\b(can you|do you|are you able|support|listen|hear|accept|handle|read)\b/u', $t) === 1) {
+            return true;
+        }
+
+        return preg_match('/\bwhat (?:can|do) you (?:do|support|handle)\b/u', $t) === 1;
+    }
+
+    /**
+     * Accurate capability summary for "what can you do?" / voice-note questions.
+     *
+     * @param  'plain'|'whatsapp'  $style
+     * @param  'whatsapp'|'telegram'|'web'|null  $currentChannel
+     * @param  'private'|'group'|null  $chatType
+     */
+    public function zakCapabilityReply(
+        string $style = 'plain',
+        ?string $currentChannel = null,
+        ?string $chatType = null,
+        ?string $memberPhoneForWeb = null,
+    ): string {
+        $scope = $this->friendlyScopeSummary(null);
+        $bot = $this->botDisplayName();
+        $channels = $this->channelsAccessBlock($style, $currentChannel, $chatType, $memberPhoneForWeb);
+
+        if ($style === 'whatsapp') {
+            $body = "*I'm {$bot}* 🙂\n\n"
+                ."Here's what I can do:\n"
+                ."• Answer from community knowledge — {$scope} 💬\n"
+                ."• Listen to voice notes on Telegram and WhatsApp, then reply in your language 🎧\n"
+                ."• Catch you up on what you missed when I have sources 🔎\n"
+                ."• Take tips via ".$this->highlightCommand('/share', 'whatsapp')
+                .' and ideas via '.$this->highlightCommand('/feature', 'whatsapp')." ✍️\n"
+                ."• If I don't know yet, I'll say so and follow up when I can 🙂\n\n"
+                .$this->anyLanguageHint();
+
+            if ($channels !== '') {
+                $body .= "\n\n".$channels;
+            }
+
+            return $body;
+        }
+
+        $body = "I'm {$bot} 🙂\n\n"
+            ."Here's what I can do:\n"
+            ."• Answer from community knowledge — {$scope}\n"
+            ."• Listen to voice notes on Telegram and WhatsApp, then reply in your language\n"
+            ."• Catch you up on what you missed when I have sources\n"
+            ."• Take tips via /share and ideas via /feature (admin review)\n"
+            ."• If I don't know yet, I'll say so and follow up when I can\n\n"
+            .$this->anyLanguageHint();
+
+        if ($channels !== '') {
+            $body .= "\n\n".$channels;
+        }
+
+        return $body;
     }
 
     /**
@@ -2986,19 +3060,8 @@ final class ChannelConversationService
             return "Doing well, thanks 🙂 What do you need help with?";
         }
 
-        if (preg_match('/^(who are you|what (?:can|do) you do|help)\b/u', $stripped) === 1) {
-            $intro = "I'm {$this->botDisplayName()} 🙂\n\n".$this->shortIntro($style, $channel, $chatType, $memberPhoneForWeb);
-
-            if ($style === 'whatsapp') {
-                return $intro."\n\n"
-                    .'Try '.$this->highlightCommand('/ask', 'whatsapp').', '
-                    .$this->highlightCommand('/share', 'whatsapp').', or '
-                    .$this->highlightCommand('/feature', 'whatsapp')
-                    .', or just ask in plain language.';
-            }
-
-            return $intro."\n\n"
-                .'Try /ask, /share, or /feature, or just ask in plain language.';
+        if ($this->isZakCapabilityAsk($text)) {
+            return $this->zakCapabilityReply($style, $channel, $chatType, $memberPhoneForWeb);
         }
 
         if (preg_match('/\b(not friendly|unfriendly|rude|mean|cold|unhelpful)\b/u', $stripped) === 1
