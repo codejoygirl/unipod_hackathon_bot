@@ -3,9 +3,13 @@
 import Image from "next/image";
 import { APP_LOGO_SRC } from "@/lib/branding";
 
-export function GrokThinkingLoader() {
+interface GrokThinkingLoaderProps {
+  statusText?: string;
+}
+
+export function GrokThinkingLoader({ statusText = "Zak is thinking…" }: GrokThinkingLoaderProps) {
   return (
-    <div className="flex items-end gap-2 self-start py-1">
+    <div className="flex items-end gap-2 self-start py-1" role="status" aria-live="polite">
       {/* Short bot icon on the left (avatar like WhatsApp) */}
       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white p-0.5 shadow-xs overflow-hidden">
         <Image
@@ -18,10 +22,15 @@ export function GrokThinkingLoader() {
       </div>
 
       {/* WhatsApp-style typing bubble with 3 animated bouncing dots */}
-      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-xs border border-zinc-200/80 bg-white px-4 py-3 shadow-xs">
-        <span className="h-2 w-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.32s]" />
-        <span className="h-2 w-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.16s]" />
-        <span className="h-2 w-2 rounded-full bg-zinc-500 animate-bounce" />
+      <div className="flex flex-col gap-1 rounded-2xl rounded-tl-xs border border-zinc-200/80 bg-white px-4 py-2.5 shadow-xs dark:border-zinc-700/80 dark:bg-[#1a1a1a]">
+        <div className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.32s] dark:bg-zinc-400" />
+          <span className="h-2 w-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.16s] dark:bg-zinc-400" />
+          <span className="h-2 w-2 rounded-full bg-zinc-500 animate-bounce dark:bg-zinc-400" />
+        </div>
+        {statusText ? (
+          <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">{statusText}</span>
+        ) : null}
       </div>
     </div>
   );

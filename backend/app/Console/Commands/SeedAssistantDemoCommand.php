@@ -46,50 +46,102 @@ class SeedAssistantDemoCommand extends Command
             'user_id' => $user->id,
         ])->firstOrFail();
 
-        $uri = 'doc://demo-clinic-hours';
-        $content = 'The community clinic opens on Saturday at 9am and closes at 1pm.';
-
-        $source = KnowledgeSource::query()->updateOrCreate(
+        $seedDocs = [
             [
-                'tenant_id' => $tenant->id,
-                'uri' => $uri,
-            ],
-            [
-                'community_id' => $community->id,
-                'created_by' => $user->id,
+                'uri' => 'doc://demo-clinic-hours',
                 'name' => 'Clinic hours',
                 'source_type' => 'markdown',
                 'authority_tier' => KnowledgeAuthorityTier::OfficialAnnouncement,
-                'lifecycle_status' => KnowledgeLifecycleStatus::Published,
-                'language' => 'en',
-                'content' => $content,
-                'content_sha256' => hash('sha256', $content),
-                'published_at' => now(),
+                'content' => 'The community clinic opens on Saturday at 9am and closes at 1pm.',
                 'metadata' => ['seeded_by' => 'zak:seed-assistant-demo'],
             ],
-        );
+            [
+                'uri' => 'community://'.$community->id.'/asset/gfolder:1bximvs0xra5nfmdkvbdbzjgmuuqptlbs',
+                'name' => 'UniPod Community Resources',
+                'source_type' => 'markdown',
+                'authority_tier' => KnowledgeAuthorityTier::VerifiedResource,
+                'content' => "UniPod Community Resources\n\nhttps://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs\n\nOfficial UniPod community Google Drive hub containing core programme toolkits, templates, guidelines, and cohort learning materials.",
+                'metadata' => [
+                    'seeded_by' => 'zak:seed-assistant-demo',
+                    'asset_kind' => 'folder',
+                    'asset_identity' => 'gfolder:1bximvs0xra5nfmdkvbdbzjgmuuqptlbs',
+                    'delivery' => 'google_drive',
+                    'delivery_url' => 'https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs',
+                ],
+            ],
+            [
+                'uri' => 'community://'.$community->id.'/asset/gdoc:1yzvsmxcbq_evwzk-zx3ibhyxwdhxrs5o',
+                'name' => 'UniPods Handbook',
+                'source_type' => 'markdown',
+                'authority_tier' => KnowledgeAuthorityTier::VerifiedResource,
+                'content' => "UniPods Handbook\n\nhttps://drive.google.com/file/d/1YZvsMxcbq_EvWZk-Zx3IBHYxwdhXRs5O/view\n\nComprehensive UniPods programme handbook with cohort guidelines, expectations, innovation milestones, and mentor directories.",
+                'metadata' => [
+                    'seeded_by' => 'zak:seed-assistant-demo',
+                    'asset_kind' => 'handbook',
+                    'asset_identity' => 'gdoc:1yzvsmxcbq_evwzk-zx3ibhyxwdhxrs5o',
+                    'delivery' => 'google_drive',
+                    'delivery_url' => 'https://drive.google.com/file/d/1YZvsMxcbq_EvWZk-Zx3IBHYxwdhXRs5O/view',
+                ],
+            ],
+            [
+                'uri' => 'community://'.$community->id.'/asset/gdoc:1jkykc8xmp1msh7jpga-c0lpszceg_gkf',
+                'name' => 'Wadhwani Ignite Module Slides',
+                'source_type' => 'markdown',
+                'authority_tier' => KnowledgeAuthorityTier::VerifiedResource,
+                'content' => "Wadhwani Ignite Module Slides\n\nhttps://drive.google.com/file/d/1jkYKc8xmP1Msh7jPGaC0lPsZceG_GkFh/view\n\nWadhwani Ignite entrepreneurship training decks, curriculum slides, and workshop resources.",
+                'metadata' => [
+                    'seeded_by' => 'zak:seed-assistant-demo',
+                    'asset_kind' => 'slides',
+                    'asset_identity' => 'gdoc:1jkykc8xmp1msh7jpga-c0lpszceg_gkf',
+                    'delivery' => 'google_drive',
+                    'delivery_url' => 'https://drive.google.com/file/d/1jkYKc8xmP1Msh7jPGaC0lPsZceG_GkFh/view',
+                ],
+            ],
+        ];
 
-        if (! $this->option('skip-ai')) {
-            try {
-                $response = $ai->syncDocument(
-                    tenantId: $tenant->id,
-                    communityId: $community->id,
-                    uri: $uri,
-                    name: 'Clinic hours',
-                    sourceType: 'markdown',
-                    content: $content,
-                    authorityTier: KnowledgeAuthorityTier::OfficialAnnouncement->value,
-                    metadata: ['seeded_by' => 'zak:seed-assistant-demo'],
-                );
-                $source->ai_source_id = $response['source_id'] ?? null;
-                $source->ai_version_id = $response['version_id'] ?? null;
-                $source->save();
-                $aiIngested = true;
-            } catch (Throwable $e) {
-                $aiError = $e->getMessage();
+        foreach ($seedDocs as $doc) {
+            $source = KnowledgeSource::query()->updateOrCreate(
+                [
+                    'tenant_id' => $tenant->id,
+                    'uri' => $doc['uri'],
+                ],
+                [
+                    'community_id' => $community->id,
+                    'created_by' => $user->id,
+                    'name' => $doc['name'],
+                    'source_type' => $doc['source_type'],
+                    'authority_tier' => $doc['authority_tier'],
+                    'lifecycle_status' => KnowledgeLifecycleStatus::Published,
+                    'language' => 'en',
+                    'content' => $doc['content'],
+                    'content_sha256' => hash('sha256', $doc['content']),
+                    'published_at' => now(),
+                    'metadata' => $doc['metadata'],
+                ],
+            );
+
+            if (! $this->option('skip-ai')) {
+                try {
+                    $response = $ai->syncDocument(
+                        tenantId: $tenant->id,
+                        communityId: $community->id,
+                        uri: $doc['uri'],
+                        name: $doc['name'],
+                        sourceType: $doc['source_type'],
+                        content: $doc['content'],
+                        authorityTier: $doc['authority_tier']->value,
+                        metadata: $doc['metadata'],
+                    );
+                    $source->ai_source_id = $response['source_id'] ?? null;
+                    $source->ai_version_id = $response['version_id'] ?? null;
+                    $source->save();
+                    $aiIngested = true;
+                } catch (Throwable $e) {
+                    $aiError = $e->getMessage();
+                }
+            } else {
+                $aiError = 'skipped (--skip-ai)';
             }
-        } else {
-            $aiError = 'skipped (--skip-ai)';
         }
 
         $user->tokens()->where('name', 'zak-demo')->delete();
@@ -172,7 +224,7 @@ class SeedAssistantDemoCommand extends Command
         $this->components->twoColumnDetail('<fg=green;options=bold>Seeded user</>', $email.' / '.$password);
         $this->components->twoColumnDetail('<fg=green;options=bold>Membership role</>', MembershipRole::CommunityAdmin->value);
         $this->components->twoColumnDetail('<fg=green;options=bold>Knowledge doc</>', $source->name.' ['.$source->lifecycle_status->value.']');
-        $this->components->twoColumnDetail('<fg=green;options=bold>Knowledge URI</>', $uri);
+        $this->components->twoColumnDetail('<fg=green;options=bold>Knowledge URI</>', $source->uri);
         $this->components->twoColumnDetail(
             '<fg=green;options=bold>AI ingest</>',
             $aiIngested ? '<fg=green>OK</>' : '<fg=yellow>'.($aiError ?? 'not run').'</>'
@@ -227,7 +279,7 @@ BASH);
             'ZAK_DEMO_TOKEN='.$plainTextToken,
             'ZAK_TENANT_ID='.$tenant->id,
             'ZAK_COMMUNITY_ID='.$community->id,
-            'ZAK_KNOWLEDGE_URI='.$uri,
+            'ZAK_KNOWLEDGE_URI='.$source->uri,
             'ZAK_KNOWLEDGE_ID='.$source->id,
             '',
         ]));

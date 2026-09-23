@@ -8,7 +8,14 @@ export type QuotedMessage = {
 
 export type StoredChatEntry =
   | { id: string; role: "user"; text: string; sentAt: string; quote?: QuotedMessage }
-  | { id: string; role: "assistant"; response: AssistantAskResponse; sentAt: string }
+  | {
+      id: string;
+      role: "assistant";
+      response: AssistantAskResponse;
+      sentAt: string;
+      reaction?: "up" | "down" | null;
+      quote?: QuotedMessage;
+    }
   | { id: string; role: "error"; text: string; sentAt: string };
 
 function storageKey(communityId: string, sessionId: string): string {

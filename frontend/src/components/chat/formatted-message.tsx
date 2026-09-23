@@ -104,17 +104,17 @@ function parseUrl(rawUrl: string): LinkInfo {
 function getLinkBadgeClass(type: LinkInfo["type"]): string {
   switch (type) {
     case "teams":
-      return "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200/80";
+      return "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200/80 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800";
     case "zoom":
-      return "bg-sky-50 text-sky-700 hover:bg-sky-100 border-sky-200/80";
+      return "bg-sky-50 text-sky-700 hover:bg-sky-100 border-sky-200/80 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800";
     case "meet":
-      return "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200/80";
+      return "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200/80 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800";
     case "whatsapp":
-      return "bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-300 font-semibold";
+      return "bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-300 font-semibold dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800";
     case "telegram":
-      return "bg-sky-50 text-sky-800 hover:bg-sky-100 border-sky-300 font-semibold";
+      return "bg-sky-50 text-sky-800 hover:bg-sky-100 border-sky-300 font-semibold dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800";
     default:
-      return "bg-zinc-100/90 text-zinc-700 hover:bg-zinc-200/80 border-zinc-200";
+      return "bg-zinc-100/90 text-zinc-700 hover:bg-zinc-200/80 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-700";
   }
 }
 
@@ -129,14 +129,14 @@ function LinkIcon({ type }: { type: LinkInfo["type"] }) {
   }
   if (type === "whatsapp") {
     return (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-emerald-600">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-emerald-600 dark:text-emerald-400">
         <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
       </svg>
     );
   }
   if (type === "telegram") {
     return (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-sky-600">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-sky-600 dark:text-sky-400">
         <line x1="22" y1="2" x2="11" y2="13" />
         <polygon points="22 2 15 22 11 13 2 9 22 2" />
       </svg>
@@ -166,7 +166,7 @@ function EmailBadge({ email, isUser }: { email: string; isUser: boolean }) {
       className={`inline-flex items-center gap-1.5 my-0.5 mx-0.5 rounded-lg border px-2 py-0.5 text-xs font-medium transition shadow-2xs select-none ${
         isUser
           ? "border-zinc-700/80 bg-zinc-800/90 text-sky-200"
-          : "border-sky-200/90 bg-sky-50/90 text-sky-900"
+          : "border-sky-200/90 bg-sky-50/90 text-sky-900 dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-300"
       }`}
     >
       <a
@@ -183,7 +183,7 @@ function EmailBadge({ email, isUser }: { email: string; isUser: boolean }) {
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="shrink-0 text-sky-600"
+          className="shrink-0 text-sky-600 dark:text-sky-400"
         >
           <rect x="2" y="4" width="20" height="16" rx="2" />
           <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
@@ -199,7 +199,7 @@ function EmailBadge({ email, isUser }: { email: string; isUser: boolean }) {
             ? "bg-emerald-600 text-white font-semibold"
             : isUser
             ? "bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white"
-            : "bg-sky-100 text-sky-700 hover:bg-sky-200"
+            : "bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900 dark:text-sky-200"
         }`}
         title="Copy email address"
       >
@@ -226,7 +226,7 @@ function PhoneBadge({ phone, isUser }: { phone: string; isUser: boolean }) {
       className={`inline-flex items-center gap-1.5 my-0.5 mx-0.5 rounded-lg border px-2 py-0.5 text-xs font-medium transition shadow-2xs select-none ${
         isUser
           ? "border-zinc-700/80 bg-zinc-800/90 text-emerald-300"
-          : "border-emerald-200/90 bg-emerald-50/90 text-emerald-900"
+          : "border-emerald-200/90 bg-emerald-50/90 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
       }`}
     >
       <a
@@ -243,7 +243,7 @@ function PhoneBadge({ phone, isUser }: { phone: string; isUser: boolean }) {
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="shrink-0 text-emerald-600"
+          className="shrink-0 text-emerald-600 dark:text-emerald-400"
         >
           <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
         </svg>
@@ -258,7 +258,7 @@ function PhoneBadge({ phone, isUser }: { phone: string; isUser: boolean }) {
             ? "bg-emerald-600 text-white font-semibold"
             : isUser
             ? "bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white"
-            : "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+            : "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900 dark:text-emerald-200"
         }`}
         title="Copy phone number"
       >
@@ -268,7 +268,7 @@ function PhoneBadge({ phone, isUser }: { phone: string; isUser: boolean }) {
   );
 }
 
-// Bot Command chip (e.g. /help, /catchup, /summary, /ask, /share)
+// Bot Command chip (e.g. /ask, /share, /feature, /help, /asset, etc.)
 function CommandBadge({ command, isUser }: { command: string; isUser: boolean }) {
   const clean = command.replace(/^\*|\*$/g, "").trim();
   const display = clean.startsWith("/") ? clean : `/${clean}`;
@@ -276,7 +276,7 @@ function CommandBadge({ command, isUser }: { command: string; isUser: boolean })
   function handleClick() {
     if (typeof window !== "undefined") {
       window.dispatchEvent(
-        new CustomEvent("insert-chat-command", { detail: { command: display } })
+        new CustomEvent("insert-chat-command", { detail: { command: display + " " } })
       );
     }
   }
@@ -288,11 +288,12 @@ function CommandBadge({ command, isUser }: { command: string; isUser: boolean })
       className={`inline-flex items-center font-mono font-bold text-[12px] px-2 py-0.5 rounded-lg border mx-0.5 my-0.5 transition cursor-pointer shadow-2xs select-none active:scale-95 ${
         isUser
           ? "bg-zinc-800 text-emerald-300 border-zinc-700 hover:bg-zinc-700 hover:text-white"
-          : "bg-zinc-100 text-zinc-900 border-zinc-300 hover:bg-zinc-200/90 hover:border-zinc-400"
+          : "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-900/60"
       }`}
-      title={`Click to use ${display}`}
+      title={`Click to populate ${display}`}
     >
       <span>{display}</span>
+      <span className="ml-1 text-[9px] opacity-70">↵</span>
     </button>
   );
 }
@@ -300,10 +301,10 @@ function CommandBadge({ command, isUser }: { command: string; isUser: boolean })
 function MentionBadge({ mention, isUser }: { mention: string; isUser: boolean }) {
   return (
     <span
-      className={`inline-flex items-center font-medium px-1.5 py-0.2 rounded-md text-xs mx-0.5 ${
+      className={`inline-flex items-center font-medium px-1.5 py-0.5 rounded-md text-xs mx-0.5 ${
         isUser
           ? "bg-zinc-800 text-emerald-300 border border-zinc-700/80"
-          : "bg-zinc-100 text-zinc-800 border border-zinc-200/80"
+          : "bg-zinc-100 text-zinc-800 border border-zinc-200/80 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-700"
       }`}
     >
       {mention}
@@ -321,18 +322,36 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   }
 
   return (
-    <div className="my-2.5 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-900 text-zinc-100 shadow-xs">
-      <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3.5 py-1.5 text-[11px] font-mono text-zinc-400">
-        <span className="uppercase tracking-wider text-[10px] text-zinc-400 font-semibold">{language || "code"}</span>
+    <div className="my-3 overflow-hidden rounded-2xl border border-zinc-800 bg-[#1e1e20] text-zinc-100 shadow-xs dark:border-zinc-700/80 dark:bg-[#141414]">
+      <div className="flex items-center justify-between border-b border-zinc-800/80 bg-[#18181b] px-4 py-2 text-[12px] font-mono text-zinc-400 dark:border-zinc-800 dark:bg-[#18181a]">
+        <span className="text-[11px] text-zinc-300 font-medium tracking-wide">
+          {language || "snippet"}
+        </span>
         <button
           type="button"
           onClick={handleCopy}
-          className="rounded px-2 py-0.5 hover:bg-zinc-800 hover:text-zinc-200 transition cursor-pointer"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-700/60 hover:text-white transition cursor-pointer"
+          title="Copy code"
         >
-          {copied ? "Copied!" : "Copy"}
+          {copied ? (
+            <>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-emerald-400">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span className="text-[11px] text-emerald-400 font-medium">Copied!</span>
+            </>
+          ) : (
+            <>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              <span className="text-[11px]">Copy</span>
+            </>
+          )}
         </button>
       </div>
-      <pre className="overflow-x-auto p-3.5 font-mono text-xs leading-relaxed text-zinc-200">
+      <pre className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed text-zinc-200">
         <code>{code}</code>
       </pre>
     </div>
@@ -345,9 +364,9 @@ function MarkdownTable({ rows, isUser }: { rows: string[][]; isUser: boolean }) 
   const body = rows.slice(1);
 
   return (
-    <div className="my-2.5 overflow-x-auto rounded-xl border border-zinc-200/90 shadow-2xs">
-      <table className="min-w-full divide-y divide-zinc-200 text-xs">
-        <thead className={isUser ? "bg-zinc-800 text-zinc-200" : "bg-zinc-50 text-zinc-700"}>
+    <div className="my-2.5 overflow-x-auto rounded-xl border border-zinc-200/90 shadow-2xs dark:border-zinc-800">
+      <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-800 text-xs">
+        <thead className={isUser ? "bg-zinc-800 text-zinc-200" : "bg-zinc-50 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"}>
           <tr>
             {header.map((col, idx) => (
               <th
@@ -359,9 +378,9 @@ function MarkdownTable({ rows, isUser }: { rows: string[][]; isUser: boolean }) 
             ))}
           </tr>
         </thead>
-        <tbody className={`divide-y divide-zinc-100 ${isUser ? "bg-zinc-900 text-zinc-200" : "bg-white text-zinc-700"}`}>
+        <tbody className={`divide-y divide-zinc-100 dark:divide-zinc-800/60 ${isUser ? "bg-zinc-900 text-zinc-200" : "bg-white text-zinc-700 dark:bg-[#1a1a1a] dark:text-zinc-300"}`}>
           {body.map((row, rIdx) => (
-            <tr key={rIdx} className={isUser ? "hover:bg-zinc-800/50" : "hover:bg-zinc-50/50"}>
+            <tr key={rIdx} className={isUser ? "hover:bg-zinc-800/50" : "hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30"}>
               {row.map((cell, cIdx) => (
                 <td key={cIdx} className="px-3 py-2">
                   {cell}
@@ -380,28 +399,17 @@ function MarkdownTable({ rows, isUser }: { rows: string[][]; isUser: boolean }) 
  */
 function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  // Strip stray WhatsApp formatting artifacts like .* or *. so they never dangle in web view
-  let remaining = text.replace(/\s*(\.\*|\*\.)(?=\s|$|[.,:;!?])/g, "").replace(/\.\*|\*\./g, "");
+  let remaining = text.replace(/(?<=\s|^)(\.\*|\*\.)(?=\s|$)/g, "");
   let keyIndex = 0;
 
-  // Patterns in order of precedence:
-  // 1. Email: clean, or wrapped in * or _ or ` or quotes, and swallow surrounding punctuation/asterisks (. , * .* *.)
   const emailRegex = /(?:[*_`'"<(\[]+)?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?:(?:\.\*|\*\.|\.|\*)+|[*_`'">)\]]+)?/;
-  // 2. URL (including wa.me and t.me)
   const urlRegex = /(https?:\/\/[^\s<>"'()]+)/;
-  // 3. Bot commands: /ask, /share, /feature, /help, /start, /catchup, /summary, /logins, /loginas or *catchup*, *summary*, *help*, *ask*, *logins*
-  const commandRegex = /(?:^|(?<=\s|[([{"']))(\/(?:ask|share|feature|help|start|catchup|summary|join|export|import|publish|kb|knowledge|features|approve|decline|reply|logins|loginas)\b|\*(?:catchup|summary|help|ask|share|feature|start|logins|loginas)\*)(?=[\s,.:;!?)\]}"']|$)/i;
-  // 4. Phone number e.g. +2348117084647 or +254 712 345678
+  const commandRegex = /(?:^|(?<=\s|[([{"']))(\/(?:ask|share|feature|help|start|catchup|summary|join|export|import|publish|kb|knowledge|features|approve|decline|reply|logins|loginas|asset)\b|\*(?:catchup|summary|help|ask|share|feature|start|logins|loginas|asset)\*)(?=[\s,.:;!?)\]}"']|$)/i;
   const phoneRegex = /(?:^|(?<=\s))(\+(?:[0-9][\s-]?){7,14}[0-9])(?=[\s,.]|$)/;
-  // 5. Mention e.g. @zak or @username
   const mentionRegex = /(?:^|(?<=\s))(@[a-zA-Z0-9_]{2,30})(?=[\s,.]|$)/;
-  // 6. Bold Markdown **text** or WhatsApp style *text*
-  const boldRegex = /\*\*([^*]+?)\*\*|(?<!\w)\*([^\s*][^*]*?[^\s*]|[^\s*])\*(?!\w)/;
-  // 7. Italic _text_
-  const italicRegex = /(?<!\w)_([^_]+?)_(?!\w)/;
-  // 8. Strikethrough ~text~ or ~~text~~
+  const boldRegex = /\*\*([^*\n]+?)\*\*|\*([^*\n\s](?:[^*\n]*?[^*\n\s])?)\*/;
+  const italicRegex = /(?<!\w)_([^_\n\s](?:[^_\n]*?[^_\n\s])?)_(?!\w)/;
   const strikeRegex = /~~([^~]+?)~~|(?<!\w)~([^~\n]+?)~(?!\w)/;
-  // 9. Inline code `code`
   const codeRegex = /`([^`]+?)`/;
 
   const typePrecedence: Record<string, number> = {
@@ -484,7 +492,6 @@ function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
       break;
     }
 
-    // Sort by earliest position, breaking ties with precedence
     matches.sort((a, b) => {
       if (a.index !== b.index) return a.index - b.index;
       return (typePrecedence[a.type] ?? 99) - (typePrecedence[b.type] ?? 99);
@@ -492,7 +499,6 @@ function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
 
     const earliest = matches[0];
 
-    // Push text before match
     if (earliest.index > 0) {
       nodes.push(remaining.slice(0, earliest.index));
     }
@@ -539,7 +545,7 @@ function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
       nodes.push(<MentionBadge key={k} mention={earliest.value} isUser={isUser} />);
     } else if (earliest.type === "bold") {
       nodes.push(
-        <strong key={k} className={isUser ? "font-semibold text-white" : "font-semibold text-zinc-900"}>
+        <strong key={k} className={isUser ? "font-semibold text-white" : "font-semibold text-zinc-900 dark:text-zinc-100"}>
           {earliest.value}
         </strong>
       );
@@ -562,7 +568,7 @@ function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
           className={`rounded px-1.5 py-0.5 text-[12px] font-mono border ${
             isUser
               ? "bg-zinc-800 text-zinc-200 border-zinc-700"
-              : "bg-zinc-100 text-zinc-800 border-zinc-200/80"
+              : "bg-zinc-100 text-zinc-800 border-zinc-200/80 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-700"
           }`}
         >
           {earliest.value}
@@ -577,7 +583,6 @@ function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
 }
 
 export function FormattedMessage({ content, isUser = false }: FormattedMessageProps) {
-  // Extract detected meeting links for preview action cards
   const urlRegex = /(https?:\/\/[^\s<>"'()]+)/g;
   const detectedLinks: LinkInfo[] = [];
   const matches = content.match(urlRegex);
@@ -587,13 +592,11 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
     }
   }
 
-  // Deduplicate links for preview cards
   const uniquePreviewLinks = detectedLinks.filter(
     (l, idx, arr) => arr.findIndex((x) => x.url === l.url) === idx
   );
 
-  // Parse multiline blocks: code blocks, tables, lists, quotes, headings
-  const sanitizedContent = content.replace(/\s*(\.\*|\*\.)(?=\s|$|[.,:;!?])/g, "").replace(/\.\*|\*\./g, "");
+  const sanitizedContent = content.replace(/(?<=\s|^)(\.\*|\*\.)(?=\s|$)/g, "");
   const rawLines = sanitizedContent.split("\n");
   const blocks: React.ReactNode[] = [];
   let i = 0;
@@ -622,12 +625,11 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       continue;
     }
 
-    // 2. Markdown Table: starts and ends with |
+    // 2. Markdown Table
     if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
       const tableRows: string[][] = [];
       while (i < rawLines.length && rawLines[i].trim().startsWith("|") && rawLines[i].trim().endsWith("|")) {
         const rowLine = rawLines[i].trim();
-        // Skip separator row |---|---|
         if (!/^\|(?:\s*[-:]+[-| :]*)\|$/.test(rowLine)) {
           const cells = rowLine
             .slice(1, -1)
@@ -652,10 +654,10 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       continue;
     }
 
-    // 3. Headings: #, ##, ###
+    // 3. Headings
     if (line.startsWith("### ")) {
       blocks.push(
-        <h4 key={`h4-${i}`} className={`font-semibold text-sm mt-2 mb-1 ${isUser ? "text-white" : "text-zinc-900"}`}>
+        <h4 key={`h4-${i}`} className={`font-semibold text-sm mt-2 mb-1 ${isUser ? "text-white" : "text-zinc-900 dark:text-zinc-100"}`}>
           {renderInlineContent(line.slice(4), isUser)}
         </h4>
       );
@@ -664,7 +666,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
     }
     if (line.startsWith("## ")) {
       blocks.push(
-        <h3 key={`h3-${i}`} className={`font-bold text-sm mt-2.5 mb-1 ${isUser ? "text-white" : "text-zinc-900"}`}>
+        <h3 key={`h3-${i}`} className={`font-bold text-sm mt-2.5 mb-1 ${isUser ? "text-white" : "text-zinc-900 dark:text-zinc-100"}`}>
           {renderInlineContent(line.slice(3), isUser)}
         </h3>
       );
@@ -673,7 +675,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
     }
     if (line.startsWith("# ")) {
       blocks.push(
-        <h2 key={`h2-${i}`} className={`font-bold text-base mt-3 mb-1.5 ${isUser ? "text-white" : "text-zinc-900"}`}>
+        <h2 key={`h2-${i}`} className={`font-bold text-base mt-3 mb-1.5 ${isUser ? "text-white" : "text-zinc-900 dark:text-zinc-100"}`}>
           {renderInlineContent(line.slice(2), isUser)}
         </h2>
       );
@@ -681,11 +683,11 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       continue;
     }
 
-    // WhatsApp style Section Header: *Header text* on its own line
-    const sectionMatch = trimmed.match(/^\*([^*]+)\*$/);
+    // Section Header: *Header text*
+    const sectionMatch = trimmed.match(/^\*([^*]+)\*[.:!]?$/);
     if (sectionMatch) {
       blocks.push(
-        <div key={`section-${i}`} className={`font-bold text-[14px] mt-2 mb-0.5 ${isUser ? "text-white" : "text-zinc-950"}`}>
+        <div key={`section-${i}`} className={`font-bold text-[14.5px] mt-2.5 mb-1 ${isUser ? "text-white" : "text-zinc-950 dark:text-zinc-100"}`}>
           {renderInlineContent(sectionMatch[1], isUser)}
         </div>
       );
@@ -693,14 +695,14 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       continue;
     }
 
-    // 4. Bullet lists: - item, * item, • item
+    // 4. Bullet lists
     const bulletMatch = line.match(/^\s*[-*•]\s+(.*)$/);
     if (bulletMatch) {
       blocks.push(
         <div key={`bullet-${i}`} className="flex items-start gap-2 my-1 pl-1">
           <span
             className={`mt-2 h-1.5 w-1.5 rounded-full shrink-0 ${
-              isUser ? "bg-zinc-400" : "bg-zinc-500"
+              isUser ? "bg-zinc-400" : "bg-zinc-500 dark:bg-zinc-400"
             }`}
             aria-hidden
           />
@@ -711,12 +713,12 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       continue;
     }
 
-    // 5. Numbered lists: 1. item
+    // 5. Numbered lists
     const numberMatch = line.match(/^\s*(\d+)\.\s+(.*)$/);
     if (numberMatch) {
       blocks.push(
         <div key={`num-${i}`} className="flex items-start gap-2 my-1 pl-1">
-          <span className={`font-semibold text-xs mt-0.5 shrink-0 ${isUser ? "text-zinc-300" : "text-zinc-500"}`}>
+          <span className={`font-semibold text-xs mt-0.5 shrink-0 ${isUser ? "text-zinc-300" : "text-zinc-500 dark:text-zinc-400"}`}>
             {numberMatch[1]}.
           </span>
           <div className="flex-1">{renderInlineContent(numberMatch[2], isUser)}</div>
@@ -726,13 +728,13 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       continue;
     }
 
-    // 6. Blockquotes: > quote
+    // 6. Blockquotes
     if (line.startsWith("> ")) {
       blocks.push(
         <blockquote
           key={`quote-${i}`}
           className={`border-l-2 pl-3 my-1.5 italic text-xs ${
-            isUser ? "border-zinc-500 text-zinc-300" : "border-zinc-300 text-zinc-600"
+            isUser ? "border-zinc-500 text-zinc-300" : "border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
           }`}
         >
           {renderInlineContent(line.slice(2), isUser)}
@@ -757,14 +759,14 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
         {blocks}
       </div>
 
-      {/* If there's a meeting link (like Teams, Zoom, Meet), render a rich interactive action card */}
+      {/* Meeting rich preview cards */}
       {!isUser &&
         uniquePreviewLinks
           .filter((l) => ["teams", "zoom", "meet"].includes(l.type))
           .map((link) => (
             <div
               key={link.url}
-              className="mt-3 rounded-xl border border-indigo-200/90 bg-indigo-50/70 p-3 text-indigo-950 shadow-2xs"
+              className="mt-3 rounded-xl border border-indigo-200/90 bg-indigo-50/70 p-3 text-indigo-950 shadow-2xs dark:border-indigo-800/80 dark:bg-indigo-950/40 dark:text-indigo-200"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -775,14 +777,14 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
                     </svg>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold tracking-tight text-indigo-950 truncate">
+                    <p className="text-xs font-semibold tracking-tight text-indigo-950 truncate dark:text-indigo-100">
                       {link.type === "teams"
                         ? "Microsoft Teams Meeting"
                         : link.type === "zoom"
                         ? "Zoom Meeting"
                         : "Google Meet Video Call"}
                     </p>
-                    <p className="text-[11px] text-indigo-700/80 truncate">
+                    <p className="text-[11px] text-indigo-700/80 truncate dark:text-indigo-300">
                       Online Community Session
                     </p>
                   </div>

@@ -67,3 +67,27 @@ export type ApiErrorBody = {
   message?: string;
   errors?: Record<string, string[] | string>;
 };
+
+export type CommunityResource = {
+  id: string;
+  name: string;
+  kind: "folder" | "handbook" | "slides" | "form" | "recording" | "document" | "other" | string;
+  url: string | null;
+  description: string;
+  authority_tier: string;
+  source_type: string;
+  published_at?: string | null;
+  is_asset?: boolean;
+};
+
+export type CommunityResourcesResponse = {
+  data: {
+    community: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+    is_admin: boolean;
+    resources: CommunityResource[];
+  };
+};

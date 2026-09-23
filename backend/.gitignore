@@ -26,6 +26,7 @@
 /public/login/
 /public/catch-up/
 /public/meetings/
+/public/resources/
 /public/tasks/
 /public/more/
 /public/*.svg
@@ -38,6 +39,8 @@
 /storage/pail
 /storage/app/zak-demo-ask.env
 /storage/app/zak-demo-ask.json
+/storage/app/zak-knowledge-import.env
+/storage/app/zak-knowledge-import.json
 /vendor
 _ide_helper.php
 Homestead.json
