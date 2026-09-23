@@ -28,7 +28,7 @@ class AdminKnowledgeDeskTest extends TestCase
             'tenant_id' => $tenant->id,
             'community_id' => $community->id,
             'created_by' => $user->id,
-            'name' => 'WA Web spike forward',
+            'name' => 'UniPods / Wadhwani programme resource pack',
             'uri' => 'whatsapp-web-spike://import/test',
             'source_type' => 'whatsapp',
             'lifecycle_status' => KnowledgeLifecycleStatus::Draft,
@@ -41,9 +41,36 @@ class AdminKnowledgeDeskTest extends TestCase
         $desk = app(AdminKnowledgeDesk::class);
         $reply = $desk->draftCreatedReply($source, 'whatsapp');
 
-        $this->assertStringContainsString('Draft saved', $reply);
+        $this->assertStringContainsString('Imported', $reply);
+        $this->assertStringContainsString('Swipe-reply', $reply);
         $this->assertStringContainsString('/publish', $reply);
         $this->assertStringContainsString($desk->shortId($source), $reply);
+        $this->assertStringContainsString('/knowledge', $reply);
+        $this->assertStringNotContainsString('knowledge drafts', $reply);
+        $this->assertStringNotContainsString('spike', mb_strtolower($reply));
+    }
+
+    public function test_suggest_import_title_uses_first_meaningful_line(): void
+    {
+        $desk = app(AdminKnowledgeDesk::class);
+        $title = $desk->suggestImportTitle(
+            "UniPods / Wadhwani programme resource pack\n\nCommunity knowledge: schedules\n\nhttps://example.com"
+        );
+
+        $this->assertSame('UniPods / Wadhwani programme resource pack', $title);
+    }
+
+    public function test_draft_card_helpers_extract_id_and_confirm_publish(): void
+    {
+        $desk = app(AdminKnowledgeDesk::class);
+        $card = "*Imported.*\n\n*UniPods pack*\nID: `MGR8KC`\n\nSwipe-reply with *publish*";
+
+        $this->assertTrue($desk->isDraftCardText($card));
+        $this->assertSame('MGR8KC', $desk->extractShortIdFromDraftCard($card));
+        $this->assertTrue($desk->isPublishConfirmText(''));
+        $this->assertTrue($desk->isPublishConfirmText('publish'));
+        $this->assertTrue($desk->isPublishConfirmText('/publish'));
+        $this->assertFalse($desk->isPublishConfirmText('what is this about?'));
     }
 
     public function test_knowledge_lists_drafts_and_assets(): void
@@ -133,7 +160,9 @@ class AdminKnowledgeDeskTest extends TestCase
         $this->assertTrue($result['ok']);
         $this->assertStringContainsString('Published', $result['reply']);
         $this->assertStringContainsString('Export to publish', $result['reply']);
-        $this->assertStringContainsString('Synced to the AI index', $result['reply']);
+        $this->assertStringContainsString('Members can ask about it now', $result['reply']);
+        $this->assertStringNotContainsString('AI index', $result['reply']);
+        $this->assertStringNotContainsString('chunked', mb_strtolower($result['reply']));
 
         $this->assertDatabaseHas('knowledge_documents', [
             'name' => 'Export to publish',

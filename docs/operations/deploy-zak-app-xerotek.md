@@ -383,29 +383,62 @@ Do **not** run `infrastructure/whatsapp-web-spike` on this server.
 
 ---
 
-## Step 11 — Frontend (after API works)
+## Step 11 — Frontend (same domain, no separate Node site)
+
+The web UI is a **static Next export** copied into `backend/public/` beside `index.php`.  
+Members open **`https://zak-app.xerotek.io/`** — same hostname as the API (`/api/v1/...`).
 
 As **zak-app**:
 
 ```bash
 cd /home/zak-app/htdocs/zak-app.xerotek.io/frontend
 cp .env.example .env.local
-nano .env.local
 ```
 
-```env
-NEXT_PUBLIC_APP_NAME=Zak
-NEXT_PUBLIC_API_URL=https://zak-app.xerotek.io
-```
+Leave `NEXT_PUBLIC_API_URL` **empty** in `.env.local` (same-origin). Then:
 
 ```bash
 npm ci
-npm run build
+npm run build:laravel
 ```
 
-CloudPanel: add a **Node.js** site only if you have a **second** hostname (for example `app.zak-app.xerotek.io`). Do not point the PHP document root at `frontend/`. This PHP site must stay on `backend/public`.
+Confirm Laravel `.env` (Step 6) already has:
 
-If you have no second hostname yet, skip this step. Telegram and WhatsApp already work without the web UI.
+```env
+APP_URL=https://zak-app.xerotek.io
+FRONTEND_URL=https://zak-app.xerotek.io
+ZAK_WEB_CHAT_URL=https://zak-app.xerotek.io
+SANCTUM_STATEFUL_DOMAINS=zak-app.xerotek.io
+```
+
+Do **not** add a second CloudPanel Node site for the UI. Document root stays **`backend/public`**.
+
+After deploy or UI changes, re-run `npm run build:laravel` from `frontend/`.
+
+Verify on the VPS:
+
+```bash
+cd /home/zak-app/htdocs/zak-app.xerotek.io/backend
+php artisan zak:frontend-doctor
+php artisan route:clear
+php artisan config:cache
+```
+
+Member chat links use **`?k=`** (access key from `.env`) and **`?p=`** (phone digits). Example:
+
+```bash
+php artisan zak:web-chat-link --phone=2347041131371
+```
+
+Set in `.env`:
+
+```env
+ZAK_WEB_CHAT_ACCESS_KEY=<long-random-string>
+ZAK_WEB_CHAT_DEFAULT_COMMUNITY_ID=<community-ulid>
+ZAK_WEB_CHAT_REQUIRE_PHONE=true
+```
+
+If you still see the Laravel “Let’s get started” page, the static UI was never published — run `build:laravel` and `zak:frontend-doctor`.
 
 ---
 

@@ -83,10 +83,10 @@ final class ProgramAssetRegistrar
                 'reply' => "Paste one asset per line after {$cmd} import, like:\n"
                     ."```\n"
                     ."/asset import\n"
-                    ."handbook UniPods Handbook https://drive.google.com/file/d/…\n"
-                    ."form Session signup https://docs.google.com/forms/d/…\n"
+                    ."handbook UniPods Handbook https://drive.google.com/file/d/YOUR_FILE_ID/view\n"
+                    ."form Session signup https://docs.google.com/forms/d/YOUR_FORM_ID/viewform\n"
                     ."```\n\n"
-                    .'Same Drive file id is updated, not duplicated.',
+                    .'Paste full Share → Copy link URLs. Same Drive file id is updated, not duplicated.',
             ];
         }
 
@@ -195,9 +195,16 @@ final class ProgramAssetRegistrar
 
         $canonical = $this->canonicalizeGoogleUrl($url);
         if ($canonical === null) {
+            $looksGoogle = preg_match('/(?:drive|docs|sheets|slides)\.google\.com/i', $url) === 1;
+            $looksTruncated = preg_match('/[…]|\.{2,}(?:\/|$|\?|#)|YOUR_[A-Z0-9_]+/u', $url) === 1;
+
             return [
                 'ok' => false,
-                'reply' => 'For now, use a Google Drive / Docs / Sheets / Slides https link.',
+                'reply' => $looksTruncated
+                    ? 'That Drive link looks incomplete (placeholder or cut off). In Drive: Share → Copy link, then paste the *full* https URL — not the YOUR_FOLDER_ID example.'
+                    : ($looksGoogle
+                        ? 'That Google link is missing a usable file/folder id. Paste the full share link from Drive.'
+                        : 'For now, use a Google Drive / Docs / Sheets / Slides https link.'),
             ];
         }
 
@@ -344,25 +351,39 @@ final class ProgramAssetRegistrar
         }
 
         if (preg_match('#drive\.google\.com/file/d/([^/]+)#i', $url, $m) === 1) {
-            return 'https://drive.google.com/file/d/'.$m[1].'/view';
+            return $this->usableGoogleResourceId($m[1])
+                ? 'https://drive.google.com/file/d/'.$m[1].'/view'
+                : null;
         }
         if (preg_match('~drive\.google\.com/drive/(?:u/\d+/)?folders/([^/?#]+)~i', $url, $m) === 1) {
-            return 'https://drive.google.com/drive/folders/'.$m[1];
+            return $this->usableGoogleResourceId($m[1])
+                ? 'https://drive.google.com/drive/folders/'.$m[1]
+                : null;
         }
         if (preg_match('~drive\.google\.com/open\?[^#]*id=([a-zA-Z0-9_-]+)~i', $url, $m) === 1) {
-            return 'https://drive.google.com/file/d/'.$m[1].'/view';
+            return $this->usableGoogleResourceId($m[1])
+                ? 'https://drive.google.com/file/d/'.$m[1].'/view'
+                : null;
         }
         if (preg_match('#docs\.google\.com/document/d/([^/]+)#i', $url, $m) === 1) {
-            return 'https://docs.google.com/document/d/'.$m[1].'/edit';
+            return $this->usableGoogleResourceId($m[1])
+                ? 'https://docs.google.com/document/d/'.$m[1].'/edit'
+                : null;
         }
         if (preg_match('#docs\.google\.com/spreadsheets/d/([^/]+)#i', $url, $m) === 1) {
-            return 'https://docs.google.com/spreadsheets/d/'.$m[1].'/edit';
+            return $this->usableGoogleResourceId($m[1])
+                ? 'https://docs.google.com/spreadsheets/d/'.$m[1].'/edit'
+                : null;
         }
         if (preg_match('#docs\.google\.com/presentation/d/([^/]+)#i', $url, $m) === 1) {
-            return 'https://docs.google.com/presentation/d/'.$m[1].'/edit';
+            return $this->usableGoogleResourceId($m[1])
+                ? 'https://docs.google.com/presentation/d/'.$m[1].'/edit'
+                : null;
         }
         if (preg_match('#docs\.google\.com/forms/d/([^/]+)#i', $url, $m) === 1) {
-            return 'https://docs.google.com/forms/d/'.$m[1].'/viewform';
+            return $this->usableGoogleResourceId($m[1])
+                ? 'https://docs.google.com/forms/d/'.$m[1].'/viewform'
+                : null;
         }
 
         // Strip tracking query junk but keep path.
@@ -373,6 +394,23 @@ final class ProgramAssetRegistrar
         $scheme = $parts['scheme'] ?? 'https';
 
         return $scheme.'://'.$parts['host'].$parts['path'];
+    }
+
+    /**
+     * Reject help-text placeholders and truncated pastes (e.g. folders/…).
+     * Real Drive/Docs ids are alphanumeric with -/_ ; unit tests may use short fakes (≥5).
+     */
+    private function usableGoogleResourceId(string $id): bool
+    {
+        $id = rawurldecode(trim($id));
+        if ($id === '' || preg_match('/[…]/u', $id) === 1 || preg_match('/\.{2,}/', $id) === 1) {
+            return false;
+        }
+        if (preg_match('/^(your_[a-z0-9_]+|xxx+|placeholder|<[^>]+>)$/i', $id) === 1) {
+            return false;
+        }
+
+        return preg_match('/^[a-zA-Z0-9_-]{5,}$/', $id) === 1;
     }
 
     private function findExistingAsset(Community $community, string $identity, string $canonicalUrl): ?KnowledgeSource
@@ -410,16 +448,17 @@ final class ProgramAssetRegistrar
         if ($style === 'whatsapp') {
             return "Register a program file on Google Drive, like:\n"
                 ."```\n"
-                ."/asset handbook UniPods Handbook https://drive.google.com/file/d/…\n"
+                ."/asset handbook UniPods Handbook https://drive.google.com/file/d/YOUR_FILE_ID/view\n"
                 ."```\n\n"
                 ."Or paste many at once:\n"
                 ."```\n"
                 ."/asset import\n"
-                ."handbook UniPods Handbook https://drive.google.com/file/d/…\n"
-                ."form Session signup https://docs.google.com/forms/d/…\n"
-                ."slides Week 1 deck https://docs.google.com/presentation/d/…\n"
-                ."other All program resources https://drive.google.com/drive/folders/…\n"
+                ."handbook UniPods Handbook https://drive.google.com/file/d/YOUR_FILE_ID/view\n"
+                ."form Session signup https://docs.google.com/forms/d/YOUR_FORM_ID/viewform\n"
+                ."slides Week 1 deck https://docs.google.com/presentation/d/YOUR_SLIDES_ID/edit\n"
+                ."other All program resources https://drive.google.com/drive/folders/YOUR_FOLDER_ID\n"
                 ."```\n\n"
+                ."Replace YOUR_*_ID with the id from Drive → Share → Copy link (full URL, not cut off).\n"
                 ."Kinds: handbook, form, slides, other.\n"
                 ."Same Drive file is *updated*, never duplicated (manual, import, or future Drive sync).\n"
                 ."Drive folder auto-poll is next; configure one shared folder when ready.";

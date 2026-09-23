@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import re
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from ai_service.schemas.retrieval import AuthorityTier, CandidateChunk
@@ -138,6 +139,8 @@ async def fetch_url_bearing_chunks(
     community_ids: Sequence[str],
     *,
     recordings_only: bool = False,
+    assets_only: bool = False,
+    query: str | None = None,
     limit: int = 40,
 ) -> list[CandidateChunk]:
     """Permission-scoped recall of chunks that already contain openable https URLs.
@@ -156,8 +159,61 @@ async def fetch_url_bearing_chunks(
             OR kc.content ILIKE '%vimeo.com/%'
           )
         """
+    elif assets_only:
+        # Programme files / forms / decks — not chat dumps of every YouTube link.
+        url_predicate = """
+          (
+            kc.content ILIKE '%drive.google.com/%'
+            OR kc.content ILIKE '%docs.google.com/%'
+            OR kc.content ILIKE '%forms.gle/%'
+            OR kc.content ILIKE '%forms.office.com/%'
+            OR kc.content ILIKE '%.pdf%'
+          )
+        """
     else:
         url_predicate = "kc.content ~* 'https?://'"
+
+    # Soft lexical prefer: rank chunks that also mention ask tokens higher.
+    # Shape-only stopwords (not a language meaning catalog).
+    order_sql = "kc.created_at DESC NULLS LAST, kc.id DESC"
+    params: dict[str, object] = {
+        "tenant_id": str(tenant_id),
+        "community_ids": [str(cid) for cid in community_ids],
+        "limit": limit,
+    }
+    ask_tokens = [
+        t
+        for t in re.findall(r"[a-zA-Z0-9']{4,}", (query or "").lower())
+        if t
+        not in {
+            "send",
+            "give",
+            "please",
+            "link",
+            "links",
+            "file",
+            "files",
+            "document",
+            "documents",
+            "with",
+            "from",
+            "this",
+            "that",
+            "have",
+            "need",
+            "want",
+            "just",
+            "only",
+        }
+    ][:6]
+    if ask_tokens:
+        # Sum of ILIKE hits as a cheap relevance bump for URL recall.
+        hit_exprs = []
+        for i, tok in enumerate(ask_tokens):
+            key = f"tok{i}"
+            params[key] = f"%{tok}%"
+            hit_exprs.append(f"(CASE WHEN kc.content ILIKE :{key} THEN 1 ELSE 0 END)")
+        order_sql = f"({'+'.join(hit_exprs)}) DESC, kc.created_at DESC NULLS LAST, kc.id DESC"
 
     sql = f"""
     SELECT
@@ -180,18 +236,11 @@ async def fetch_url_bearing_chunks(
       AND kc.community_id = ANY(CAST(:community_ids AS text[]))
       AND ks.community_id = ANY(CAST(:community_ids AS text[]))
       AND {url_predicate}
-    ORDER BY kc.created_at DESC NULLS LAST, kc.id DESC
+    ORDER BY {order_sql}
     LIMIT :limit
     """
 
-    result = await session.execute(
-        text(sql),
-        {
-            "tenant_id": str(tenant_id),
-            "community_ids": [str(cid) for cid in community_ids],
-            "limit": limit,
-        },
-    )
+    result = await session.execute(text(sql), params)
 
     candidates: list[CandidateChunk] = []
     for row in result.all():
@@ -200,7 +249,11 @@ async def fetch_url_bearing_chunks(
         locator = meta.get("locator", {})
         # Stable score at/above POSSIBLE floor so URL recall survives soft
         # cross-language hybrid ranks (Arabic/French asks vs English chunks).
-        score = 0.7
+        score = 0.72
+        content_l = (row.content or "").lower()
+        if ask_tokens:
+            hits = sum(1 for tok in ask_tokens if tok in content_l)
+            score = min(0.92, 0.68 + 0.05 * hits)
 
         candidates.append(
             CandidateChunk(

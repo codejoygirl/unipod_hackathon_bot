@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Api\V1\Internal;
 
 use App\Enums\MembershipRole;
+use App\Enums\KnowledgeLifecycleStatus;
 use App\Models\Community;
+use App\Models\KnowledgeSource;
 use App\Models\Membership;
 use App\Models\Tenant;
 use App\Models\User;
@@ -131,11 +133,12 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
             'whatsapp_web_spike.default_community_id' => $community->id,
             'whatsapp_web_spike.admin_phones' => ['15551234567'],
+            'whatsapp_web_spike.process_sync' => true,
         ]);
 
         $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
             'from' => '15551234567',
-            'text' => 'EXPORT Water off tomorrow 8am–12pm.',
+            'text' => "EXPORT UniPods / Wadhwani programme resource pack\n\nWater off tomorrow 8am–12pm.",
         ], [
             'X-Spike-Secret' => 'spike-test-secret',
         ])
@@ -146,7 +149,70 @@ class WhatsAppWebSpikeTest extends TestCase
             'community_id' => $community->id,
             'source_type' => 'whatsapp',
             'lifecycle_status' => 'draft',
-            'name' => 'WA Web spike forward',
+            'name' => 'UniPods / Wadhwani programme resource pack',
+        ]);
+    }
+
+    public function test_admin_swipe_reply_publishes_draft(): void
+    {
+        Http::fake([
+            '*/ingestion/sync' => Http::response([
+                'source_id' => '11111111-1111-1111-1111-111111111111',
+                'version_id' => '22222222-2222-2222-2222-222222222222',
+                'status' => 'completed',
+            ], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => $user->id,
+        ]);
+
+        config([
+            'whatsapp_web_spike.enabled' => true,
+            'whatsapp_web_spike.shared_secret' => 'spike-test-secret',
+            'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
+            'whatsapp_web_spike.default_community_id' => $community->id,
+            'whatsapp_web_spike.admin_phones' => ['15551234567'],
+            'whatsapp_web_spike.process_sync' => true,
+        ]);
+
+        $source = KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'UniPods resource pack',
+            'uri' => 'whatsapp-web-spike://import/swipe-test',
+            'source_type' => 'whatsapp',
+            'lifecycle_status' => KnowledgeLifecycleStatus::Draft,
+            'language' => 'en',
+            'content' => 'schedules and slides',
+            'content_sha256' => hash('sha256', 'schedules and slides'),
+            'metadata' => ['origin' => 'admin_import'],
+        ]);
+        $short = strtoupper(substr((string) $source->id, -6));
+
+        $reply = $this->postJson('/api/v1/internal/whatsapp-web-spike/inbound', [
+            'from' => '15551234567',
+            'text' => 'publish',
+            'reply_to_bot' => true,
+            'quoted_text' => "*Imported.*\n\n*UniPods resource pack*\nID: `{$short}`\n\nSwipe-reply with *publish*",
+        ], [
+            'X-Spike-Secret' => 'spike-test-secret',
+        ])
+            ->assertOk()
+            ->json('data.reply');
+
+        $this->assertIsString($reply);
+        $this->assertStringContainsString('Published', $reply);
+        $this->assertStringContainsString('UniPods resource pack', $reply);
+        $this->assertStringNotContainsString('AI index', $reply);
+
+        $this->assertDatabaseHas('knowledge_documents', [
+            'id' => $source->id,
+            'lifecycle_status' => 'published',
         ]);
     }
 
@@ -165,6 +231,7 @@ class WhatsAppWebSpikeTest extends TestCase
             'whatsapp_web_spike.default_user_email' => 'demo@zak.test',
             'whatsapp_web_spike.default_community_id' => $community->id,
             'whatsapp_web_spike.admin_phones' => ['2348011111111'],
+            'whatsapp_web_spike.process_sync' => true,
         ]);
 
         $deny = app(\App\Services\Channels\ChannelCommandAccess::class)->adminOnlyDenial('whatsapp');
@@ -182,7 +249,7 @@ class WhatsAppWebSpikeTest extends TestCase
 
         $this->assertDatabaseMissing('knowledge_documents', [
             'community_id' => $community->id,
-            'name' => 'WA Web spike forward',
+            'name' => 'UniPods / Wadhwani programme resource pack',
         ]);
     }
 

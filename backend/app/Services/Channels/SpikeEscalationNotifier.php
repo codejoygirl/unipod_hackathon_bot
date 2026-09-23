@@ -815,8 +815,8 @@ final class SpikeEscalationNotifier
         if ($channel === '' || $channel === 'telegram_spike') {
             $to = ($inGroup && $originChatId !== '') ? $originChatId : $memberChatId;
             if ($to === '') {
-                return false;
-            }
+            return false;
+        }
 
             return $this->notifyMember($to, $text, $messageId !== '' ? $messageId : null, 'telegram_html');
         }
@@ -1767,16 +1767,16 @@ final class SpikeEscalationNotifier
                     'knowledge_id' => $knowledgeId,
                     'decision' => $decision,
                     'error' => $e->getMessage(),
-                ]);
+            ]);
 
-                return [
-                    'ok' => false,
+            return [
+                'ok' => false,
                     'reply' => "I couldn't ".($approve ? 'publish' : 'reject').' that note: '.$e->getMessage(),
-                ];
-            }
+            ];
+        }
 
             $resolved = array_merge($record, [
-                'resolved_at' => now()->toIso8601String(),
+            'resolved_at' => now()->toIso8601String(),
                 'admin_decision' => $approve ? 'approved' : 'declined',
             ]);
             if ($resolvedBy !== null && trim($resolvedBy) !== '') {
@@ -1807,8 +1807,8 @@ final class SpikeEscalationNotifier
         }
 
         if ($approve) {
-            return [
-                'ok' => true,
+        return [
+            'ok' => true,
                 'reply' => 'Approved. That note is published. '
                     .app(ChannelConversationService::class)->botDisplayName().' can use it in answers now.',
             ];

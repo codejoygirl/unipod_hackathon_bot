@@ -228,7 +228,10 @@ class ChannelConversationServiceTest extends TestCase
 
         $this->assertTrue($svc->isBareBotPing('@zak_bot'));
         $this->assertTrue($svc->isBareBotPing('zak_bot'));
+        $this->assertTrue($svc->isBareBotPing('hi Zak'));
+        $this->assertTrue($svc->isBareBotPing('Hi Zak'));
         $this->assertFalse($svc->isBareBotPing('@zak_bot when is clinic?'));
+        $this->assertFalse($svc->isBareBotPing('hi Zak when is clinic?'));
 
         $fresh = $svc->resolveInbound('@zak_bot', []);
         $this->assertSame(ChannelConversationService::INTENT_CONVERSATIONAL, $fresh['intent']);
@@ -583,6 +586,8 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('Ask me privately.', $wa);
         $this->assertStringContainsString('Private chat', $wa);
         $this->assertStringContainsString('2347000000000', $wa);
+        $this->assertStringContainsString('text=', $wa);
+        $this->assertStringContainsString(rawurlencode('hi Zak'), $wa);
 
         $tg = $svc->withPrivateChatLink('Demande-moi en privé.', 'plain', 'telegram');
         $this->assertStringContainsString('Demande-moi en privé.', $tg);
@@ -620,11 +625,29 @@ class ChannelConversationServiceTest extends TestCase
         $wa = $svc->outOfScopeReply(style: 'whatsapp');
         $this->assertStringContainsString('/share', $wa);
         $this->assertStringContainsString('*Still need help?*', $wa);
-        $this->assertStringContainsString('/ask', $wa);
+        $this->assertStringContainsString('*/ask*', $wa);
         $this->assertStringContainsString('```', $wa);
         $this->assertStringNotContainsString('Need an admin', $wa);
         $this->assertStringNotContainsString('need a human', mb_strtolower($wa));
         $this->assertLessThan(900, mb_strlen($wa));
+    }
+
+    public function test_web_chat_link_in_private_dm_includes_member_phone(): void
+    {
+        config([
+            'zak_presence.web_chat_url' => 'https://zak-app.test',
+            'zak_web_chat.access_key' => 'test-access-key',
+            'zak_web_chat.default_community_id' => '01JAAAAAAAAAAAAAAAAAAAAAAA',
+        ]);
+
+        $svc = new ChannelConversationService;
+        $entries = $svc->channelAccessEntries('whatsapp', 'private', '2347041131371');
+        $web = collect($entries)->firstWhere('label', 'Web chat');
+
+        $this->assertIsArray($web);
+        $this->assertStringContainsString('k=test-access-key', (string) $web['url']);
+        $this->assertStringContainsString('p=2347041131371', (string) $web['url']);
+        $this->assertStringContainsString('s=m2347041131371', (string) $web['url']);
     }
 
     public function test_conversational_hello_reply_is_warm(): void
@@ -670,7 +693,7 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('/ask', $wa);
         $this->assertStringContainsString('/share', $wa);
         $this->assertStringContainsString('/feature', $wa);
-        $this->assertStringContainsString('request or improve a feature', $wa);
+        $this->assertStringContainsString('request a feature or suggest an improvement', $wa);
         $this->assertStringContainsString('e.g.', $wa);
         $this->assertStringNotContainsString('/join', $wa);
         $this->assertStringContainsString('👋', $wa);
@@ -699,16 +722,17 @@ class ChannelConversationServiceTest extends TestCase
 
         $admin = $svc->helpTextFor('whatsapp', 'whatsapp', true);
         $this->assertStringContainsString('/import', $admin);
-        $this->assertStringContainsString('knowledge draft', $admin);
+        $this->assertStringContainsString('create a draft', $admin);
         $this->assertStringContainsString('/publish', $admin);
         $this->assertStringContainsString('/knowledge', $admin);
+        $this->assertStringContainsString('*/knowledge*', $admin);
         $this->assertStringContainsString('/features', $admin);
         $this->assertStringContainsString('/approve', $admin);
         $this->assertStringContainsString('/reply', $admin);
         $this->assertStringContainsString('Admin', $admin);
         $this->assertStringContainsString('e.g.', $admin);
-        $this->assertMatchesRegularExpression('/e\.g\._?\s*`{0,3}\/?ask/i', $admin);
-        $this->assertMatchesRegularExpression('/e\.g\._?\s*`{0,3}\/?reply\s+[A-Z0-9]+\s+/i', $admin);
+        $this->assertMatchesRegularExpression('/e\.g\._?\s*\*?\/ask\*?/i', $admin);
+        $this->assertMatchesRegularExpression('/e\.g\._?\s*\*?\/reply\*?\s+[A-Z0-9]+\s+/i', $admin);
 
         $plainAdmin = $svc->helpTextFor('plain', 'telegram', true);
         $this->assertStringContainsString('e.g. /ask', $plainAdmin);
@@ -718,8 +742,11 @@ class ChannelConversationServiceTest extends TestCase
         $groupHelp = $svc->memberHelpText('whatsapp', 'whatsapp', 'group');
         $this->assertStringContainsString('Private chat', $groupHelp);
         $this->assertStringContainsString('api.whatsapp.com/send?phone=2347041131371', $groupHelp);
-        $this->assertStringContainsString('schedules, links, or updates', $groupHelp);
-        $this->assertStringContainsString('tip for the community', $groupHelp);
+        $this->assertStringContainsString('text=', $groupHelp);
+        $this->assertStringContainsString(rawurlencode('hi Zak'), $groupHelp);
+        $this->assertStringContainsString('*/ask*', $groupHelp);
+        $this->assertStringContainsString('ask about schedules, links, or updates', $groupHelp);
+        $this->assertStringContainsString('share a tip with the community', $groupHelp);
         $this->assertStringNotContainsString("\u{2014}", $groupHelp);
 
         $sets = [];
@@ -936,7 +963,7 @@ class ChannelConversationServiceTest extends TestCase
         $svc = new ChannelConversationService;
 
         $wa = $svc->featureUsageReply('whatsapp');
-        $this->assertStringContainsString('```/feature```', $wa);
+        $this->assertStringContainsString('*/feature*', $wa);
         $this->assertStringContainsString('*new feature*', $wa);
         $this->assertStringContainsString('*improve*', $wa);
         $this->assertStringContainsString('/feature Add reminders', $wa);

@@ -87,8 +87,9 @@ Admin DM with Zak:
 
 1. Chat export: `/import` → paste → `/publish latest`
 2. Drive files: `/asset handbook Title https://drive.google.com/file/d/…`
-3. Or API: `POST /api/v1/knowledge-sources/import` then `submit-review` + `publish`
-4. Optional demo seed: `php artisan zak:seed-assistant-demo`
+3. Staged chats: `php artisan zak:import-knowledge-chats` (reads `storage/app/knowledge-import/`, mints token, publishes)
+4. Or API: `POST /api/v1/knowledge-sources/import` then `submit-review` + `publish`
+5. Optional demo seed: `php artisan zak:seed-assistant-demo`
 
 List what is left:
 

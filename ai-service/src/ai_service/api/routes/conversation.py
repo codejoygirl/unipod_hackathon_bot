@@ -92,12 +92,17 @@ class ConversationClassifyResponse(BaseModel):
         default=False,
         description="True when the message continues/verifies the prior answer (any language).",
     )
+    link_focus: str = Field(
+        default="na",
+        description="one | many | na — model decides if the ask wants a single match or a list",
+    )
 
 
 _ALLOWED_INTENTS = frozenset(
     {"conversational", "knowledge", "out_of_scope", "clarify", "personal_help"}
 )
 _ALLOWED_LINK_MODES = frozenset({"none", "recordings", "meetings", "assets"})
+_ALLOWED_LINK_FOCUSES = frozenset({"one", "many", "na"})
 
 
 def _classify_system_prompt(community_name: str | None, community_scope: str | None) -> str:
@@ -110,17 +115,18 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
     )
     return (
         "You route messages for Zak, a private community chat assistant.\n"
-        "Return EXACTLY one line: INTENT|LINK_MODE|FOLLOW_UP\n"
+        "Return EXACTLY one line: INTENT|LINK_MODE|FOLLOW_UP|LINK_FOCUS\n"
         "INTENT is one of: conversational, knowledge, out_of_scope, clarify, personal_help\n"
         "LINK_MODE is one of: none, recordings, meetings, assets\n"
         "FOLLOW_UP is yes or no\n"
+        "LINK_FOCUS is one of: one, many, na\n"
         "No other words.\n\n"
         f"Community display name: {label}\n"
         f"{scope_line}\n\n"
         "STEP 1: Mentally understand what the member wants, in whatever language they used. "
         "Do not refuse because the language is unfamiliar. Do not rely on English keywords.\n"
         f"{_UNTRUSTED_SAFETY}\n"
-        "STEP 2: Map that meaning to INTENT and FOLLOW_UP.\n\n"
+        "STEP 2: Map that meaning to INTENT, FOLLOW_UP, and LINK_FOCUS.\n\n"
         "INTENT labels:\n"
         "- conversational: short social turns only (hello, thanks, ok, bye, who are you about Zak, "
         "tone feedback, frustration/insults aimed at Zak, 'do you speak X'). Any language. "
@@ -171,16 +177,22 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
         "- assets: wants other shared links (forms, docs, slides, websites, "
         "social / LinkedIn / GitHub / TikTok profiles, WhatsApp invites, registration sheets)\n"
         "- none: not asking for a URL list\n\n"
+        "LINK_FOCUS (any language — you decide from meaning, not keywords):\n"
+        "- one: they want a single best matching document/link/guide\n"
+        "- many: they want a list / several / all of that kind\n"
+        "- na: not a URL-list ask (LINK_MODE is none)\n\n"
         "Examples (learn the pattern; apply to ANY language — do not require these exact words):\n"
-        "User: Give me today's recap → knowledge|none|no\n"
-        "User: Donnez-moi le récapitulatif d'aujourd'hui. → knowledge|none|no\n"
-        "User: Fún mi ní àkótán àwọn ohun tó ṣẹlẹ̀ lónìí. → knowledge|none|no\n"
-        "User: Send recording links → knowledge|recordings|no\n"
-        "User: Liens vers les enregistrements → knowledge|recordings|no\n"
-        "User: أرسل لي تسجيلات جميع الجلسات → knowledge|recordings|no\n"
-        "User: What's our TikTok? → knowledge|assets|no\n"
-        "User: Social media handles / LinkedIn profiles → knowledge|assets|no\n"
-        "User: Ekaro oo → conversational|none|no\n"
+        "User: Give me today's recap → knowledge|none|no|na\n"
+        "User: Donnez-moi le récapitulatif d'aujourd'hui. → knowledge|none|no|na\n"
+        "User: Fún mi ní àkótán àwọn ohun tó ṣẹlẹ̀ lónìí. → knowledge|none|no|na\n"
+        "User: Send recording links → knowledge|recordings|no|many\n"
+        "User: Liens vers les enregistrements → knowledge|recordings|no|many\n"
+        "User: أرسل لي تسجيلات جميع الجلسات → knowledge|recordings|no|many\n"
+        "User: What's our TikTok? → knowledge|assets|no|one\n"
+        "User: Social media handles / LinkedIn profiles → knowledge|assets|no|many\n"
+        "User: Give me the only hackathon guidelines document → knowledge|assets|no|one\n"
+        "User: UniPods Video Demo Guide link → knowledge|assets|no|one\n"
+        "User: Ekaro oo → conversational|none|no|na\n"
         "User: Gracias → conversational|none|no\n"
         "User: Are you dumb? → conversational|none|no\n"
         "User: You are mad → conversational|none|no\n"
@@ -278,6 +290,22 @@ def _parse_link_mode(raw: str) -> str:
         if mode in text.split():
             return mode
     return "none"
+
+
+def _parse_link_focus(raw: str) -> str:
+    text = (raw or "").strip().lower()
+    text = text.replace("\u2014", "-").replace("\u2013", "-")
+    if "|" in text:
+        parts = [p.strip() for p in text.split("|")]
+        if len(parts) >= 4:
+            token = (re.sub(r"[^a-z_]+", " ", parts[3]).strip().split() or [""])[0]
+            if token in _ALLOWED_LINK_FOCUSES:
+                return token
+    text = re.sub(r"[^a-z_]+", " ", text).strip()
+    for focus in ("one", "many"):
+        if focus in text.split():
+            return focus
+    return "na"
 
 
 def _parse_follow_up(raw: str) -> bool:
@@ -582,12 +610,13 @@ async def conversation_classify(
                     ),
                 ],
                 temperature=0.0,
-                max_tokens=32,
+                max_tokens=40,
             )
         )
         intent = _parse_intent_label(response.content)
         link_mode = _parse_link_mode(response.content)
         follow_up = _parse_follow_up(response.content)
+        link_focus = _parse_link_focus(response.content)
         if intent is None:
             logger.warning(
                 "conversation classify returned unusable label (chars=%s)",
@@ -598,18 +627,27 @@ async def conversation_classify(
                 intent="knowledge",
                 link_mode="none",
                 follow_up=False,
+                link_focus="na",
             )
         if follow_up:
             # Follow-ups always continue community knowledge; never clarify/OOS.
             intent = "knowledge"
             link_mode = "none"
+            link_focus = "na"
         if intent != "knowledge":
             link_mode = "none"
             follow_up = False
+            link_focus = "na"
+        if link_mode == "none":
+            link_focus = "na"
+        elif link_focus == "na":
+            # Model omitted focus on a URL ask — default to a list, not a forced single.
+            link_focus = "many"
         return ConversationClassifyResponse(
             intent=intent,
             link_mode=link_mode,
             follow_up=follow_up,
+            link_focus=link_focus,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("conversation classify failed: %s", exc, exc_info=True)
@@ -617,6 +655,7 @@ async def conversation_classify(
             intent="knowledge",
             link_mode="none",
             follow_up=False,
+            link_focus="na",
         )
 
 

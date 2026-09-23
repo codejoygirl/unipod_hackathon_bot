@@ -42,10 +42,15 @@ class AiServiceClient
         ?string $targetLanguage = null,
         bool $enableConflictDetection = true,
         string $linkMode = 'none',
+        string $linkFocus = 'na',
     ): GroundedAnswerDTO {
         $allowedLink = ['none', 'recordings', 'meetings', 'assets'];
         if (! in_array($linkMode, $allowedLink, true)) {
             $linkMode = 'none';
+        }
+        $allowedFocus = ['one', 'many', 'na'];
+        if (! in_array($linkFocus, $allowedFocus, true)) {
+            $linkFocus = 'na';
         }
 
         $payloadArray = [
@@ -56,6 +61,7 @@ class AiServiceClient
             'enable_conflict_detection' => $enableConflictDetection,
             'temperature' => 0.0,
             'link_mode' => $linkMode,
+            'link_focus' => $linkFocus,
             'timezone' => (string) config('app.timezone', 'UTC'),
             'reference_time' => now()->toIso8601String(),
         ];
@@ -172,7 +178,7 @@ class AiServiceClient
     /**
      * Classify an ambiguous chat turn. Null on hard failure (caller keeps heuristics).
      *
-     * @return array{intent: 'conversational'|'knowledge'|'out_of_scope'|'clarify'|'personal_help', link_mode: 'none'|'recordings'|'meetings'|'assets', follow_up: bool}|null
+     * @return array{intent: 'conversational'|'knowledge'|'out_of_scope'|'clarify'|'personal_help', link_mode: 'none'|'recordings'|'meetings'|'assets', follow_up: bool, link_focus: 'one'|'many'|'na'}|null
      */
     public function classifyConversationIntent(
         string $message,
@@ -217,9 +223,11 @@ class AiServiceClient
 
             $intent = strtolower(trim((string) ($response->json('intent') ?? '')));
             $linkMode = strtolower(trim((string) ($response->json('link_mode') ?? 'none')));
+            $linkFocus = strtolower(trim((string) ($response->json('link_focus') ?? 'na')));
             $followUp = filter_var($response->json('follow_up') ?? false, FILTER_VALIDATE_BOOLEAN);
             $allowedIntent = ['conversational', 'knowledge', 'out_of_scope', 'clarify', 'personal_help'];
             $allowedLink = ['none', 'recordings', 'meetings', 'assets'];
+            $allowedFocus = ['one', 'many', 'na'];
 
             if (! in_array($intent, $allowedIntent, true)) {
                 return null;
@@ -229,20 +237,33 @@ class AiServiceClient
                 $linkMode = 'none';
             }
 
+            if (! in_array($linkFocus, $allowedFocus, true)) {
+                $linkFocus = 'na';
+            }
+
             if ($followUp) {
                 $intent = 'knowledge';
                 $linkMode = 'none';
+                $linkFocus = 'na';
             }
 
             if ($intent !== 'knowledge') {
                 $linkMode = 'none';
                 $followUp = false;
+                $linkFocus = 'na';
+            }
+
+            if ($linkMode === 'none') {
+                $linkFocus = 'na';
+            } elseif ($linkFocus === 'na') {
+                $linkFocus = 'many';
             }
 
             return [
                 'intent' => $intent,
                 'link_mode' => $linkMode,
                 'follow_up' => $followUp,
+                'link_focus' => $linkFocus,
             ];
         } catch (Throwable $e) {
             Log::warning('AI Service /conversation/classify unreachable', [

@@ -270,7 +270,12 @@ class RagTriadEvaluator:
         if "http://" in answer.lower() or "https://" in answer.lower():
             from ai_service.evaluations.link_answer_quality import evaluate_link_answer_quality
 
-            link_report = evaluate_link_answer_quality(answer, question=query)
+            focus = kwargs.get("link_focus")
+            link_report = evaluate_link_answer_quality(
+                answer,
+                question=query,
+                link_focus=focus if isinstance(focus, str) else None,
+            )
             details["link_answer_quality"] = {
                 "passed": link_report.passed,
                 "score": link_report.score,

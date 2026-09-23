@@ -61,6 +61,90 @@ final class AdminKnowledgeDesk
     }
 
     /**
+     * Friendly title from pasted import body (first meaningful line / heading).
+     */
+    public function suggestImportTitle(string $content, string $fallback = 'Imported knowledge'): string
+    {
+        $text = trim(str_replace("\r\n", "\n", $content));
+        if ($text === '') {
+            return $fallback;
+        }
+
+        foreach (preg_split("/\n+/u", $text) ?: [] as $raw) {
+            $line = trim((string) $raw);
+            if ($line === '') {
+                continue;
+            }
+            // Section markers like === Slides === → use inner label when short.
+            if (preg_match('/^=+\s*(.+?)\s*=+$/u', $line, $m) === 1) {
+                $line = trim($m[1]);
+            }
+            if ($line === '' || str_starts_with(strtolower($line), 'http://')
+                || str_starts_with(strtolower($line), 'https://')) {
+                continue;
+            }
+            // Skip pure bullet separators.
+            if (preg_match('/^[-*_=\s]+$/u', $line) === 1) {
+                continue;
+            }
+            $line = preg_replace('/\s+/u', ' ', $line) ?? $line;
+            if (mb_strlen($line) < 3) {
+                continue;
+            }
+            if (mb_strlen($line) > 80) {
+                $line = rtrim(mb_substr($line, 0, 77)).'…';
+            }
+
+            return $line;
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * Whether quoted bot text looks like an import draft card.
+     */
+    public function isDraftCardText(string $quoted): bool
+    {
+        $q = mb_strtolower(trim($quoted));
+        if ($q === '') {
+            return false;
+        }
+
+        return str_contains($q, 'draft saved')
+            || str_contains($q, 'imported')
+            || (str_contains($q, '/publish') && preg_match('/\bid\b/i', $quoted) === 1);
+    }
+
+    /**
+     * Pull the 6-char draft id from a draft card quote.
+     */
+    public function extractShortIdFromDraftCard(string $quoted): ?string
+    {
+        if (preg_match('/\bID:\s*`?([A-Z0-9]{4,12})`?/i', $quoted, $m) === 1) {
+            return strtoupper($m[1]);
+        }
+        if (preg_match('/\/publish\s+([A-Z0-9]{4,12})\b/i', $quoted, $m) === 1) {
+            return strtoupper($m[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Swipe-reply body that means "publish this draft" (command-shaped only).
+     */
+    public function isPublishConfirmText(string $text): bool
+    {
+        $t = trim($text);
+        if ($t === '' || strcasecmp($t, '@zak') === 0) {
+            return true;
+        }
+
+        return preg_match('/^\/?publish(?:\s+\S+)?$/iu', $t) === 1;
+    }
+
+    /**
      * Hint shown right after /import creates a draft.
      *
      * @param  'whatsapp'|'plain'|'telegram_html'  $style
@@ -68,29 +152,28 @@ final class AdminKnowledgeDesk
     public function draftCreatedReply(KnowledgeSource $source, string $style = 'whatsapp'): string
     {
         $short = $this->shortId($source);
-        $pub = $this->conversation->highlightCommand('/publish', $style === 'whatsapp' ? 'whatsapp' : 'plain');
         $kb = $this->conversation->highlightCommand('/knowledge', $style === 'whatsapp' ? 'whatsapp' : 'plain');
         $name = trim((string) $source->name);
         if ($name === '') {
-            $name = 'Chat export';
+            $name = 'Imported knowledge';
         }
 
         if ($style === 'whatsapp') {
-            return "*Draft saved.*\n\n"
-                ."*Title:* {$name}\n"
-                ."*ID:* `{$short}`\n\n"
-                ."Publish into the knowledge base:\n"
+            return "*Imported.*\n\n"
+                ."*{$name}*\n"
+                ."ID: `{$short}`\n\n"
+                ."Swipe-reply with *publish* to make it live, or send:\n"
                 ."```\n"
                 ."/publish {$short}\n"
                 ."```\n\n"
-                ."Or list drafts with {$kb} drafts.";
+                ."See drafts anytime with {$kb}.";
         }
 
-        return "Draft saved.\n\n"
-            ."Title: {$name}\n"
+        return "Imported.\n\n"
+            ."{$name}\n"
             ."ID: {$short}\n\n"
-            ."Publish with: {$pub} {$short}\n"
-            ."List drafts with: {$kb} drafts";
+            ."Reply with publish to make it live, or send /publish {$short}.\n"
+            ."See drafts anytime with {$kb}.";
     }
 
     /**
@@ -179,26 +262,27 @@ final class AdminKnowledgeDesk
         }
 
         $parts = (int) (($published->metadata['ingest_part_count'] ?? 0) ?: 0);
-        $partsNote = $parts > 1
-            ? "\nIndexed in {$parts} parts (chunked for size)."
-            : "\nSynced to the AI index (chunked + embedded).";
+        $name = trim((string) $published->name);
+        if ($name === '') {
+            $name = 'Imported knowledge';
+        }
 
         if ($style === 'whatsapp') {
+            $extra = $parts > 1 ? "\n(Large import — stored in {$parts} parts.)" : '';
+
             return [
                 'ok' => true,
                 'reply' => "*Published.*\n\n"
-                    ."*{$published->name}*\n"
-                    ."ID: `{$this->shortId($published)}`\n"
-                    ."Members can ask about this now."
-                    .$partsNote,
+                    ."*{$name}* is live. Members can ask about it now."
+                    .$extra,
             ];
         }
 
+        $extra = $parts > 1 ? " Large import stored in {$parts} parts." : '';
+
         return [
             'ok' => true,
-            'reply' => "Published: {$published->name} (ID {$this->shortId($published)})."
-                ." Members can ask about this now."
-                .str_replace("\n", ' ', $partsNote),
+            'reply' => "Published. {$name} is live — members can ask about it now.".$extra,
         ];
     }
 
@@ -425,7 +509,9 @@ final class AdminKnowledgeDesk
             if ($preferUrl) {
                 $url = trim((string) (($source->metadata['delivery_url'] ?? '') ?: ''));
                 if ($url !== '') {
-                    $extra = "\n   ".$url;
+                    $extra = preg_match('/[…]|\.{2,}(?:\/|$|\?|#)|YOUR_[A-Z0-9_]+/u', $url) === 1
+                        ? "\n   (link incomplete — re-run /asset with the full Drive Share → Copy link)"
+                        : "\n   ".$url;
                 }
             } elseif ($showPublishedAt && $source->published_at !== null) {
                 $extra = ' · '.$source->published_at->timezone((string) config('app.timezone', 'UTC'))->format('Y-m-d');

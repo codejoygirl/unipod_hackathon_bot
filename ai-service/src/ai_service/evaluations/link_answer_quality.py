@@ -1,7 +1,7 @@
 """Deterministic checks that a member-facing reply answered the link/caption task well.
 
 These are shape + quality gates (not a language keyword catalog). The model still
-owns multilingual captions; this only fails obvious paste/CTA/title bugs.
+owns multilingual captions and focus; this fails obvious paste/CTA/title/dump bugs.
 """
 
 from __future__ import annotations
@@ -33,44 +33,49 @@ class LinkAnswerQualityReport:
         self.passed = False
 
 
-def evaluate_link_answer_quality(answer: str, *, question: str | None = None) -> LinkAnswerQualityReport:
+def evaluate_link_answer_quality(
+    answer: str,
+    *,
+    question: str | None = None,
+    link_focus: str | None = None,
+) -> LinkAnswerQualityReport:
     """Evaluate whether a reply's link list is readable and task-shaped.
 
     Checks (language-neutral):
     - Numbered captions sit on their own line above https URLs
-    - Captions are not chat crumbs / CTAs / speaker pastes
+    - Captions are not weak chat/CTA paste
     - No long "caption: https://..." same-line slips
-    - When the ask looks singular, avoid dumping many unrelated URLs
+    - URLs are not HTML-escaped (&amp;)
+    - When classifier focus is ``one``, refuse multi-URL dumps
     """
     report = LinkAnswerQualityReport()
     text = (answer or "").replace("\r\n", "\n").strip()
     if not text:
         report.add("empty_answer")
         report.score = 0.0
+        report.passed = False
         return report
 
-    urls = _URL_RE.findall(text)
-    report.url_count = len(urls)
-    if report.url_count == 0:
-        # Not a link-list answer — nothing to score here.
-        return report
+    if "&amp;" in text and _URL_RE.search(text):
+        report.add("html_escaped_url")
 
-    lines = [ln.strip() for ln in text.splitlines()]
+    lines = text.splitlines()
     i = 0
     while i < len(lines):
-        line = lines[i]
-        m = _NUMBERED.match(line)
+        trimmed = lines[i].strip()
+        m = _NUMBERED.match(trimmed)
         if not m:
             i += 1
             continue
         rest = m.group(2).strip()
         same = re.match(r"^(.+?)\s*:\s*(https?://\S+)\s*$", rest)
-        if same and len(re.findall(r"[\w'’-]+", same.group(1), flags=re.UNICODE)) >= 4:
+        if same and len(same.group(1).split()) >= 3:
             report.same_line_url_count += 1
             report.add(f"same_line_caption_url:{m.group(1)}")
             i += 1
             continue
         if rest.startswith("http://") or rest.startswith("https://"):
+            report.url_count += 1
             report.missing_caption_count += 1
             report.add(f"missing_caption:{m.group(1)}")
             i += 1
@@ -78,33 +83,33 @@ def evaluate_link_answer_quality(answer: str, *, question: str | None = None) ->
 
         caption = rest
         j = i + 1
-        while j < len(lines) and not lines[j]:
+        while j < len(lines) and not lines[j].strip():
             j += 1
-        if j >= len(lines) or not (
-            lines[j].startswith("http://") or lines[j].startswith("https://")
-        ):
+        if j >= len(lines) or not _URL_RE.match(lines[j].strip()):
             i += 1
             continue
 
+        report.url_count += 1
         report.caption_count += 1
         if AnswerSynthesizer._is_weak_link_label(caption):
             report.weak_caption_count += 1
             report.add(f"weak_caption:{caption[:80]}")
         i = j + 1
 
-    q = (question or "").strip().lower()
-    singular = bool(
-        re.search(r"\b(first|initial|main|primary)\b", q)
-        or (re.search(r"\blink\b", q) and not re.search(r"\blinks\b", q))
-    ) and not bool(re.search(r"\b(handles|profiles|meetings|recordings)\b", q))
-    if singular and report.url_count > 3:
+    # Classifier-owned focus (preferred). Fallback: structural dump gate only.
+    focus = (link_focus or "").strip().lower()
+    if focus == "one" and report.url_count > 1:
         report.add(f"singular_ask_url_dump:{report.url_count}")
+    elif focus not in {"one", "many", "na"} and report.url_count > 8:
+        # Phone-unfriendly corpus dump regardless of ask wording.
+        report.add(f"url_dump:{report.url_count}")
 
     penalties = (
         report.weak_caption_count
         + report.same_line_url_count
         + report.missing_caption_count
-        + (1 if any(i.startswith("singular_ask") for i in report.issues) else 0)
+        + (1 if any(i.startswith("singular_ask") or i.startswith("url_dump") for i in report.issues) else 0)
+        + (1 if any(i.startswith("html_escaped") for i in report.issues) else 0)
     )
     denom = max(report.caption_count, report.url_count, 1)
     report.score = max(0.0, round(1.0 - (penalties / denom), 3))

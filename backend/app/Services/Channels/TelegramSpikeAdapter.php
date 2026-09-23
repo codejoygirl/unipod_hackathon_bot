@@ -125,7 +125,25 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         // Admin commands only in private DM — never expose them in group /help.
         $showAdmin = $isAdmin && $chatType === 'private';
 
-        return $this->conversation->helpTextFor('plain', 'telegram', $showAdmin, $chatType);
+        return $this->conversation->helpTextFor(
+            'plain',
+            'telegram',
+            $showAdmin,
+            $chatType,
+            $this->memberPhoneForWeb($message),
+        );
+    }
+
+    private function memberPhoneForWeb(?InboundMessage $message): ?string
+    {
+        if ($message === null || $this->chatType($message) !== 'private') {
+            return null;
+        }
+
+        $raw = is_array($message->raw) ? $message->raw : [];
+
+        return app(\App\Services\WebChat\WebChatMemberPhone::class)
+            ->normalize((string) ($raw['from_phone'] ?? $raw['phone'] ?? ''));
     }
 
     /**
@@ -185,6 +203,11 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         $adminReply = $this->tryHandleAdminEscalationReply($message);
         if ($adminReply !== null) {
             return $adminReply;
+        }
+
+        $draftPublish = $this->tryAdminDraftPublishSwipe($message);
+        if ($draftPublish !== null) {
+            return $draftPublish;
         }
 
         $upper = strtoupper($message->text);
@@ -333,6 +356,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             $message,
             $effectiveQuery,
             linkMode: (string) ($resolved['link_mode'] ?? 'none'),
+            linkFocus: (string) ($resolved['link_focus'] ?? 'na'),
         );
         Log::info('telegram_spike.reply', [
             'path' => 'ask',
@@ -703,7 +727,12 @@ final class TelegramSpikeAdapter implements ChannelAdapter
     ): string {
         $chatType = $message !== null ? $this->chatType($message) : 'private';
         if ($mode === 'social' && $this->conversation->isChannelPresenceAsk($text)) {
-            return $this->conversation->channelPresenceReply('plain', 'telegram', $chatType);
+            return $this->conversation->channelPresenceReply(
+                'plain',
+                'telegram',
+                $chatType,
+                $this->memberPhoneForWeb($message),
+            );
         }
 
         $ctx = $this->communityAiContext($community);
@@ -789,6 +818,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         InboundMessage $message,
         ?string $effectiveQuery = null,
         string $linkMode = 'none',
+        string $linkFocus = 'na',
     ): string {
         $link = Cache::get($this->linkCacheKey($message->externalUserId));
         $user = $this->resolveUser();
@@ -831,6 +861,15 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         if (! in_array($linkMode, $allowedLink, true)) {
             $linkMode = 'none';
         }
+        $allowedFocus = ['one', 'many', 'na'];
+        if (! in_array($linkFocus, $allowedFocus, true)) {
+            $linkFocus = 'na';
+        }
+        if ($linkMode === 'none') {
+            $linkFocus = 'na';
+        } elseif ($linkFocus === 'na') {
+            $linkFocus = 'many';
+        }
 
         $priorTurns = $this->priorTurns($message);
         $query = $this->conversation->buildKnowledgeQuery($question, $priorTurns);
@@ -841,12 +880,13 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             communityIds: [$communityId],
             targetLanguage: $targetLanguage,
             linkMode: $linkMode,
+            linkFocus: $linkFocus,
         );
 
         $result = $this->citationRevalidator->revalidate($user, $result);
 
         $chatType = (string) ($message->raw['chat_type'] ?? 'private');
-        $reply = $this->formatAskReply($result, $chatType, $question, $linkMode);
+        $reply = $this->formatAskReply($result, $chatType, $question, $linkMode, $linkFocus);
 
         $softHandoff = str_starts_with($reply, "I don't have a solid answer for that yet.");
         $shouldEscalate = ($result->answer === '' || $softHandoff)
@@ -910,6 +950,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         string $chatType = 'private',
         string $originalQuestion = '',
         string $linkMode = 'none',
+        string $linkFocus = 'na',
     ): string {
         $isPrivate = in_array($chatType, ['private', ''], true);
 
@@ -938,6 +979,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             $result,
             $originalQuestion !== '' ? $originalQuestion : $result->query,
             $linkMode,
+            $linkFocus,
         );
         $answer = $this->ensureListHasIntro(
             $answer,
@@ -1070,6 +1112,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         GroundedAnswerDTO $result,
         string $originalQuestion = '',
         string $linkMode = 'none',
+        string $linkFocus = 'na',
     ): string {
         $question = $originalQuestion !== '' ? $originalQuestion : $this->currentQuestionOnly($result->query);
         $urlsInAnswer = $this->extractHttpUrls($answer);
@@ -1086,6 +1129,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
         // Prefer model link_mode (any language). English regex is offline fallback only.
         $mode = $this->resolveUrlListMode($question, $linkMode);
+        $filterMode = $mode === 'none' ? 'default' : $mode;
         $wantsMeetingLinks = $mode === 'meetings';
         $wantsRecordings = $mode === 'recordings';
         $wantsGenericLinks = $mode === 'assets';
@@ -1101,15 +1145,38 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         );
 
         $labels = $this->preferredUrlLabels($answer."\n".$evidenceText);
+        $answerModeUrls = $this->uniqueOpenableUrls($urlsInAnswer, mode: $filterMode);
+        $evidenceModeUrls = $this->uniqueOpenableUrls($evidenceUrls, mode: $filterMode);
 
-        $candidateUrls = $this->uniqueOpenableUrls(
-            array_merge($urlsInAnswer, $evidenceUrls),
-            mode: $mode === 'none' ? 'default' : $mode,
-        );
+        // Trust a solid AI link list. Never re-merge the citation corpus on top —
+        // that turned singular/multi asks into 10–15 generic "Google Drive file" dumps.
+        if ($wantsAnyLinkList && ! $hollow && $answerModeUrls !== []) {
+            $fixed = $answer;
+            if ($wantsRecordings) {
+                $fixed = $this->stripNonRecordingUrlsFromAnswer($fixed);
+            } elseif ($wantsMeetingLinks) {
+                $fixed = $this->stripNonMeetingUrlsFromAnswer($fixed);
+            }
+            $fixed = $this->expandTruncatedUrlsFromEvidence($fixed, $evidenceModeUrls);
 
-        // Rebuild complete lists only for meeting / recording / asset link asks.
-        // Never replace solid prose (e.g. "Who's Diane?") with unrelated URLs.
-        if ($wantsAnyLinkList && $candidateUrls !== []) {
+            return $this->ensureReadableStructure($fixed);
+        }
+
+        // Hollow / wrong-class AI draft: light fill from evidence only (capped).
+        if ($wantsAnyLinkList && $evidenceModeUrls !== []) {
+            $focus = strtolower(trim($linkFocus));
+            if (! in_array($focus, ['one', 'many', 'na'], true)) {
+                $focus = 'na';
+            }
+            $candidateUrls = $evidenceModeUrls;
+            if ($focus === 'one') {
+                $candidateUrls = array_slice($candidateUrls, 0, 1);
+            } elseif ($mode === 'assets') {
+                $candidateUrls = array_slice($candidateUrls, 0, 5);
+            } else {
+                $candidateUrls = array_slice($candidateUrls, 0, 6);
+            }
+
             $list = $this->linkListIntro($question, $mode)."\n\n".$this->formatLabeledLinkList($candidateUrls, $labels);
             if ($this->hasAdditionalNonLinkQuestion($question)) {
                 $prose = $this->proseWithoutHttpUrls($answer);
@@ -1122,7 +1189,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         }
 
         // Typed recording/meeting asks: never pass through LinkedIn / random URL dumps.
-        if (($wantsRecordings || $wantsMeetingLinks) && $candidateUrls === []) {
+        if (($wantsRecordings || $wantsMeetingLinks) && $answerModeUrls === [] && $evidenceModeUrls === []) {
             return '';
         }
 
@@ -1135,6 +1202,39 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         }
 
         return $this->ensureReadableStructure($answer);
+    }
+
+    /**
+     * Replace cut-off http(s) twins in the answer with longer evidence URLs (same dedupe key).
+     *
+     * @param  list<string>  $evidenceUrls
+     */
+    private function expandTruncatedUrlsFromEvidence(string $answer, array $evidenceUrls): string
+    {
+        if ($answer === '' || $evidenceUrls === []) {
+            return $answer;
+        }
+
+        $byKey = [];
+        foreach ($evidenceUrls as $url) {
+            $key = $this->urlDedupeKey($url);
+            if (! isset($byKey[$key]) || strlen($url) > strlen($byKey[$key])) {
+                $byKey[$key] = $url;
+            }
+        }
+
+        foreach ($this->extractHttpUrls($answer) as $url) {
+            $key = $this->urlDedupeKey($url);
+            $full = $byKey[$key] ?? null;
+            if ($full === null || $full === $url) {
+                continue;
+            }
+            if (strlen($full) > strlen($url)) {
+                $answer = str_replace($url, $full, $answer);
+            }
+        }
+
+        return $answer;
     }
 
     /**
@@ -1602,6 +1702,55 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         return trim($text);
     }
 
+    private function stripNonMeetingUrlsFromAnswer(string $answer): string
+    {
+        $lines = preg_split("/\r\n|\n|\r/u", $answer) ?: [$answer];
+        $kept = [];
+        $pendingLabel = null;
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            $urls = $this->extractHttpUrls($trimmed);
+
+            if ($urls !== []) {
+                $url = $urls[0];
+                if (! $this->isMeetingJoinUrl($url)) {
+                    $pendingLabel = null;
+
+                    continue;
+                }
+                if (is_string($pendingLabel) && $pendingLabel !== '') {
+                    $kept[] = $pendingLabel;
+                    $pendingLabel = null;
+                }
+                $kept[] = $trimmed;
+
+                continue;
+            }
+
+            if (preg_match('/^(?:\d+\.|[•\-])\s+\S/u', $trimmed) === 1) {
+                $pendingLabel = $trimmed;
+
+                continue;
+            }
+
+            if ($pendingLabel !== null) {
+                $kept[] = $pendingLabel;
+                $pendingLabel = null;
+            }
+            $kept[] = $line;
+        }
+
+        if ($pendingLabel !== null) {
+            $kept[] = $pendingLabel;
+        }
+
+        $text = implode("\n", $kept);
+        $text = preg_replace("/\n{3,}/u", "\n\n", $text) ?? $text;
+
+        return trim($text);
+    }
+
     /**
      * @return array<string, string> url => label
      */
@@ -1980,7 +2129,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         $source = $this->lifecycle->import($user, [
             'tenant_id' => $community->tenant_id,
             'community_id' => $communityId,
-            'name' => 'Telegram admin import',
+            'name' => $this->knowledgeDesk->suggestImportTitle($body),
             'uri' => 'telegram-spike://import/'.Str::ulid(),
             'source_type' => 'telegram',
             'content' => $body,
@@ -1994,6 +2143,49 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         Log::info('telegram_spike.admin_import_draft', ['knowledge_id' => $source->id]);
 
         return $this->knowledgeDesk->draftCreatedReply($source, 'plain');
+    }
+
+    /**
+     * Admin replied to an import draft card → publish without typing the ID.
+     */
+    private function tryAdminDraftPublishSwipe(InboundMessage $message): ?string
+    {
+        if (! $this->commandAccess->isAdmin(
+            $this->channelName(),
+            $message->externalUserId,
+            is_array($message->raw) ? $message->raw : [],
+        )) {
+            return null;
+        }
+
+        $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if (! $replyToBot) {
+            return null;
+        }
+
+        $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
+        if ($quoted === '' || ! $this->knowledgeDesk->isDraftCardText($quoted)) {
+            return null;
+        }
+
+        if (! $this->knowledgeDesk->isPublishConfirmText($message->text)) {
+            return null;
+        }
+
+        $short = $this->knowledgeDesk->extractShortIdFromDraftCard($quoted);
+        if ($short === null || $short === '') {
+            return "I couldn't read the draft ID from that reply.\n\nSend /publish latest";
+        }
+
+        $user = $this->resolveUser();
+        $community = $this->resolveLinkedCommunity($message);
+        if ($user === null || $community === null) {
+            return 'Link a community with /join before publishing.';
+        }
+
+        $result = $this->knowledgeDesk->tryHandle('/publish '.$short, $user, $community, 'plain');
+
+        return (string) ($result['reply'] ?? 'Published.');
     }
 
     private function handleAdminKnowledgeDesk(InboundMessage $message): string

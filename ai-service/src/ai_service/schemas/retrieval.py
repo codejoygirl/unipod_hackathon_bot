@@ -158,6 +158,11 @@ class GroundedAnswerRequest(BaseModel):
         max_length=20,
         description="Optional URL-list intent from classifier: none|recordings|meetings|assets.",
     )
+    link_focus: str | None = Field(
+        default=None,
+        max_length=10,
+        description="Optional focus from classifier: one|many|na (model decides single vs list).",
+    )
     timezone: str | None = Field(
         default=None,
         max_length=64,

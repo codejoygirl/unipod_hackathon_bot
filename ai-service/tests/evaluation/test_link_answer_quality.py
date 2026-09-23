@@ -61,6 +61,33 @@ def test_meaningful_social_captions_pass():
     assert report.url_count == 2
 
 
+def test_link_focus_one_rejects_multi_url_dump():
+    answer = (
+        "Here are the documents:\n\n"
+        "1. Course page\nhttps://learn.mit.edu/ai\n\n"
+        "2. Signup\nhttps://example.com/signup\n\n"
+        "3. Guidelines\nhttps://drive.google.com/file/d/abc/view\n"
+    )
+    report = evaluate_link_answer_quality(
+        answer,
+        question="Give me the only hackathon guidelines document",
+        link_focus="one",
+    )
+    assert report.passed is False
+    assert any(i.startswith("singular_ask_url_dump") for i in report.issues)
+
+
+def test_html_escaped_amp_in_url_fails():
+    answer = (
+        "Signup:\n\n"
+        "1. Wadhwani signup\n"
+        "https://web.nen.wfglobal.org/en/login?mode=createAccount&amp;source=student\n"
+    )
+    report = evaluate_link_answer_quality(answer, question="signup link", link_focus="one")
+    assert report.passed is False
+    assert any(i.startswith("html_escaped") for i in report.issues)
+
+
 def test_non_link_answer_is_neutral_pass():
     report = evaluate_link_answer_quality(
         "Clinic opens Saturday at 9am.",
