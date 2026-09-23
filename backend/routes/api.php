@@ -33,7 +33,12 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('/auth/login', [AuthController::class, 'login'])->name('auth.login');
 
     Route::get('/web-chat/bootstrap', [WebChatController::class, 'bootstrap'])->name('web_chat.bootstrap');
+    Route::get('/web-chat/resources', [WebChatController::class, 'resources'])->name('web_chat.resources');
     Route::post('/web-chat/ask', [WebChatController::class, 'ask'])->name('web_chat.ask');
+    Route::post('/communities/{community}/assistant/ask', [WebChatController::class, 'askForCommunity'])
+        ->whereUlid('community')
+        ->name('communities.assistant.ask');
+    Route::post('/web-chat/feature-request', [WebChatController::class, 'featureRequest'])->name('web_chat.feature_request');
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/auth/logout', [AuthController::class, 'logout'])->name('auth.logout');

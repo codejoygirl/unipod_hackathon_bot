@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\KnowledgeLifecycleStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Community;
+use App\Models\FeatureRequest;
+use App\Models\KnowledgeSource;
 use App\Services\AI\AiServiceClient;
 use App\Services\Assistant\GroundedQuestionService;
 use App\Services\Channels\AdminCredentialsService;
@@ -114,6 +117,94 @@ final class WebChatController extends Controller
                 ],
             ],
         ]);
+    }
+
+    public function resources(Request $request): JsonResponse
+    {
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $community = $this->access->community($communityId);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+
+        $isAdmin = $this->adminCredentials->isAdminPhone($memberPhone);
+
+        $sources = KnowledgeSource::query()
+            ->where('community_id', $communityId)
+            ->where('lifecycle_status', KnowledgeLifecycleStatus::Published)
+            ->orderByDesc('published_at')
+            ->get();
+
+        $resources = $sources->map(function (KnowledgeSource $source) {
+            $metadata = is_array($source->metadata) ? $source->metadata : [];
+            $deliveryUrl = $metadata['delivery_url'] ?? null;
+            $assetKind = $metadata['asset_kind'] ?? null;
+
+            $url = $deliveryUrl;
+            if (! $url && preg_match('/https?:\/\/[^\s<>"\'\)]+/u', (string) $source->content, $m)) {
+                $url = $m[0];
+            }
+
+            $nameLower = strtolower($source->name);
+            $urlLower = strtolower((string) $url);
+            $kind = $assetKind;
+            if (! $kind) {
+                if (str_contains($urlLower, 'drive.google.com/drive/folders') || str_contains($nameLower, 'folder') || str_contains($nameLower, 'resources')) {
+                    $kind = 'folder';
+                } elseif (str_contains($nameLower, 'handbook') || str_contains($nameLower, 'guide') || str_contains($nameLower, 'manual')) {
+                    $kind = 'handbook';
+                } elseif (str_contains($nameLower, 'slide') || str_contains($nameLower, 'deck') || str_contains($nameLower, 'module') || str_contains($nameLower, 'presentation')) {
+                    $kind = 'slides';
+                } elseif (str_contains($nameLower, 'form') || str_contains($nameLower, 'survey') || str_contains($nameLower, 'signup') || str_contains($urlLower, 'forms.gle')) {
+                    $kind = 'form';
+                } elseif (str_contains($nameLower, 'meeting') || str_contains($nameLower, 'recording') || str_contains($nameLower, 'workshop')) {
+                    $kind = 'recording';
+                } else {
+                    $kind = 'document';
+                }
+            }
+
+            $content = (string) $source->content;
+            $cleanContent = trim((string) preg_replace('/https?:\/\/\S+/u', '', $content));
+            $cleanContent = trim((string) preg_replace('/\s+/', ' ', $cleanContent));
+
+            return [
+                'id' => (string) $source->id,
+                'name' => (string) $source->name,
+                'kind' => (string) $kind,
+                'url' => $url,
+                'description' => mb_substr($cleanContent, 0, 240),
+                'authority_tier' => $source->authority_tier?->value ?? 'verified_resource',
+                'source_type' => (string) $source->source_type,
+                'published_at' => $source->published_at?->toIso8601String(),
+                'is_asset' => ! empty($metadata['asset_identity']),
+            ];
+        })->values();
+
+        return response()->json([
+            'data' => [
+                'community' => [
+                    'id' => $community->id,
+                    'name' => $community->name,
+                    'slug' => $community->slug,
+                ],
+                'is_admin' => $isAdmin,
+                'resources' => $resources,
+            ],
+        ]);
+    }
+
+    /**
+     * Legacy / PRD-style path: POST …/communities/{community}/assistant/ask
+     * (same handler as web-chat ask; community must match configured default).
+     */
+    public function askForCommunity(Request $request, string $community): JsonResponse
+    {
+        $defaultCommunityId = $this->access->resolveDefaultCommunityId();
+        if ($community !== $defaultCommunityId) {
+            abort(404);
+        }
+
+        return $this->ask($request);
     }
 
     public function ask(Request $request): JsonResponse
@@ -413,6 +504,79 @@ final class WebChatController extends Controller
                 'community_ids' => [$communityId],
             ],
         ]);
+    }
+
+    public function featureRequest(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:200'],
+            'description' => ['required', 'string', 'max:3000'],
+            'user_type' => ['required', 'string', 'in:admin,member'],
+            'phone' => ['nullable', 'string', 'max:64'],
+            'name' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'community_id' => ['nullable', 'string'],
+        ]);
+
+        $communityId = $validated['community_id'] ?? null;
+        if (! $communityId) {
+            $communityId = $this->access->resolveDefaultCommunityId();
+        }
+
+        $community = null;
+        if ($communityId) {
+            $community = Community::query()->find($communityId);
+        }
+
+        $userType = $validated['user_type'] === 'admin' ? 'admin' : 'member';
+        $userPhone = trim((string) ($validated['phone'] ?? ''));
+        $userName = trim((string) ($validated['name'] ?? ''));
+        if ($userName === '') {
+            $userName = $userType === 'admin' ? 'Coordinator' : 'Fellow';
+        }
+
+        $title = trim($validated['title']);
+        $description = trim($validated['description']);
+
+        // Create feature request in database
+        $feature = FeatureRequest::create([
+            'community_id' => $community?->id,
+            'user_type' => $userType,
+            'title' => $title,
+            'description' => $description,
+            'user_name' => $userName,
+            'user_phone' => $userPhone,
+            'user_email' => $validated['email'] ?? null,
+            'status' => 'open',
+            'channel' => 'web_chat',
+        ]);
+
+        // Send notification to Telegram and WhatsApp admins
+        $content = "[{$userType}] {$title}\n\n{$description}";
+        $escalation = $this->escalationNotifier->notifyFeatureRequest(
+            channel: 'web_chat',
+            from: $userPhone !== '' ? $userPhone : ($userType === 'admin' ? 'Coordinator' : 'Member'),
+            content: $content,
+            communityId: (string) ($community?->id ?? ''),
+            communityName: $community?->name,
+            fromName: $userName,
+            fromPhone: $userPhone,
+            chatType: 'web',
+        );
+
+        $ref = $escalation['ref'] ?? null;
+        if ($ref) {
+            $feature->update(['ref' => $ref]);
+        }
+
+        return response()->json([
+            'data' => [
+                'id' => $feature->id,
+                'ref' => $ref,
+                'status' => 'submitted',
+                'message' => 'Feature request submitted and sent to coordinators.',
+            ],
+        ], 201);
     }
 
     /**

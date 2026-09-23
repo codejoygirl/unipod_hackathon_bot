@@ -454,6 +454,20 @@ class AnswerSynthesizer:
         )
 
     @classmethod
+    def _is_invalid_or_internal_url(cls, url: str) -> bool:
+        """Reject malformed URLs or internal scheme leakages like https://community://..."""
+        lower = (url or "").lower().strip()
+        if not lower.startswith(("http://", "https://")):
+            return True
+        # Nested protocol leakage: https://community://, https://whatsapp://, etc.
+        if "://" in lower[8:]:
+            return True
+        for scheme in ("community://", "whatsapp://", "telegram-spike://", "doc://", "asset://"):
+            if scheme in lower:
+                return True
+        return False
+
+    @classmethod
     def restore_urls_in_answer(cls, answer: str) -> str:
         """Decode HTML entities inside http(s) URLs so members get the original link."""
 
@@ -468,6 +482,8 @@ class AnswerSynthesizer:
         for match in _URL_RE.findall(text or ""):
             url = cls._normalize_url_text(match.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
             if not url.lower().startswith(("http://", "https://")):
+                continue
+            if cls._is_invalid_or_internal_url(url):
                 continue
             if mode == "meetings":
                 if not cls._is_meeting_join_url(url):
@@ -494,6 +510,8 @@ class AnswerSynthesizer:
         for match in _URL_RE.findall(text or ""):
             url = cls._normalize_url_text(match.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
             if not url.lower().startswith(("http://", "https://")):
+                continue
+            if cls._is_invalid_or_internal_url(url):
                 continue
             if mode == "meetings":
                 if not cls._is_meeting_join_url(url):
@@ -848,11 +866,14 @@ class AnswerSynthesizer:
                     url = cls._normalize_url_text(same.group(2).rstrip(".,);]}>'\"")).rstrip(
                         ".,);]}>'\" "
                     )
-                    pairs.append((url, label))
+                    if not cls._is_invalid_or_internal_url(url):
+                        pairs.append((url, label))
                     i += 1
                     continue
                 if rest.startswith("http://") or rest.startswith("https://"):
-                    pairs.append((cls._normalize_url_text(rest.rstrip(".,);]}>'\"")), ""))
+                    cand_url = cls._normalize_url_text(rest.rstrip(".,);]}>'\""))
+                    if not cls._is_invalid_or_internal_url(cand_url):
+                        pairs.append((cand_url, ""))
                     i += 1
                     continue
                 j = i + 1
@@ -862,12 +883,14 @@ class AnswerSynthesizer:
                     nxt = lines[j].strip()
                     if nxt.startswith("http://") or nxt.startswith("https://"):
                         url = cls._normalize_url_text(nxt.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
-                        pairs.append((url, rest))
+                        if not cls._is_invalid_or_internal_url(url):
+                            pairs.append((url, rest))
                         i = j + 1
                         continue
             elif trimmed.startswith("http://") or trimmed.startswith("https://"):
                 url = cls._normalize_url_text(trimmed.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
-                pairs.append((url, ""))
+                if not cls._is_invalid_or_internal_url(url):
+                    pairs.append((url, ""))
             i += 1
         return pairs
 

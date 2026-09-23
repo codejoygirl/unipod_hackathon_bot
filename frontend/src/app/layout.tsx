@@ -1,4 +1,4 @@
-import { APP_DISPLAY_NAME, APP_LOGO_SRC } from "@/lib/branding";
+import { APP_DISPLAY_NAME, appIconUrl } from "@/lib/branding";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "./providers";
@@ -19,34 +19,63 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#ffffff",
+  themeColor: "#171717",
 };
+
+const favicon32 = appIconUrl("/favicon-32x32.png");
+const faviconIco = appIconUrl("/favicon.ico");
+const appleTouch = appIconUrl("/apple-touch-icon.png");
+const icon192 = appIconUrl("/icon-192.png");
+const icon512 = appIconUrl("/icon-512.png");
 
 export const metadata: Metadata = {
   title: APP_DISPLAY_NAME,
   description: "UniPod community knowledge assistant — private web chat",
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: [
-      { url: "/unipod-assistant-logo.png?v=3", type: "image/png" },
-      { url: "/favicon.ico?v=3" },
+      { url: favicon32, type: "image/png", sizes: "32x32" },
+      { url: icon192, type: "image/png", sizes: "192x192" },
+      { url: icon512, type: "image/png", sizes: "512x512" },
+      { url: faviconIco, sizes: "any" },
     ],
-    shortcut: "/unipod-assistant-logo.png?v=3",
-    apple: "/unipod-assistant-logo.png?v=3",
+    shortcut: favicon32,
+    apple: [{ url: appleTouch, sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "UniPod",
   },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+const themeInitScript = `
+(function() {
+  try {
+    var stored = localStorage.getItem('unipod-theme-preference');
+    var isDark = stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches) || stored === null;
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.style.colorScheme = 'dark';
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.style.colorScheme = 'light';
+    }
+  } catch(e) {}
+})();
+`;
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
       <head>
-        <link rel="icon" type="image/png" href="/unipod-assistant-logo.png?v=3" />
-        <link rel="shortcut icon" type="image/png" href="/unipod-assistant-logo.png?v=3" />
-        <link rel="apple-touch-icon" href="/unipod-assistant-logo.png?v=3" />
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="flex min-h-full flex-col">
+      <body className="flex min-h-full flex-col bg-background text-foreground">
         <Providers>{children}</Providers>
       </body>
     </html>
