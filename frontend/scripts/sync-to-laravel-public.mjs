@@ -43,13 +43,18 @@ for (const entry of readdirSync(publicDir)) {
   }
   if (
     entry === "_next" ||
+    entry.startsWith("__next") ||
+    entry === "_not-found" ||
+    entry === "404" ||
     entry === "index.html" ||
+    entry === "index.txt" ||
     entry === "login" ||
     entry === "catch-up" ||
     entry === "meetings" ||
     entry === "tasks" ||
     entry === "more" ||
-    entry.endsWith(".html")
+    entry.endsWith(".html") ||
+    entry.endsWith(".txt")
   ) {
     const target = path.join(publicDir, entry);
     rmSync(target, { recursive: true, force: true });

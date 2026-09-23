@@ -2222,9 +2222,13 @@ final class ChannelConversationService
             ];
         }
 
-        if ($currentChannel !== 'web' && filter_var(config('zak_presence.show_web_chat', true), FILTER_VALIDATE_BOOLEAN)) {
+        if (filter_var(config('zak_presence.show_web_chat', true), FILTER_VALIDATE_BOOLEAN)) {
+            $webLabel = (string) config('zak_presence.web_chat_label', 'Web chat');
+            if ($currentChannel === 'web') {
+                $webLabel = $webLabel.' (this page)';
+            }
             $entries[] = [
-                'label' => (string) config('zak_presence.web_chat_label', 'Web chat'),
+                'label' => $webLabel,
                 'url' => $this->webChatInviteUrl($webPhone),
             ];
         }
@@ -2668,6 +2672,7 @@ final class ChannelConversationService
                 'approve' => '/approve H7G74Y',
                 'decline' => '/decline H7G74Y',
                 'reply' => '/reply H7G74Y The session is at 4pm',
+                'logins' => '/logins',
             ],
             [
                 'import' => '/import [paste chat export here]',
@@ -2678,6 +2683,7 @@ final class ChannelConversationService
                 'approve' => '/approve W7X1YT',
                 'decline' => '/decline W7X1YT',
                 'reply' => '/reply W7X1YT Yes - open until Friday',
+                'logins' => '/logins',
             ],
             [
                 'import' => '/import [full export dump]',
@@ -2688,6 +2694,7 @@ final class ChannelConversationService
                 'approve' => '/approve 9D5GWS',
                 'decline' => '/decline 9D5GWS',
                 'reply' => '/reply 9D5GWS Mentors are listed in the Drive folder',
+                'logins' => '/logins',
             ],
         ];
 
@@ -2760,7 +2767,8 @@ final class ChannelConversationService
             .$this->formatCommandWithExample('/features', 'list open or decided feature requests', $ex['features'], $style)."\n"
             .$this->formatCommandWithExample('/approve', 'approve a share or feature (Request ID)', $ex['approve'], $style)."\n"
             .$this->formatCommandWithExample('/decline', 'decline a share or feature (Request ID)', $ex['decline'], $style)."\n"
-            .$this->formatCommandWithExample('/reply', 'answer an escalated member question', $ex['reply'], $style);
+            .$this->formatCommandWithExample('/reply', 'answer an escalated member question', $ex['reply'], $style)."\n"
+            .$this->formatCommandWithExample('/logins', 'view admin phones and web login passwords', $ex['logins'] ?? '/logins', $style);
     }
 
     /**

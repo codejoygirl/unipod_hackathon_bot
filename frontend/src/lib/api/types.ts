@@ -65,5 +65,5 @@ export type AssistantAskResponse = {
 
 export type ApiErrorBody = {
   message?: string;
-  errors?: Record<string, string[]>;
+  errors?: Record<string, string[] | string>;
 };

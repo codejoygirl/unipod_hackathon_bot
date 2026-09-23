@@ -50,6 +50,11 @@ final class ProcessTelegramSpikeInbound implements ShouldQueue
             return;
         }
 
+        $outbound = app(SpikeOutboundSender::class);
+        if ($chatId !== '') {
+            $outbound->sendTelegramTyping($chatId);
+        }
+
         // Rethrow on failure so Redis retries; soft deferral goes out only in failed().
         $reply = $adapter->handleInbound(
             InboundMessage::fromSpikePayload($this->payload, 'telegram_spike')
@@ -72,7 +77,7 @@ final class ProcessTelegramSpikeInbound implements ShouldQueue
             return;
         }
 
-        $this->sendReply($reply, $chatId, $messageId, app(SpikeOutboundSender::class));
+        $this->sendReply($reply, $chatId, $messageId, $outbound);
         Log::info('telegram_spike.job_sent', [
             'chat_id' => $chatId,
             'message_id' => $messageId !== '' ? $messageId : null,

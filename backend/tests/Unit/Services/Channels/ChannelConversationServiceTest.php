@@ -636,7 +636,6 @@ class ChannelConversationServiceTest extends TestCase
     {
         config([
             'zak_presence.web_chat_url' => 'https://zak-app.test',
-            'zak_web_chat.access_key' => 'test-access-key',
             'zak_web_chat.default_community_id' => '01JAAAAAAAAAAAAAAAAAAAAAAA',
         ]);
 
@@ -645,9 +644,7 @@ class ChannelConversationServiceTest extends TestCase
         $web = collect($entries)->firstWhere('label', 'Web chat');
 
         $this->assertIsArray($web);
-        $this->assertStringContainsString('k=test-access-key', (string) $web['url']);
-        $this->assertStringContainsString('p=2347041131371', (string) $web['url']);
-        $this->assertStringContainsString('s=m2347041131371', (string) $web['url']);
+        $this->assertSame('https://zak-app.test/?phone=2347041131371', (string) $web['url']);
     }
 
     public function test_conversational_hello_reply_is_warm(): void

@@ -31,6 +31,8 @@ final class ChannelListenGate
         'reply',
         'blacklist',
         'unblacklist',
+        'logins',
+        'loginas',
     ];
 
     /**

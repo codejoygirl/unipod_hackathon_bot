@@ -1,7 +1,13 @@
 import type { AssistantAskResponse } from "@/lib/api/types";
 
+export type QuotedMessage = {
+  id: string;
+  sender: string;
+  text: string;
+};
+
 export type StoredChatEntry =
-  | { id: string; role: "user"; text: string; sentAt: string }
+  | { id: string; role: "user"; text: string; sentAt: string; quote?: QuotedMessage }
   | { id: string; role: "assistant"; response: AssistantAskResponse; sentAt: string }
   | { id: string; role: "error"; text: string; sentAt: string };
 

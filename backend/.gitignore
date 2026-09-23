@@ -29,6 +29,7 @@
 /public/tasks/
 /public/more/
 /public/*.svg
+!/public/unipod-assistant-logo.png
 /public/*.txt
 /public/fonts-manifest.dev.json
 /public/hot
