@@ -11,7 +11,7 @@ Official [Telegram Bot API](https://core.telegram.org/bots) sidecar for Zak.
 3. Laravel runs grounded ask + citation checks  
 4. Bot replies in Telegram  
 
-Also: `/join <code>`, `/share <note>` (propose a knowledge draft for admin review).
+Also: `/join <code>`, `/share <note>`, admin `/import` (paste title + URL in one message), `/publish`, `/asset`, `/knowledge`.
 
 ## Setup
 

@@ -229,6 +229,12 @@ class AnswerSynthesizer:
         raw = cls._normalize_url_text(url or "").strip()
         if not raw or len(raw) < 12:
             return True
+        if "…" in raw or raw.endswith("..."):
+            return True
+        if re.search(r"YOUR_[A-Z0-9_]+", raw, flags=re.I):
+            return True
+        if re.search(r"/drive/folders/?(?:\?|$)", raw, flags=re.I):
+            return True
         if re.search(r"%[0-9A-Fa-f]?$", raw):
             return True
         if raw.endswith(("=", "&", "%", ",", '"', "'", ":", "-")):

@@ -8,6 +8,7 @@ use App\DTOs\Channels\InboundMessage;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessTelegramSpikeInbound;
 use App\Services\Channels\ChannelConversationService;
+use App\Services\Channels\ChannelListenGate;
 use App\Services\Channels\TelegramSpikeAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -55,8 +56,12 @@ final class TelegramSpikeController extends Controller
             ], 200, [], JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
         }
 
+        $listenGate = app(ChannelListenGate::class);
+        $processSync = (bool) config('telegram_spike.process_sync', true)
+            || $listenGate->spikeNeedsInlineReply($validated['text'], $validated);
+
         // Default sync so the Python sidecar keeps waiting for data.reply.
-        if ((bool) config('telegram_spike.process_sync', true)) {
+        if ($processSync) {
             $chatId = trim((string) ($validated['chat_id'] ?? $validated['from'] ?? ''));
             if ($chatId !== '') {
                 app(\App\Services\Channels\SpikeOutboundSender::class)->sendTelegramTyping($chatId);

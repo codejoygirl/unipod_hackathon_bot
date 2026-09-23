@@ -462,6 +462,15 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
     private function modelAssistedReply(InboundMessage $message, string $mode, ?Community $community): string
     {
         $chatType = $this->chatType($message);
+        if ($mode === 'social' && $this->conversation->isZakCapabilityAsk($message->text)) {
+            return $this->conversation->zakCapabilityReply(
+                'whatsapp',
+                'whatsapp',
+                $chatType,
+                $this->memberPhoneForWeb($message),
+            );
+        }
+
         if ($mode === 'social' && $this->conversation->isChannelPresenceAsk($message->text)) {
             return $this->conversation->channelPresenceReply(
                 'whatsapp',
