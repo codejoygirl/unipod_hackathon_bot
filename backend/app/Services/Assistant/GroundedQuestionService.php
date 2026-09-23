@@ -20,7 +20,7 @@ final class GroundedQuestionService
      * @param  list<string>  $communityIds
      * @return array{data: array<string, mixed>, meta: array<string, mixed>}
      */
-    public function ask(User $user, string $query, array $communityIds, ?string $targetLanguage = null): array
+    public function ask(User $user, string $query, array $communityIds, ?string $targetLanguage = null, ?string $timezone = null): array
     {
         $requested = array_values(array_unique($communityIds));
         $accessible = $user->accessibleCommunityIds();
@@ -38,6 +38,7 @@ final class GroundedQuestionService
             tenantId: $tenantId,
             communityIds: $allowed,
             targetLanguage: $targetLanguage,
+            timezone: $timezone,
         );
 
         $result = $this->citationRevalidator->revalidate($user, $result);

@@ -23,11 +23,9 @@ final class WebChatTest extends TestCase
         parent::setUp();
 
         Config::set('zak_web_chat.enabled', true);
-        Config::set('zak_web_chat.require_member_phone', false);
-        Config::set('zak_web_chat.allow_open_access', true);
     }
 
-    public function test_bootstrap_and_ask_without_sign_in(): void
+    public function test_bootstrap_and_ask_with_phone_query(): void
     {
         Http::fake([
             '*/retrieval/grounded-answer' => Http::response([
@@ -48,52 +46,154 @@ final class WebChatTest extends TestCase
         ]);
 
         [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
 
         Config::set('zak_web_chat.default_community_id', $community->id);
         Config::set('zak_web_chat.actor_user_email', $user->email);
 
-        $session = 'testsess01';
-
-        $this->getJson('/api/v1/web-chat/bootstrap?s='.$session)
+        $this->getJson('/api/v1/web-chat/bootstrap?phone='.$phone)
             ->assertOk()
+            ->assertJsonPath('data.member_phone', $phone)
             ->assertJsonPath('data.community.id', $community->id);
 
         $this->postJson('/api/v1/web-chat/ask', [
-            's' => $session,
-            'query' => 'Hello',
+            'phone' => $phone,
+            'query' => 'What is the syllabus?',
         ])
             ->assertOk()
             ->assertJsonPath('data.state', 'INSUFFICIENT_EVIDENCE');
     }
 
-    public function test_phone_query_identifies_member_session(): void
+    public function test_social_query_returns_warm_reply(): void
     {
-        Config::set('zak_web_chat.require_member_phone', true);
-
         [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
+
         Config::set('zak_web_chat.default_community_id', $community->id);
         Config::set('zak_web_chat.actor_user_email', $user->email);
 
-        $phone = '2347041131371';
-        $session = 'm'.$phone;
-
-        $this->getJson('/api/v1/web-chat/bootstrap?s='.$session.'&p='.$phone)
+        $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $phone,
+            'query' => 'Hello',
+        ])
             ->assertOk()
-            ->assertJsonPath('data.member_phone', $phone)
-            ->assertJsonPath('data.session_id', $session);
+            ->assertJsonPath('data.state', 'VERIFIED');
+    }
 
-        $this->getJson('/api/v1/web-chat/bootstrap?s=wrongsession&p='.$phone)
+    public function test_help_command_returns_channel_help(): void
+    {
+        [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
+
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        $response = $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $phone,
+            'query' => '/help',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'VERIFIED');
+
+        $this->assertStringContainsString('What I can do', (string) $response->json('data.answer'));
+    }
+
+    public function test_feature_command_records_and_acknowledges(): void
+    {
+        [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
+
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        $response = $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $phone,
+            'query' => '/feature Add voice recording transcripts',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'VERIFIED');
+
+        $this->assertStringContainsString('feature request', strtolower((string) $response->json('data.answer')));
+    }
+
+    public function test_invalid_phone_is_rejected(): void
+    {
+        Config::set('zak_web_chat.default_community_id', '01JAAAAAAAAAAAAAAAAAAAAAAA');
+
+        $this->getJson('/api/v1/web-chat/bootstrap?phone=not-a-phone')
             ->assertUnprocessable();
     }
 
-    public function test_invalid_access_key_is_rejected(): void
+    public function test_admin_phone_requires_password_on_bootstrap(): void
     {
-        Config::set('zak_web_chat.allow_open_access', false);
-        Config::set('zak_web_chat.access_key', 'known-key');
-        Config::set('zak_web_chat.default_community_id', '01JAAAAAAAAAAAAAAAAAAAAAAA');
+        [$user, $community] = $this->seedMember();
+        $adminPhone = '250783188655'; // Diane
 
-        $this->getJson('/api/v1/web-chat/bootstrap?s=testsess02&k=wrong')
-            ->assertForbidden();
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        // Without password, returns requires_password: true
+        $res = $this->getJson("/api/v1/web-chat/bootstrap?phone={$adminPhone}")
+            ->assertOk()
+            ->assertJsonPath('data.requires_password', true)
+            ->assertJsonPath('data.is_admin', true)
+            ->assertJsonPath('data.admin_name', 'Diane');
+
+        // With wrong password, returns 422
+        $this->getJson("/api/v1/web-chat/bootstrap?phone={$adminPhone}&password=wrongpassword")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['password']);
+
+        // With correct password, succeeds and returns admin_token
+        $loginRes = $this->getJson("/api/v1/web-chat/bootstrap?phone={$adminPhone}&password=Zak!Dia%238318")
+            ->assertOk()
+            ->assertJsonPath('data.requires_password', false)
+            ->assertJsonPath('data.is_admin', true)
+            ->assertJsonPath('data.role', 'admin');
+
+        $token = $loginRes->json('data.admin_token');
+        $this->assertNotEmpty($token);
+
+        // With token, subsequent bootstrap succeeds without password
+        $this->withHeader('X-Admin-Token', $token)
+            ->getJson("/api/v1/web-chat/bootstrap?phone={$adminPhone}")
+            ->assertOk()
+            ->assertJsonPath('data.requires_password', false)
+            ->assertJsonPath('data.is_admin', true);
+    }
+
+    public function test_admin_can_run_logins_command_and_non_admin_is_denied(): void
+    {
+        [$user, $community] = $this->seedMember();
+        $adminPhone = '250783188655'; // Diane
+        $memberPhone = '254711999888'; // Normal member
+
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        // Admin runs /logins
+        $adminAsk = $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $adminPhone,
+            'query' => '/logins',
+        ])
+            ->assertOk();
+
+        $answer = (string) $adminAsk->json('data.answer');
+        $this->assertStringContainsString('Diane', $answer);
+        $this->assertStringContainsString('Gift Ntuli', $answer);
+        $this->assertStringContainsString('Charles Bolton', $answer);
+        $this->assertStringContainsString('Zak!Dia#8318', $answer);
+
+        // Normal member runs /logins -> denied
+        $memberAsk = $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $memberPhone,
+            'query' => '/logins',
+        ])
+            ->assertOk();
+
+        $memberAnswer = (string) $memberAsk->json('data.answer');
+        $this->assertStringContainsString('admin-only', $memberAnswer);
+        $this->assertStringNotContainsString('Zak!Dia#8318', $memberAnswer);
     }
 
     /**

@@ -424,18 +424,14 @@ php artisan route:clear
 php artisan config:cache
 ```
 
-Member chat links use **`?k=`** (access key from `.env`) and **`?p=`** (phone digits). Example:
+Member chat links are just the phone in the query string, for example:
 
-```bash
-php artisan zak:web-chat-link --phone=2347041131371
-```
+`https://zak-app.xerotek.io/?phone=2347041131371`
 
 Set in `.env`:
 
 ```env
-ZAK_WEB_CHAT_ACCESS_KEY=<long-random-string>
 ZAK_WEB_CHAT_DEFAULT_COMMUNITY_ID=<community-ulid>
-ZAK_WEB_CHAT_REQUIRE_PHONE=true
 ```
 
 If you still see the Laravel “Let’s get started” page, the static UI was never published — run `build:laravel` and `zak:frontend-doctor`.

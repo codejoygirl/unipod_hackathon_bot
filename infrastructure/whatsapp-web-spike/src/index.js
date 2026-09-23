@@ -69,6 +69,9 @@ const TRANSIENT_ERROR_REPLY =
   "Thanks — I've got your message 🙂\n\n"
   + "I'll reply as soon as I can. No need to send it again."
 
+/**
+ * @returns {Promise<{ queued: boolean, reply: string|null }>}
+ */
 async function callLaravelInbound(payload) {
   const started = Date.now()
   console.log('[spike] → Laravel inbound…')
@@ -89,20 +92,21 @@ async function callLaravelInbound(payload) {
     if (!res.ok && res.status !== 202) {
       console.error(`[spike] Laravel inbound ${res.status} after ${ms}ms:`, JSON.stringify(body).slice(0, 500))
       // Same wording as Telegram spike when Laravel returns an error.
-      return body?.data?.reply || TRANSIENT_ERROR_REPLY
+      return { queued: false, reply: body?.data?.reply || TRANSIENT_ERROR_REPLY }
     }
     const data = body?.data || {}
     if (data.queued === true) {
-      console.log(`[spike] ← Laravel ${ms}ms queued=yes (worker will send)`)
-      return null
+      // Keep composing on the client — worker will deliver via /send later.
+      console.log(`[spike] ← Laravel ${ms}ms queued=yes (keep typing until outbound)`)
+      return { queued: true, reply: null }
     }
     const reply = data.reply ?? null
     const len = reply ? String(reply).length : 0
     console.log(`[spike] ← Laravel ${ms}ms reply_chars=${len}`)
-    return reply
+    return { queued: false, reply }
   } catch (err) {
     console.error(`[spike] Laravel request failed after ${Date.now() - started}ms:`, err.message || err)
-    return TRANSIENT_ERROR_REPLY
+    return { queued: false, reply: TRANSIENT_ERROR_REPLY }
   }
 }
 
@@ -472,6 +476,71 @@ function contactPhoneDigits(contact, senderRaw = '') {
   if (fromContact.length >= 10 && fromContact.length <= 13) {
     return fromContact
   }
+  return null
+}
+
+/**
+ * MSISDN for Laravel admin checks when DMs arrive as @lid (no contact.number).
+ * Reuses WA Web LID↔phone APIs before falling back to null.
+ */
+async function resolveSenderPhoneDigits(contact, senderRaw = '') {
+  const direct = contactPhoneDigits(contact, senderRaw)
+  if (direct) {
+    return direct
+  }
+
+  const sender = String(senderRaw || '')
+  const candidates = []
+  if (sender.includes('@')) {
+    candidates.push(sender)
+  }
+  if (contact?.id?._serialized) {
+    candidates.push(String(contact.id._serialized))
+  }
+
+  let pn = null
+  if (client?.getContactLidAndPhone && candidates.length) {
+    try {
+      const rows = await client.getContactLidAndPhone(candidates)
+      for (const row of rows || []) {
+        if (row?.pn) {
+          pn = String(row.pn)
+        }
+      }
+    } catch (err) {
+      debugLog('resolveSenderPhoneDigits getContactLidAndPhone failed', formatErr(err))
+    }
+  }
+
+  if (!pn && client?.pupPage && candidates[0]) {
+    try {
+      const looked = await client.pupPage.evaluate(async (userId) => {
+        try {
+          const { phone } = await window.WWebJS.enforceLidAndPnRetrieval(userId)
+          return phone?._serialized || null
+        } catch {
+          return null
+        }
+      }, candidates[0])
+      if (looked) {
+        pn = looked
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  if (!pn) {
+    return null
+  }
+
+  const userDigits = idUserPart(pn).replace(/\D+/g, '')
+  const serializedDigits = String(pn).replace(/\D+/g, '')
+  const candidate = userDigits || serializedDigits
+  if (candidate.length >= 10 && candidate.length <= 13) {
+    return candidate
+  }
+
   return null
 }
 
@@ -1824,19 +1893,19 @@ async function ensureMessageId(msg, maxMs = 1200) {
  * Typing via Store / WWebJS only. NEVER call resolveChat — getChat "r" burns 5–15s.
  * Prefer window.WWebJS.sendChatstate (same path as Chat.sendStateTyping in wwebjs).
  */
-async function sendTyping(msg) {
-  const chatId = String(msg?.from || msg?._data?.from || '')
-  if (!client?.pupPage || !chatId) return
+async function sendTypingToChat(chatId) {
+  const id = String(chatId || '').trim()
+  if (!client?.pupPage || !id) return
   try {
-    const ok = await client.pupPage.evaluate(async (id) => {
+    const ok = await client.pupPage.evaluate(async (chatKey) => {
       try {
         // Official wwebjs inject path — works when chat.presence APIs are gone.
         if (typeof window.WWebJS?.sendChatstate === 'function') {
-          await window.WWebJS.sendChatstate('typing', id)
+          await window.WWebJS.sendChatstate('typing', chatKey)
           return { ok: true, via: 'WWebJS.sendChatstate' }
         }
         try {
-          const wid = window.require('WAWebWidFactory').createWid(id)
+          const wid = window.require('WAWebWidFactory').createWid(chatKey)
           const ChatState = window.require('WAWebChatStateBridge')
           if (ChatState?.sendChatStateComposing) {
             await ChatState.sendChatStateComposing(wid)
@@ -1847,9 +1916,9 @@ async function sendTyping(msg) {
         }
 
         const Chat = window.require('WAWebCollections').Chat
-        let chat = Chat.get(id)
+        let chat = Chat.get(chatKey)
         if (!chat && typeof Chat.find === 'function') {
-          chat = await Chat.find(id)
+          chat = await Chat.find(chatKey)
         }
         if (!chat) return { ok: false, reason: 'no_chat' }
 
@@ -1881,7 +1950,7 @@ async function sendTyping(msg) {
       } catch (e) {
         return { ok: false, reason: String(e?.message || e || 'eval_error') }
       }
-    }, chatId)
+    }, id)
     if (ok?.ok) debugLog('typing ok', ok.via)
     else debugLog('typing skip', ok?.reason || 'failed')
   } catch (err) {
@@ -1889,13 +1958,46 @@ async function sendTyping(msg) {
   }
 }
 
+async function sendTyping(msg) {
+  const chatId = String(msg?.from || msg?._data?.from || '')
+  await sendTypingToChat(chatId)
+}
+
+/** chatId → stop fn (queued mode keeps composing until outbound /send). */
+const typingByChat = new Map()
+
+function stopTypingForChat(chatId) {
+  const id = String(chatId || '').trim()
+  if (!id) return
+  const stop = typingByChat.get(id)
+  if (!stop) return
+  try {
+    stop()
+  } catch (_) {
+    /* ignore */
+  }
+  typingByChat.delete(id)
+}
+
 /** Refresh composing while Laravel is slow (OpenClaw active-turn pattern). */
 function startTypingHeartbeat(msg) {
+  const chatId = String(msg?.from || msg?._data?.from || '').trim()
+  stopTypingForChat(chatId)
   void sendTyping(msg)
   const timer = setInterval(() => {
     void sendTyping(msg)
   }, 4000)
-  return () => clearInterval(timer)
+  // Queued jobs can take ~2m; stop so we never leak intervals.
+  const maxTimer = setTimeout(() => stopTypingForChat(chatId), 110_000)
+  const stop = () => {
+    clearInterval(timer)
+    clearTimeout(maxTimer)
+    if (chatId && typingByChat.get(chatId) === stop) {
+      typingByChat.delete(chatId)
+    }
+  }
+  if (chatId) typingByChat.set(chatId, stop)
+  return stop
 }
 
 /** One quick try — never multi-second backoff. */
@@ -2038,7 +2140,7 @@ async function handleInboundMessage(msg, source) {
       || msg._data?.notifyName
       || msg._data?.pushname
       || null
-    const fromPhone = contactPhoneDigits(contact, senderRaw)
+    const fromPhone = await resolveSenderPhoneDigits(contact, senderRaw)
     const quote = await resolveQuoteContext(msg)
     const mentioned = isBotMentioned(msg)
     const replyToBot = quote.reply_to_bot
@@ -2159,8 +2261,9 @@ async function handleInboundMessage(msg, source) {
       return
     }
 
-    let reply = null
+    let inboundResult = { queued: false, reply: null }
     // Typing during the whole Laravel/RAG wait (not only after the reply arrives).
+    // Queued mode: keep heartbeat until outbound /send (or 110s cap) — do not stop on 202.
     const stopTyping = startTypingHeartbeat(msg)
     try {
       const inbound = {
@@ -2188,11 +2291,18 @@ async function handleInboundMessage(msg, source) {
           inbound.quoted_voice = true
         }
       }
-      reply = await callLaravelInbound(inbound)
+      inboundResult = await callLaravelInbound(inbound)
     } catch (err) {
       console.error('[spike] laravel inbound failed:', formatErr(err))
+      stopTyping()
     }
 
+    if (inboundResult.queued) {
+      console.log('[spike] queued — typing stays on until worker outbound /send')
+      return
+    }
+
+    const reply = inboundResult.reply
     if (reply) {
       let meta
       try {
@@ -2345,6 +2455,9 @@ function startOutboundServer() {
         }
       }
 
+      // Pulse composing once more, then clear the queued-mode heartbeat for this chat.
+      await sendTypingToChat(chatId)
+
       let sent
       try {
         sent = await sendOutbound(text, opts)
@@ -2356,6 +2469,8 @@ function startOutboundServer() {
         } else {
           throw err
         }
+      } finally {
+        stopTypingForChat(chatId)
       }
       rememberBotOutboundId(sent)
       const messageId = messageSerializedId(sent)

@@ -1016,6 +1016,15 @@ final class SpikeEscalationNotifier
     ): ?array {
         $text = trim($adminText);
 
+        if (preg_match('/^\/?(logins|loginas)\b/iu', $text) === 1) {
+            return [
+                'ok' => true,
+                'reply' => app(AdminCredentialsService::class)->formatLoginsCard(
+                    $defaultChannel === 'whatsapp_web_spike' ? 'whatsapp' : 'plain'
+                ),
+            ];
+        }
+
         if (preg_match('/^\/?approve\s+(\S+)/iu', $text, $m) === 1) {
             return $this->runShareDecisionByRef(trim($m[1]), '/approve', $resolvedBy);
         }

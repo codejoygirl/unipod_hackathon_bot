@@ -11,6 +11,10 @@ use Illuminate\Support\Str;
 
 final class WebChatAccessService
 {
+    public function __construct(
+        private readonly WebChatMemberPhone $phones,
+    ) {}
+
     public function isEnabled(): bool
     {
         return (bool) config('zak_web_chat.enabled', true);
@@ -25,32 +29,14 @@ final class WebChatAccessService
         return $key;
     }
 
-    public function resolveCommunityId(?string $accessKey): string
+    public function resolveDefaultCommunityId(): string
     {
         abort_unless($this->isEnabled(), 503, 'Web chat is disabled.');
 
-        $accessKey = trim((string) $accessKey);
         $defaultCommunity = trim((string) config('zak_web_chat.default_community_id'));
+        abort_if($defaultCommunity === '', 503, 'Web chat community is not configured.');
 
-        if ($accessKey !== '') {
-            $configured = trim((string) config('zak_web_chat.access_key'));
-            if ($configured !== '' && hash_equals($configured, $accessKey) && $defaultCommunity !== '') {
-                return $defaultCommunity;
-            }
-
-            $cached = Cache::get($this->cacheKey($accessKey));
-            if (is_string($cached) && $cached !== '') {
-                return $cached;
-            }
-
-            abort(403, 'Invalid or expired chat link.');
-        }
-
-        if (filter_var(config('zak_web_chat.allow_open_access'), FILTER_VALIDATE_BOOLEAN) && $defaultCommunity !== '') {
-            return $defaultCommunity;
-        }
-
-        abort(403, 'Missing chat access key. Open the link shared by your community admin.');
+        return $defaultCommunity;
     }
 
     public function community(string $communityId): Community
@@ -76,6 +62,12 @@ final class WebChatAccessService
     {
         $accessible = $user->accessibleCommunityIds();
         abort_unless(in_array($communityId, $accessible, true), 403, 'Actor cannot access this community.');
+    }
+
+    /** ?phone= in the URL (8–15 digits). */
+    public function memberPhoneFromQuery(?string $phone): ?string
+    {
+        return $this->phones->normalize($phone);
     }
 
     private function cacheKey(string $key): string
