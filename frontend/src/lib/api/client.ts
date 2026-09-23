@@ -75,11 +75,19 @@ export async function apiFetch<T>(
     headers.set("X-XSRF-TOKEN", xsrf);
   }
 
-  const response = await fetch(url, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers,
+      credentials: "include",
+    });
+  } catch {
+    throw new ApiError(
+      0,
+      "We're having trouble connecting right now. Please try again in a moment.",
+    );
+  }
 
   if (response.status === 204) {
     return undefined as T;
@@ -97,11 +105,58 @@ export async function apiFetch<T>(
 
   if (!response.ok) {
     const body = (parsed && typeof parsed === "object" ? parsed : null) as ApiErrorBody | null;
-    const message =
-      body?.message ||
-      (response.status === 401 ? "Please sign in again." : `Request failed (${response.status}).`);
-    throw new ApiError(response.status, message, body);
+    throw new ApiError(response.status, friendlyHttpMessage(response.status, body), body);
   }
 
   return parsed as T;
+}
+
+function firstValidationMessage(body: ApiErrorBody | null): string | null {
+  const errors = body?.errors;
+  if (!errors || typeof errors !== "object") {
+    return null;
+  }
+  for (const value of Object.values(errors)) {
+    if (Array.isArray(value) && typeof value[0] === "string" && value[0].trim() !== "") {
+      return value[0].trim();
+    }
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function looksTechnical(message: string): boolean {
+  return /laravel|sail|localhost|stack trace|sqlstate|exception|npm |docker|uvicorn|fastapi/i.test(
+    message,
+  );
+}
+
+function friendlyHttpMessage(status: number, body: ApiErrorBody | null): string {
+  const fromBody =
+    (typeof body?.message === "string" && body.message.trim()) ||
+    firstValidationMessage(body) ||
+    "";
+  if (fromBody && !looksTechnical(fromBody)) {
+    return fromBody;
+  }
+
+  if (status === 401 || status === 403) {
+    return "You're not allowed to use this chat right now. Please ask your admin for a new link.";
+  }
+  if (status === 404) {
+    return "We couldn't find that page. Please check your link or ask your admin for help.";
+  }
+  if (status === 422) {
+    return "Something in that request didn't look right. Please try again.";
+  }
+  if (status === 429) {
+    return "You're sending messages a bit quickly. Please wait a moment and try again.";
+  }
+  if (status >= 500 || status === 0) {
+    return "Something went wrong on our side. Please try again in a moment.";
+  }
+
+  return "We couldn't complete that request. Please try again.";
 }

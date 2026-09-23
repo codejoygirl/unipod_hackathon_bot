@@ -14,6 +14,36 @@ use Illuminate\Support\Facades\Log;
 final class SpikeOutboundSender
 {
     /**
+     * Show "typing…" in Telegram (expires ~5s). Call at job start and before send.
+     */
+    public function sendTelegramTyping(string $chatId): void
+    {
+        $token = (string) config('telegram_spike.bot_token', '');
+        if ($token === '' || $chatId === '') {
+            return;
+        }
+
+        try {
+            Http::timeout(5)
+                ->connectTimeout(3)
+                ->withOptions(['force_ip_resolve' => 'v4'])
+                ->asJson()
+                ->post(
+                    "https://api.telegram.org/bot{$token}/sendChatAction",
+                    [
+                        'chat_id' => $chatId,
+                        'action' => 'typing',
+                    ],
+                );
+        } catch (\Throwable $e) {
+            Log::debug('spike.outbound.telegram_typing_failed', [
+                'error' => $e->getMessage(),
+                'chat_id' => $chatId,
+            ]);
+        }
+    }
+
+    /**
      * @param  array<string, mixed>  $context
      */
     public function sendTelegram(
@@ -26,6 +56,8 @@ final class SpikeOutboundSender
         if ($token === '' || $chatId === '' || trim($text) === '') {
             return false;
         }
+
+        $this->sendTelegramTyping($chatId);
 
         $payload = [
             'chat_id' => $chatId,

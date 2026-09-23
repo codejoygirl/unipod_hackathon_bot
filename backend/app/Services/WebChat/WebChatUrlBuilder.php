@@ -11,28 +11,16 @@ final class WebChatUrlBuilder
     ) {}
 
     /**
-     * Member invite URL on the same host as Laravel (includes ?k= and ?p= when configured).
+     * Member web chat URL: ?phone= digits (community from server config).
      */
     public function inviteUrl(?string $memberPhoneRaw = null): string
     {
         $base = rtrim((string) config('zak_presence.web_chat_url', config('app.url')), '/');
-        $query = [];
-
-        $accessKey = trim((string) config('zak_web_chat.access_key'));
-        if ($accessKey !== '') {
-            $query['k'] = $accessKey;
-        }
-
         $phone = $this->phones->normalize($memberPhoneRaw);
-        if ($phone !== null) {
-            $query['p'] = $phone;
-            $query['s'] = $this->phones->sessionIdFromPhone($phone);
-        }
-
-        if ($query === []) {
+        if ($phone === null) {
             return $base.'/';
         }
 
-        return $base.'/?'.http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        return $base.'/?'.http_build_query(['phone' => $phone], '', '&', PHP_QUERY_RFC3986);
     }
 }

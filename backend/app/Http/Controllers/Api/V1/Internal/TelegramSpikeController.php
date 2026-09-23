@@ -57,6 +57,10 @@ final class TelegramSpikeController extends Controller
 
         // Default sync so the Python sidecar keeps waiting for data.reply.
         if ((bool) config('telegram_spike.process_sync', true)) {
+            $chatId = trim((string) ($validated['chat_id'] ?? $validated['from'] ?? ''));
+            if ($chatId !== '') {
+                app(\App\Services\Channels\SpikeOutboundSender::class)->sendTelegramTyping($chatId);
+            }
             try {
                 $reply = $this->adapter->handleInbound(
                     InboundMessage::fromSpikePayload($validated, 'telegram_spike')
@@ -80,6 +84,10 @@ final class TelegramSpikeController extends Controller
             ], 200, [], JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
         }
 
+        $chatId = trim((string) ($validated['chat_id'] ?? $validated['from'] ?? ''));
+        if ($chatId !== '') {
+            app(\App\Services\Channels\SpikeOutboundSender::class)->sendTelegramTyping($chatId);
+        }
         ProcessTelegramSpikeInbound::dispatch($validated)->afterResponse();
 
         return response()->json([

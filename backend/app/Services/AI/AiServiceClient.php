@@ -43,6 +43,7 @@ class AiServiceClient
         bool $enableConflictDetection = true,
         string $linkMode = 'none',
         string $linkFocus = 'na',
+        ?string $timezone = null,
     ): GroundedAnswerDTO {
         $allowedLink = ['none', 'recordings', 'meetings', 'assets'];
         if (! in_array($linkMode, $allowedLink, true)) {
@@ -62,7 +63,7 @@ class AiServiceClient
             'temperature' => 0.0,
             'link_mode' => $linkMode,
             'link_focus' => $linkFocus,
-            'timezone' => (string) config('app.timezone', 'UTC'),
+            'timezone' => $timezone ?: (string) config('app.timezone', 'UTC'),
             'reference_time' => now()->toIso8601String(),
         ];
 

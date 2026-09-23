@@ -31,10 +31,6 @@ final class WebChatMemberPhone
 
     public function displayLabel(string $phoneDigits): string
     {
-        if (strlen($phoneDigits) <= 4) {
-            return '+'.$phoneDigits;
-        }
-
-        return '+'.substr($phoneDigits, 0, -4).'····'.substr($phoneDigits, -4);
+        return '+'.$phoneDigits;
     }
 }

@@ -4,27 +4,28 @@ type EscalationNoticeProps = {
 
 export function EscalationNotice({ reason }: EscalationNoticeProps) {
   return (
-    <div className="rounded-2xl border border-sky-100 bg-white p-4 shadow-sm">
-      <div className="flex gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="M12 3a7 7 0 0 0-4 12v3h8v-3a7 7 0 0 0-4-12Z"
-              stroke="currentColor"
-              strokeWidth="1.75"
-            />
-            <path d="M10 21h4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-          </svg>
-        </div>
-        <div className="min-w-0 space-y-2">
-          <p className="text-sm font-semibold text-zinc-900">Needs an admin</p>
-          <p className="text-sm leading-relaxed text-zinc-600">
+    <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3.5 text-xs text-amber-900">
+      <div className="flex items-start gap-2.5">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          className="mt-0.5 shrink-0 text-amber-600"
+          aria-hidden
+        >
+          <path
+            d="M12 3a7 7 0 0 0-4 12v3h8v-3a7 7 0 0 0-4-12Z"
+            stroke="currentColor"
+            strokeWidth="1.75"
+          />
+          <path d="M10 21h4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+        </svg>
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="font-semibold text-amber-950">Needs admin verification</p>
+          <p className="leading-relaxed text-amber-900/90">
             {reason ||
-              "This answer could not be verified from community knowledge. Escalation to admins is available today through your linked WhatsApp or Telegram private chat with Zak."}
-          </p>
-          <p className="text-xs text-zinc-500">
-            Web admin inbox is not connected yet — use the same private DM flow as on messaging
-            channels.
+              "This answer could not be fully verified from community knowledge sources. Escalation to admins is available through your linked WhatsApp or Telegram channel."}
           </p>
         </div>
       </div>

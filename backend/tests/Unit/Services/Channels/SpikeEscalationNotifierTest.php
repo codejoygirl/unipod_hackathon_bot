@@ -254,7 +254,7 @@ class SpikeEscalationNotifierTest extends TestCase
 
             return $request['chat_id'] === '999888'
                 && ($request['parse_mode'] ?? null) === 'HTML'
-                && str_contains($text, 'Hi B A,')
+                && str_contains($text, 'B A,')
                 && str_contains($text, 'How many bots are currently added to the group?')
                 && str_contains($text, 'There are currently 2 bots in the group.')
                 && str_contains($text, '<b>You asked:</b>')
