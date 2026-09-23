@@ -56,19 +56,68 @@ class SpikeEscalationNotifierTest extends TestCase
 
             return str_contains($request->url(), 'api.telegram.org/bottest-token/sendMessage')
                 && $request['chat_id'] === '123456'
+                && ($request['parse_mode'] ?? null) === 'HTML'
                 && str_contains($text, "Name: @devabdulsamad245")
                 && str_contains($text, 'Member ID: 7216526143')
+                && str_contains($text, 'Channel: Telegram')
+                && ! str_contains($text, 'telegram_spike')
                 && str_contains($text, 'Request ID:')
                 && str_contains($text, 'Community: UniPods Cohort')
                 && str_contains($text, "Question:\nWho's God?")
                 && str_contains($text, "Why:\nI couldn't find enough")
-                && str_contains($text, '/reply ')
-                && str_contains($text, '/blacklist')
+                && str_contains($text, '<code>/reply</code>')
+                && str_contains($text, '<code>/blacklist</code>')
                 && ! str_contains($text, 'Admin contact')
                 && ! str_contains($text, '01m2y2cc');
         });
         $this->assertNotEmpty($result['ref'] ?? null);
         $this->assertSame($result['id'], Cache::get('spike_escalation_ref:'.$result['ref']));
+    }
+
+    public function test_whatsapp_admin_card_for_telegram_member_does_not_fake_phone_mention(): void
+    {
+        Cache::flush();
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'UniPods Cohort',
+        ]);
+
+        config([
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+            'whatsapp_web_spike.shared_secret' => 'spike-secret',
+            'whatsapp_web_spike.outbound_url' => 'http://127.0.0.1:3101',
+            'whatsapp_web_spike.bot_number' => '2347041131371',
+            'whatsapp_web_spike.admin_phones' => ['2349137374124'],
+        ]);
+
+        Http::fake([
+            '127.0.0.1:3101/*' => Http::response(['ok' => true, 'message_id' => 'wa-card-1'], 200),
+        ]);
+
+        $result = (new SpikeEscalationNotifier)->escalate([
+            'question' => "Who's God?",
+            'from' => '7216526143',
+            'from_name' => '@devabdulsamad245',
+            'community_id' => $community->id,
+            'community_name' => $community->name,
+            'reason' => 'insufficient_evidence',
+            'channel' => 'telegram_spike',
+        ]);
+
+        $this->assertTrue($result['notified']);
+        Http::assertSent(function ($request) {
+            $text = (string) ($request['text'] ?? '');
+
+            return str_contains($request->url(), '127.0.0.1:3101/send')
+                && str_contains($text, 'Name: @devabdulsamad245')
+                && str_contains($text, 'Channel: Telegram')
+                && ! str_contains($text, 'telegram_spike')
+                && ! str_contains($text, 'Name: @7216526143')
+                && ! str_contains($text, '@+7')
+                && ($request['mention'] ?? null) === null;
+        });
     }
 
     public function test_escalation_notifies_whatsapp_admins_via_outbound(): void
@@ -110,6 +159,7 @@ class SpikeEscalationNotifierTest extends TestCase
                 && $request['to'] === '2348117084647'
                 && str_contains((string) $request['text'], 'Are we going to India?')
                 && str_contains((string) $request['text'], 'Name: @276694879498269')
+                && ! str_contains((string) $request['text'], 'Name: Abdulsamad Balogun')
                 && ($request['mention'] ?? null) === '276694879498269@lid';
         });
         Http::assertNotSent(function ($request) {
@@ -302,11 +352,12 @@ class SpikeEscalationNotifierTest extends TestCase
 
             return str_contains($request->url(), 'sendMessage')
                 && $request['chat_id'] === '123456'
+                && ($request['parse_mode'] ?? null) === 'HTML'
                 && str_contains($text, 'Member shared a note')
                 && str_contains($text, 'Clinic closed Friday afternoon')
                 && str_contains($text, 'Request ID:')
-                && str_contains($text, '/approve ')
-                && str_contains($text, '/decline ');
+                && str_contains($text, '<code>/approve</code>')
+                && str_contains($text, '<code>/decline</code>');
         });
 
         $ref = $notify['ref'];
@@ -364,9 +415,10 @@ class SpikeEscalationNotifierTest extends TestCase
 
             return str_contains($request->url(), 'sendMessage')
                 && $request['chat_id'] === '123456'
+                && ($request['parse_mode'] ?? null) === 'HTML'
                 && str_contains($text, 'Member requested a new feature or an improvement')
                 && str_contains($text, 'Add calendar reminders')
-                && str_contains($text, '/approve ');
+                && str_contains($text, '<code>/approve</code>');
         });
 
         $ref = $notify['ref'];
@@ -424,6 +476,90 @@ class SpikeEscalationNotifierTest extends TestCase
         $this->assertStringContainsString('@2348011111111', $decision['reply']);
         $this->assertStringNotContainsString('Ada', $decision['reply']);
         $this->assertStringNotContainsString('the group', $decision['reply']);
+    }
+
+    public function test_feature_admin_ack_uses_lid_mention_when_phone_missing(): void
+    {
+        Cache::flush();
+        $community = Community::factory()->create(['name' => 'Demo Community']);
+
+        config([
+            'whatsapp_web_spike.outbound_url' => 'http://wa-out.test',
+            'whatsapp_web_spike.shared_secret' => 'spike-secret',
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+        ]);
+
+        Http::fake([
+            'http://wa-out.test/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $notifier = app(SpikeEscalationNotifier::class);
+        $notify = $notifier->notifyFeatureRequest(
+            channel: 'whatsapp_web_spike',
+            from: '265721070268441',
+            content: 'Add voice notes',
+            communityId: $community->id,
+            fromName: 'Abdulsamad Balogun',
+            fromPhone: null,
+            chatType: 'group',
+            chatId: '120363411674252738@g.us',
+        );
+
+        $decision = $notifier->tryAdminCommand('/approve '.$notify['ref']);
+        $this->assertTrue($decision['ok']);
+        $this->assertStringContainsString('@265721070268441', $decision['reply']);
+        $this->assertStringNotContainsString('Abdulsamad Balogun', $decision['reply']);
+        $this->assertStringNotContainsString('the group', $decision['reply']);
+    }
+
+    public function test_whatsapp_admin_card_name_uses_mention_and_cc_mentions_array(): void
+    {
+        Cache::flush();
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Demo Community',
+        ]);
+
+        config([
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+            'whatsapp_web_spike.shared_secret' => 'spike-secret',
+            'whatsapp_web_spike.outbound_url' => 'http://127.0.0.1:3101',
+            'whatsapp_web_spike.bot_number' => '2347041131371',
+            'whatsapp_web_spike.admin_phones' => ['2348117084647'],
+        ]);
+
+        Http::fake([
+            '127.0.0.1:3101/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $result = (new SpikeEscalationNotifier)->notifyFeatureRequest(
+            channel: 'whatsapp_web_spike',
+            from: '265721070268441',
+            content: 'we would like voice replies. Cc: @80599524048943',
+            communityId: $community->id,
+            communityName: $community->name,
+            fromName: 'Abdulsamad Balogun',
+            fromPhone: null,
+            chatType: 'group',
+            chatId: '120363411674252738@g.us',
+        );
+
+        $this->assertTrue($result['notified']);
+        Http::assertSent(function ($request) {
+            $text = (string) ($request['text'] ?? '');
+            $mentions = $request['mentions'] ?? null;
+
+            return str_contains($request->url(), '127.0.0.1:3101/send')
+                && str_contains($text, 'Name: @265721070268441')
+                && ! str_contains($text, 'Name: Abdulsamad Balogun')
+                && str_contains($text, 'Cc: @80599524048943')
+                && is_array($mentions)
+                && in_array('265721070268441@lid', $mentions, true)
+                && in_array('80599524048943@lid', $mentions, true);
+        });
     }
 
     public function test_feature_request_decline_notifies_member(): void
@@ -637,6 +773,8 @@ class SpikeEscalationNotifierTest extends TestCase
             'from_phone' => '2348011111111',
             'from_name' => 'Abdulsamad Balogun',
             'chat_type' => 'private',
+            'chat_id' => '2348011111111@c.us',
+            'message_id' => 'true_2348011111111@c.us_ASKMSG01',
             'community_id' => $community->id,
             'community_name' => $community->name,
             'reason' => 'member_ask',
@@ -644,18 +782,35 @@ class SpikeEscalationNotifierTest extends TestCase
         ]);
 
         $ref = $created['ref'];
-        $result = $notifier->tryAdminCommand("/reply {$ref} Yes, open until 4pm.");
+        $result = $notifier->tryAdminCommand(
+            "/reply {$ref} Yes, open until 4pm.",
+            'whatsapp_web_spike',
+            '265721070268441',
+            '2348117084647',
+        );
         $this->assertTrue($result['ok']);
         $this->assertStringContainsString('sent that to Abdulsamad Balogun', $result['reply']);
         $this->assertStringContainsString('(request *', $result['reply']);
 
         Http::assertSent(function ($request) {
-            return str_contains($request->url(), '127.0.0.1:3101/send')
-                && $request['to'] === '2348011111111'
-                && str_contains((string) $request['text'], 'Is the clinic open Friday?')
-                && str_contains((string) $request['text'], 'Yes, open until 4pm.')
-                && str_contains((string) $request['text'], "*Here's an update from an admin:*")
-                && str_contains((string) $request['text'], '*You asked:*');
+            if (! str_contains($request->url(), '127.0.0.1:3101/send')) {
+                return false;
+            }
+            $data = $request->data();
+            $text = (string) ($data['text'] ?? '');
+
+            return ($data['to'] ?? null) === '2348011111111@c.us'
+                && ($data['mention'] ?? null) === null
+                && ($data['quoted_message_id'] ?? null) === 'true_2348011111111@c.us_ASKMSG01'
+                && is_array($data['mentions'] ?? null)
+                && in_array('2348117084647@c.us', $data['mentions'], true)
+                && ! in_array('2348011111111@c.us', $data['mentions'], true)
+                && str_starts_with(ltrim($text), '*You asked:*')
+                && ! str_starts_with(ltrim($text), 'Hi,')
+                && str_contains($text, 'Is the clinic open Friday?')
+                && str_contains($text, 'Yes, open until 4pm.')
+                && str_contains($text, "*Here's an update from an admin* (@2348117084647):")
+                && str_contains($text, '*You asked:*');
         });
     }
 
@@ -710,6 +865,7 @@ class SpikeEscalationNotifierTest extends TestCase
         Http::assertSent(function ($request) {
             return str_contains($request->url(), '127.0.0.1:3101/send')
                 && $request['to'] === '265721070268441@lid'
+                && ($request['mention'] ?? null) === null
                 && str_contains((string) $request['text'], 'It is a metaphor.');
         });
     }
@@ -782,11 +938,103 @@ class SpikeEscalationNotifierTest extends TestCase
                 && is_array($data['mentions'] ?? null)
                 && in_array('2348011111111@c.us', $data['mentions'], true)
                 && in_array('2348117084647@c.us', $data['mentions'], true)
-                && str_starts_with(ltrim($text), 'Hi,')
+                && str_starts_with(ltrim($text), '*You asked:*')
+                && ! str_starts_with(ltrim($text), 'Hi,')
                 && str_contains($text, "Who's Joy?")
                 && str_contains($text, 'Joy is a METI member.')
                 && str_contains($text, "*Here's an update from an admin* (@2348117084647):")
                 && ! str_contains($text, '@265721070268441');
         });
+    }
+
+    public function test_reply_with_unknown_request_id_says_not_found(): void
+    {
+        Cache::flush();
+        $notifier = app(SpikeEscalationNotifier::class);
+
+        $result = $notifier->tryAdminCommand('/reply W7X1YT God is the creator of the universe.');
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("couldn't find request W7X1YT", $result['reply']);
+        $this->assertStringNotContainsString('Include the Request ID', $result['reply']);
+    }
+
+    public function test_reply_without_request_id_prompts_for_it(): void
+    {
+        Cache::flush();
+        $notifier = app(SpikeEscalationNotifier::class);
+
+        $result = $notifier->tryAdminCommand('/reply God is the creator of the universe.');
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('Include the Request ID', $result['reply']);
+    }
+
+    public function test_whatsapp_card_message_id_maps_back_to_escalation(): void
+    {
+        Cache::flush();
+        $notifier = app(SpikeEscalationNotifier::class);
+        $notifier->rememberWhatsAppEscalationMessage(
+            'true_2349137374124@c.us_3EB0ABCDEF',
+            '01TESTWAESCMSG1',
+        );
+
+        $this->assertSame(
+            '01TESTWAESCMSG1',
+            $notifier->findEscalationIdByWhatsAppMessageId('true_2349137374124@c.us_3EB0ABCDEF'),
+        );
+        $this->assertSame(
+            '01TESTWAESCMSG1',
+            $notifier->findEscalationIdByWhatsAppMessageId('3EB0ABCDEF'),
+        );
+        $this->assertSame('W7X1YT', $notifier->extractRefFromCardText(
+            "*Zak Bot needs a quick hand.*\n\nRequest ID: W7X1YT\n\nQuestion:\nHi",
+        ));
+        $this->assertSame('W7X1YT', $notifier->extractRefFromCardText(
+            "How to act:\n```\n/reply W7X1YT Your answer here\n```",
+        ));
+    }
+
+    public function test_already_resolved_reply_formats_actor_and_timezone(): void
+    {
+        config(['app.timezone' => 'Africa/Lagos']);
+        config(['whatsapp_web_spike.admin_phones' => ['2348117084647']]);
+
+        $notifier = app(SpikeEscalationNotifier::class);
+        $reply = $notifier->alreadyResolvedReply([
+            'ref' => 'HQWP73',
+            'resolved_at' => '2026-09-22T20:43:00+00:00',
+            'resolved_by' => '265721070268441@lid',
+            'resolved_by_phone' => '2348117084647',
+            'admin_answer' => 'Sallah is next year',
+        ]);
+
+        $this->assertNotNull($reply);
+        $this->assertTrue($reply['ok']);
+        $this->assertStringContainsString('Request HQWP73 was already answered by @2348117084647', $reply['reply']);
+        $this->assertStringNotContainsString('@lid', $reply['reply']);
+        $this->assertStringNotContainsString('2026-09-22T20:43:00', $reply['reply']);
+        $this->assertStringContainsString('WAT', $reply['reply']);
+        $this->assertStringContainsString('UTC+1', $reply['reply']);
+        $this->assertMatchesRegularExpression('/Sep 22, 2026 at \d{1,2}:\d{2} [AP]M/', $reply['reply']);
+    }
+
+    public function test_already_resolved_hides_raw_lid_when_phone_unknown(): void
+    {
+        config(['app.timezone' => 'UTC']);
+        config(['whatsapp_web_spike.admin_phones' => []]);
+
+        $notifier = app(SpikeEscalationNotifier::class);
+        $reply = $notifier->alreadyResolvedReply([
+            'ref' => 'ABC123',
+            'resolved_at' => '2026-09-22T20:43:00+00:00',
+            'resolved_by' => '265721070268441@lid',
+            'admin_answer' => 'done',
+        ]);
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('by an admin', $reply['reply']);
+        $this->assertStringNotContainsString('265721070268441', $reply['reply']);
+        $this->assertStringContainsString('UTC+0', $reply['reply']);
     }
 }

@@ -135,4 +135,25 @@ class ChannelCommandAccessTest extends TestCase
             $access->resolveWhatsAppAdminPhone('265721070268441'),
         );
     }
+
+    public function test_title_only_quote_still_counts_as_escalation_card_reply(): void
+    {
+        config([
+            'whatsapp_web_spike.admin_phones' => ['2349137374124'],
+            'whatsapp_web_spike.bot_number' => '2347041131371',
+        ]);
+        $access = new ChannelCommandAccess;
+
+        $this->assertTrue($access->looksLikeEscalationCardReply([
+            'reply_to_bot' => true,
+            'quoted_text' => "Zak Bot needs a quick hand.\n...",
+        ]));
+
+        $this->assertTrue($access->isAdmin('whatsapp_web_spike', '265721070268441', [
+            'chat_type' => 'private',
+            'text' => 'God is the creator of the universe.',
+            'reply_to_bot' => true,
+            'quoted_text' => "Zak Bot needs a quick hand.\n...",
+        ]));
+    }
 }

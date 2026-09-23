@@ -17,12 +17,26 @@ final class ProcessZavuInboundMessage implements ShouldQueue
 {
     use Queueable;
 
+    public int $tries = 3;
+
+    public int $timeout = 120;
+
+    /**
+     * @return list<int>
+     */
+    public function backoff(): array
+    {
+        return [5, 30, 90];
+    }
+
     /**
      * @param  array<string, mixed>  $event
      */
     public function __construct(
         public readonly array $event,
-    ) {}
+    ) {
+        $this->onQueue((string) config('zak.queues.channels', 'channels'));
+    }
 
     public function handle(WhatsAppZavuAdapter $adapter, ZavuClient $zavu): void
     {

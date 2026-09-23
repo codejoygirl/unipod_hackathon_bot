@@ -15,6 +15,21 @@
 /auth.json
 /node_modules
 /public/build
+# Next.js static export (frontend npm run build:laravel)
+/public/_next/
+/public/__next.*/
+/public/404/
+/public/_not-found/
+/public/index.html
+/public/index.txt
+/public/404.html
+/public/login/
+/public/catch-up/
+/public/meetings/
+/public/tasks/
+/public/more/
+/public/*.svg
+/public/*.txt
 /public/fonts-manifest.dev.json
 /public/hot
 /public/storage

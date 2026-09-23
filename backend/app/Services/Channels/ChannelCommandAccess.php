@@ -41,7 +41,9 @@ final class ChannelCommandAccess
             $chatType = strtolower(trim((string) ($raw['chat_type'] ?? 'private')));
             $isPrivate = $chatType === '' || $chatType === 'private' || $chatType === 'dm';
             $cardReply = $this->looksLikeEscalationCardReply($raw);
-            $adminAction = $this->isAdminOnlyCommand((string) ($raw['text'] ?? '')) || $cardReply;
+            $text = (string) ($raw['text'] ?? '');
+            $helpOrStart = (bool) preg_match('/^\/?(help|start)\b/iu', ltrim($text));
+            $adminAction = $this->isAdminOnlyCommand($text) || $cardReply || $helpOrStart;
             if ($isPrivate && $adminAction) {
                 $linked = $this->tryLinkSoleWhatsAppAdminLid($senderId, $phones);
                 if ($linked) {
@@ -105,23 +107,35 @@ final class ChannelCommandAccess
             return false;
         }
 
-        $quoted = trim((string) ($raw['quoted_text'] ?? ''));
-        if ($quoted === '') {
-            return false;
+        $quotedMsgId = trim((string) ($raw['quoted_message_id'] ?? ''));
+        if ($quotedMsgId !== '') {
+            $escId = app(SpikeEscalationNotifier::class)->findEscalationIdByWhatsAppMessageId($quotedMsgId);
+            if ($escId !== null) {
+                return true;
+            }
         }
 
-        if (preg_match('/Request ID:\s*[A-Z0-9]+/i', $quoted) !== 1) {
+        $quoted = trim((string) ($raw['quoted_text'] ?? ''));
+        if ($quoted === '') {
             return false;
         }
 
         $lower = mb_strtolower($quoted);
         $bot = mb_strtolower(app(ChannelConversationService::class)->botDisplayName());
 
-        return str_contains($lower, $bot.' needs a quick hand')
+        // Title-only WhatsApp quote previews often omit "Request ID:" — still a card.
+        if (str_contains($lower, $bot.' needs a quick hand')
             || str_contains($lower, 'zak needs a quick hand') // legacy cards
             || str_contains($lower, 'member shared a note')
-            || str_contains($lower, 'member requested a feature')
-            || str_contains($lower, 'how to act')
+            || str_contains($lower, 'member requested a feature')) {
+            return true;
+        }
+
+        if (preg_match('/Request ID:\s*[A-Z0-9]+/i', $quoted) !== 1) {
+            return false;
+        }
+
+        return str_contains($lower, 'how to act')
             || str_contains($lower, '/approve')
             || str_contains($lower, '/reply');
     }

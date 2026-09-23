@@ -126,6 +126,9 @@ def test_classify_prompt_teaches_multilingual_follow_up():
     assert "Never use clarify when the member is clearly referring" in prompt
     assert "personal_help" in prompt
     assert "Motivate me" in prompt
+    assert "When are we going home? → clarify|none|no" in prompt
+    assert "8qa4RWev0a0ZdQFrMeSa zak-app → clarify|none|no" in prompt
+    assert "opaque" in prompt.lower() or "accidental" in prompt.lower()
 
 
 def test_take_private_and_personal_help_prompts():

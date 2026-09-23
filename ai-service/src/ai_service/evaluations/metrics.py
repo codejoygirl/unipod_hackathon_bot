@@ -266,6 +266,26 @@ class RagTriadEvaluator:
 
         is_acceptable = score >= 0.85 and context_recall >= 0.80
 
+        details: dict[str, Any] = {}
+        if "http://" in answer.lower() or "https://" in answer.lower():
+            from ai_service.evaluations.link_answer_quality import evaluate_link_answer_quality
+
+            focus = kwargs.get("link_focus")
+            link_report = evaluate_link_answer_quality(
+                answer,
+                question=query,
+                link_focus=focus if isinstance(focus, str) else None,
+            )
+            details["link_answer_quality"] = {
+                "passed": link_report.passed,
+                "score": link_report.score,
+                "weak_caption_count": link_report.weak_caption_count,
+                "same_line_url_count": link_report.same_line_url_count,
+                "issues": link_report.issues[:8],
+            }
+            if not link_report.passed:
+                is_acceptable = False
+
         return RagTriadReport(
             faithfulness=score,
             context_recall=context_recall,
@@ -281,6 +301,7 @@ class RagTriadEvaluator:
             is_acceptable=is_acceptable,
             score=harmonic_mean,
             passed=is_acceptable,
+            details=details,
         )
 
 

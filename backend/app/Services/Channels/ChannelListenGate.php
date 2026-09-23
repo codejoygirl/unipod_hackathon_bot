@@ -21,6 +21,10 @@ final class ChannelListenGate
         'import',
         'export', // alias of /import (legacy)
         'asset', // register a Drive/program file into knowledge
+        'publish', // publish a knowledge draft from chat
+        'knowledge', // list drafts / published / assets
+        'kb', // alias of /knowledge
+        'features', // list open / decided feature requests
         'approve',
         'decline',
         'reject',

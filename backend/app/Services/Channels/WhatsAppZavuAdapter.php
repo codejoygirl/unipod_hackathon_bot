@@ -257,7 +257,13 @@ final class WhatsAppZavuAdapter implements ChannelAdapter
 
         $reply = trim($modelReply);
         if ($reply === '') {
-            $reply = $this->conversation->conversationalReply($message->text);
+            $reply = $this->conversation->conversationalReply(
+                $message->text,
+                'whatsapp',
+                'whatsapp',
+                'private',
+                $this->memberPhoneForWeb($message),
+            );
         }
 
         $this->conversation->remember($this->channelName(), $message->externalUserId, 'user', $message->text);
@@ -314,6 +320,7 @@ final class WhatsAppZavuAdapter implements ChannelAdapter
             communityIds: [$communityId],
             targetLanguage: null,
             linkMode: $linkMode,
+            linkFocus: 'many',
         );
 
         $result = $this->citationRevalidator->revalidate($user, $result);
@@ -452,6 +459,13 @@ final class WhatsAppZavuAdapter implements ChannelAdapter
     private function linkCacheKey(string $externalUserId): string
     {
         return 'wa_zavu_link:'.sha1($externalUserId);
+    }
+
+    private function memberPhoneForWeb(InboundMessage $message): ?string
+    {
+        return app(\App\Services\WebChat\WebChatMemberPhone::class)->normalize(
+            (string) ($message->raw['from_phone'] ?? $message->externalUserId),
+        );
     }
 
     private function plainText(string $text): string

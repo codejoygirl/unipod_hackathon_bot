@@ -21,6 +21,7 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "python-telegram-bot>=22.8",
     "sqlalchemy>=2.0.54",
+    "tzdata>=2025.1",
 ]
 
 [project.scripts]

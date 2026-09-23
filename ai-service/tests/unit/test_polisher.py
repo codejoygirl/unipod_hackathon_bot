@@ -78,6 +78,8 @@ def test_writer_system_prioritizes_member_question_language():
     lower = _WRITER_SYSTEM.lower()
     assert "member_question" in lower
     assert "translate" in lower
+    assert "caption" in lower
+    assert "same language" in lower or "same reply language" in lower
     assert "yoruba" in lower
     assert "highest priority" in lower
     assert "whatsapp" in lower

@@ -70,8 +70,15 @@ return [
     'group_listen' => env('WHATSAPP_WEB_SPIKE_GROUP_LISTEN', 'mention_or_command'),
 
     /*
-    | Spike outbound HTTP (Laravel → worker) for admin escalation DMs.
+    | Spike outbound HTTP (Laravel → worker) for admin escalation DMs + queued replies.
     | Spike listens on 127.0.0.1:OUTBOUND_PORT. From Sail use host.docker.internal.
     */
     'outbound_url' => env('WHATSAPP_WEB_SPIKE_OUTBOUND_URL', 'http://host.docker.internal:3101'),
+
+    /*
+    | true (default): handle inbound in-request and return data.reply (local spike DX).
+    | false: enqueue ProcessWhatsAppWebSpikeInbound on zak.queues.channels; spike gets 202
+    | accepted and Laravel sends via outbound /send from the worker.
+    */
+    'process_sync' => (bool) env('WHATSAPP_WEB_SPIKE_PROCESS_SYNC', true),
 ];

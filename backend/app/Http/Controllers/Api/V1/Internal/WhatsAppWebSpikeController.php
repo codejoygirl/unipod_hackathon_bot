@@ -6,6 +6,8 @@ namespace App\Http\Controllers\Api\V1\Internal;
 
 use App\DTOs\Channels\InboundMessage;
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessWhatsAppWebSpikeInbound;
+use App\Services\Channels\ChannelConversationService;
 use App\Services\Channels\WhatsAppWebSpikeAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -54,6 +56,8 @@ final class WhatsAppWebSpikeController extends Controller
             return response()->json([
                 'data' => [
                     'reply' => null,
+                    'accepted' => false,
+                    'queued' => false,
                     'channel' => $this->adapter->channelName(),
                 ],
             ]);
@@ -63,25 +67,41 @@ final class WhatsAppWebSpikeController extends Controller
             $validated['chat_type'] = 'group';
         }
 
-        try {
-            $reply = $this->adapter->handleInbound(
-                InboundMessage::fromSpikePayload($validated)
-            );
-        } catch (\Throwable $e) {
-            Log::error('whatsapp_web_spike.controller_inbound_failed', [
-                'error' => $e->getMessage(),
-                'from' => $validated['from'] ?? null,
+        // Default sync so local spikes keep waiting for data.reply (no behavior break).
+        if ((bool) config('whatsapp_web_spike.process_sync', true)) {
+            try {
+                $reply = $this->adapter->handleInbound(
+                    InboundMessage::fromSpikePayload($validated)
+                );
+            } catch (\Throwable $e) {
+                Log::error('whatsapp_web_spike.controller_inbound_failed', [
+                    'error' => $e->getMessage(),
+                    'from' => $validated['from'] ?? null,
+                ]);
+                $reply = app(ChannelConversationService::class)
+                    ->transientDeferralReply();
+            }
+
+            return response()->json([
+                'data' => [
+                    'reply' => $reply,
+                    'accepted' => true,
+                    'queued' => false,
+                    'channel' => $this->adapter->channelName(),
+                ],
             ]);
-            $reply = "I hit a snag answering that just now. "
-                .'Mind sending it again in a moment?';
         }
+
+        ProcessWhatsAppWebSpikeInbound::dispatch($validated)->afterResponse();
 
         return response()->json([
             'data' => [
-                'reply' => $reply,
+                'reply' => null,
+                'accepted' => true,
+                'queued' => true,
                 'channel' => $this->adapter->channelName(),
             ],
-        ]);
+        ], 202);
     }
 
     public function mintJoin(Request $request): JsonResponse

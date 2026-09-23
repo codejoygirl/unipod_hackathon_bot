@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Console\Concerns\EnsuresAssistantDemoScope;
 use App\Enums\KnowledgeAuthorityTier;
 use App\Enums\KnowledgeLifecycleStatus;
 use App\Enums\MembershipRole;
@@ -14,13 +15,14 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AI\AiServiceClient;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Hash;
 use Throwable;
 
 class SeedAssistantDemoCommand extends Command
 {
+    use EnsuresAssistantDemoScope;
+
     protected $signature = 'zak:seed-assistant-demo
-                            {--email=demo@zak.test : Demo user email}
+                            {--email= : Demo user email (default: WHATSAPP_WEB_SPIKE_DEFAULT_USER_EMAIL or TELEGRAM_SPIKE_DEFAULT_USER_EMAIL)}
                             {--password=password123 : Demo user password}
                             {--skip-ai : Skip AI ingestion (Laravel-only seed)}';
 
@@ -28,51 +30,21 @@ class SeedAssistantDemoCommand extends Command
 
     public function handle(AiServiceClient $ai): int
     {
-        $email = (string) $this->option('email');
+        $email = $this->resolveDemoUserEmail($this->option('email'));
         $password = (string) $this->option('password');
         $aiIngested = false;
         $aiError = null;
 
         $this->components->info('Seeding Zak assistant demo data…');
 
-        $tenant = Tenant::query()->firstOrCreate(
-            ['slug' => 'demo-tenant'],
-            ['name' => 'Demo Tenant'],
-        );
+        [$tenant, $community] = array_slice($this->ensureDemoTenantAndCommunity(), 0, 2);
+        [$user] = $this->ensureDemoAdminUser($tenant, $community, $email, $password);
 
-        $community = Community::query()->firstOrCreate(
-            ['tenant_id' => $tenant->id, 'slug' => 'demo-community'],
-            [
-                'name' => 'Demo Community',
-                'description' => 'UniPods / Wadhwani programme community: schedules, sessions, modules, '
-                    .'deadlines, announcements, meeting notes, coaching, and session recordings or links '
-                    .'shared in the group.',
-            ],
-        );
-
-        if ($community->description === null || trim((string) $community->description) === '') {
-            $community->description = 'UniPods / Wadhwani programme community: schedules, sessions, modules, '
-                .'deadlines, announcements, meeting notes, coaching, and session recordings or links '
-                .'shared in the group.';
-            $community->save();
-        }
-
-        $user = User::query()->updateOrCreate(
-            ['email' => $email],
-            [
-                'name' => 'Demo Ask User',
-                'password' => Hash::make($password),
-            ],
-        );
-
-        $membership = Membership::query()->firstOrCreate(
-            [
-                'tenant_id' => $tenant->id,
-                'community_id' => $community->id,
-                'user_id' => $user->id,
-                'role' => MembershipRole::CommunityAdmin,
-            ],
-        );
+        $membership = Membership::query()->where([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'user_id' => $user->id,
+        ])->firstOrFail();
 
         $uri = 'doc://demo-clinic-hours';
         $content = 'The community clinic opens on Saturday at 9am and closes at 1pm.';

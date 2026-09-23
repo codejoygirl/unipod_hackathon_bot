@@ -66,7 +66,8 @@ if (!SPIKE_SECRET) {
 
 // Same wording as Telegram spike when Laravel / the bot snags (no em dashes).
 const TRANSIENT_ERROR_REPLY =
-  'I hit a snag answering that just now. Mind sending it again in a moment?'
+  "Thanks — I've got your message 🙂\n\n"
+  + "I'll reply as soon as I can. No need to send it again."
 
 async function callLaravelInbound(payload) {
   const started = Date.now()
@@ -80,17 +81,22 @@ async function callLaravelInbound(payload) {
         'X-Spike-Secret': SPIKE_SECRET,
       },
       body: JSON.stringify(payload),
-      // AI classify + grounded answer can take a while; fail louder than hang forever.
+      // Sync mode: AI can take a while. Async/queued mode returns ~1s with accepted.
       signal: AbortSignal.timeout(120_000),
     })
     const body = await res.json().catch(() => ({}))
     const ms = Date.now() - started
-    if (!res.ok) {
+    if (!res.ok && res.status !== 202) {
       console.error(`[spike] Laravel inbound ${res.status} after ${ms}ms:`, JSON.stringify(body).slice(0, 500))
       // Same wording as Telegram spike when Laravel returns an error.
       return body?.data?.reply || TRANSIENT_ERROR_REPLY
     }
-    const reply = body?.data?.reply ?? null
+    const data = body?.data || {}
+    if (data.queued === true) {
+      console.log(`[spike] ← Laravel ${ms}ms queued=yes (worker will send)`)
+      return null
+    }
+    const reply = data.reply ?? null
     const len = reply ? String(reply).length : 0
     console.log(`[spike] ← Laravel ${ms}ms reply_chars=${len}`)
     return reply
@@ -481,20 +487,26 @@ function stripFakeAtDisplayNames(text) {
 }
 
 /**
- * Collect @phone tags from body text → JIDs for options.mentions (green paint).
- * Phone-length only (10–13); skip long LIDs which rarely highlight in DM.
+ * Collect @digit tags from body text → JIDs for options.mentions (green paint).
+ * Phone-length (10–13) → @c.us; longer IDs → @lid (group Linked IDs).
  *
  * @returns {string[]}
  */
-function phoneMentionJidsFromText(text) {
+function mentionJidsFromText(text) {
   const jids = []
-  const re = /@(\d{10,13})\b/g
+  const re = /@(\d{6,})\b/g
   let m
   while ((m = re.exec(String(text || ''))) !== null) {
-    const jid = `${m[1]}@c.us`
+    const digits = m[1]
+    const jid = digits.length >= 14 ? `${digits}@lid` : `${digits}@c.us`
     if (!jids.includes(jid)) jids.push(jid)
   }
   return jids
+}
+
+/** @deprecated use mentionJidsFromText — kept for private mid-body phone tags */
+function phoneMentionJidsFromText(text) {
+  return mentionJidsFromText(text).filter((jid) => jid.endsWith('@c.us'))
 }
 
 /**
@@ -625,21 +637,21 @@ async function resolveAskerMention(contact, senderRaw) {
 
 /**
  * Address the asker with a real @id mention tag (WA renders the green name).
- * Always "Hi @id, …" — never "@id, Hi,".
+ * Language-neutral: "@id, …" — never inject English "Hi" (reply body may be any language).
  */
 function blendMentionTag(mentionTag, body) {
   let text = stripFakeAtDisplayNames(body)
   const tag = String(mentionTag || '').trim()
   if (!tag) return text
-  if (!text) return `Hi ${tag},`
+  if (!text) return `${tag},`
 
   // Normalize inverted "@digits, Hi," from older sends / plain-name prefixes.
-  text = text.replace(/^@\+?\d{6,}\s*,\s*Hi\b[,]?/i, 'Hi,')
-  text = text.replace(/^@\d{6,}(?!\d)\s*,\s*Hi\b[,]?/i, 'Hi,')
+  text = text.replace(/^@\+?\d{6,}\s*,\s*Hi\b[,]?/i, '')
+  text = text.replace(/^@\d{6,}(?!\d)\s*,\s*Hi\b[,]?/i, '')
   text = stripFakeAtDisplayNames(text)
 
-  if (text.includes(tag) && /^Hi\s+/i.test(text)) {
-    // Already "Hi @id…" — keep order, drop duplicate leading tags.
+  if (text.includes(tag)) {
+    // Already addressed — keep order, drop duplicate leading tags.
     return text.replace(/^@\d{6,}(?!\d)\s*,\s*/u, '').trim()
   }
 
@@ -647,29 +659,16 @@ function blendMentionTag(mentionTag, body) {
   let cleaned = text.replace(/^@\+?\d{6,}\b[,\s]*/u, '').trim()
   cleaned = cleaned.replace(/^@\d{6,}(?!\d)[,\s]*/u, '').trim()
 
-  const apology = cleaned.match(/^(sorry|apologies|whoops|oops)([!.,]|\s)+/i)
-  if (apology) {
-    const word = apology[1].charAt(0).toUpperCase() + apology[1].slice(1).toLowerCase()
-    const rest = cleaned.slice(apology[0].length).replace(/^[\s,]+/, '')
-    return rest ? `${word} ${tag}, ${rest}` : `${word} ${tag}.`
-  }
+  // Strip legacy English-only channel opener (not a greeting catalog — just remove old inject).
+  cleaned = cleaned.replace(/^(hey|hi|hello|howdy|yo)\b[ \t]*,?[ \t]*/i, '').trim()
+  // Drop fake "@~Joy" / "@Abdulsamad Balogun," openers (not real WA digit mentions).
+  cleaned = cleaned.replace(/^@~?(?!\d)[\p{L}\p{N}._❤️💕🙏\s-]{1,80},?[ \t]*/u, '').trim()
+  // Drop a leftover plain display name after a stripped Hi (e.g. "Abdulsamad,\n\n…").
+  cleaned = cleaned.replace(/^[^@\n,]{1,60},\s*(?=\S)/, '').trim()
 
-  // Only the greeting token on the first line (do not eat "*You asked:*").
-  const greeting = cleaned.match(/^(hey|hi|hello|howdy|yo)\b[ \t]*,?[ \t]*/i)
-  if (greeting) {
-    const word = greeting[1].charAt(0).toUpperCase() + greeting[1].slice(1).toLowerCase()
-    let rest = cleaned.slice(greeting[0].length).replace(/^[\s,]+/, '')
-    // Drop a leftover plain display name after Hi (e.g. "Hi Abdulsamad,")
-    rest = rest.replace(/^[^@\n,]{1,60},\s*/, '')
-    if (!rest) return `${word} ${tag},`
-    const gap = rest.startsWith('\n') ? '' : '\n\n'
-    if (/^hi\b/i.test(word)) {
-      return `Hi ${tag},${gap}${rest}`.replace(/\n{3,}/g, '\n\n')
-    }
-    return `${word} ${tag},${gap}${rest}`.replace(/\n{3,}/g, '\n\n')
-  }
-
-  return `${tag}, ${cleaned}`
+  if (!cleaned) return `${tag},`
+  const gap = cleaned.startsWith('\n') ? '' : '\n\n'
+  return `${tag},${gap}${cleaned}`.replace(/\n{3,}/g, '\n\n')
 }
 
 function isBotContact(contact) {
@@ -1412,7 +1411,10 @@ async function replyInContext(msg, text, { isGroup, senderRaw, fromName, contact
     body = blendMentionTag(askerTag, body)
   }
 
-  const uniqueMentions = [...new Set(askerMentionJids.filter(Boolean))]
+  const uniqueMentions = [...new Set([
+    ...askerMentionJids.filter(Boolean),
+    ...mentionJidsFromText(body),
+  ])]
   const mentionOpts = uniqueMentions.length > 0 ? { mentions: uniqueMentions } : {}
   debugLog('group mention plan', { tag: askerTag, mentions: uniqueMentions })
 
@@ -2066,8 +2068,8 @@ async function handleInboundMessage(msg, source) {
 
     const mentions = await resolveMentionedPeople(msg)
 
-    // Do NOT show typing yet — Laravel may still decide this turn is undirected
-    // (incidental @, chatter, etc.). Typing starts only after we have a reply.
+    // Do NOT skip typing for directed turns — members need composing feedback
+    // during the Laravel/RAG wait. Undirected group chatter never reaches here.
     await ensureMessageId(msg, 600)
     // Settle BEFORE media download — message_create often races Store media keys
     // (Puppeteer EvaluationFailed "r" / empty download).
@@ -2084,7 +2086,7 @@ async function handleInboundMessage(msg, source) {
           await replyInContext(
             msg,
             "I couldn't download that voice note clearly.\n\n"
-              + 'Mind sending it again, or type the question?',
+              + 'Could you send it once more, or type the question?',
             { isGroup, senderRaw, fromName, contact },
           )
         } finally {
@@ -2148,7 +2150,7 @@ async function handleInboundMessage(msg, source) {
         await replyInContext(
           msg,
           "I couldn't download that voice note clearly.\n\n"
-            + 'Mind sending it again as a voice reply to me, or type the question?',
+            + 'Could you send it once more as a voice reply to me, or type the question?',
           { isGroup, senderRaw, fromName, contact },
         )
       } finally {
@@ -2158,6 +2160,8 @@ async function handleInboundMessage(msg, source) {
     }
 
     let reply = null
+    // Typing during the whole Laravel/RAG wait (not only after the reply arrives).
+    const stopTyping = startTypingHeartbeat(msg)
     try {
       const inbound = {
         from,
@@ -2190,8 +2194,6 @@ async function handleInboundMessage(msg, source) {
     }
 
     if (reply) {
-      // Confirmed we'll answer - type while composing/sending the reply.
-      const stopTyping = startTypingHeartbeat(msg)
       let meta
       try {
         meta = await replyInContext(msg, reply, {
@@ -2211,6 +2213,7 @@ async function handleInboundMessage(msg, source) {
             : ' private'),
       )
     } else {
+      stopTyping()
       console.log('[spike] silent (no reply from Laravel - not for Zak / nothing to say)')
     }
 
@@ -2304,24 +2307,23 @@ function startOutboundServer() {
       const askerJid = mentionRaw ? pushMention(mentionRaw) : null
       for (const m of mentionListRaw) pushMention(m)
 
-      if (askerJid) {
+      // Structured admin cards already embed @tags (Name / Cc:). Do not prepend
+      // another leading @asker — only ensure mentions[] includes every body tag.
+      const isAdminCard = /Request ID:|Member ID:|\*Member requested/i.test(text)
+      if (askerJid && !isAdminCard) {
         const mentionUser = idUserPart(askerJid)
         const tag = `@${(mentionUser || '').replace(/\D+/g, '') || mentionUser}`
         // Fix inverted "@id, Hi," from older clients / failed blends.
-        text = text.replace(new RegExp(`^${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,\\s*Hi\\b[,]?`, 'i'), 'Hi,')
+        text = text.replace(new RegExp(`^${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,\\s*Hi\\b[,]?`, 'i'), '')
+        text = text.replace(/^(hey|hi|hello|howdy|yo)\b[ \t]*,?[ \t]*/i, '').trim()
         if (!text.includes(tag)) {
-          // Only match the greeting line — never swallow "*You asked:*".
-          const hi = text.match(/^(Hi)\b[ \t]*(?:[^@\n,]{1,60})?,?[ \t]*\n*/i)
-          if (hi) {
-            const rest = text.slice(hi[0].length).replace(/^[\s,]+/, '')
-            const gap = rest.startsWith('\n') ? '' : '\n\n'
-            text = `Hi ${tag},${gap}${rest}`.replace(/\n{3,}/g, '\n\n')
-          } else if (/^Hi\b/i.test(text.trim())) {
-            text = text.replace(/^Hi\b[ \t]*,?[ \t]*/i, `Hi ${tag}, `)
-          } else {
-            text = `Hi ${tag},\n\n${text}`
-          }
+          const gap = text.startsWith('\n') ? '' : '\n\n'
+          text = `${tag},${gap}${text}`.replace(/\n{3,}/g, '\n\n')
         }
+      }
+      // Also harvest any @digits already in the body (Cc:, Name:, etc.).
+      for (const jid of mentionJidsFromText(text)) {
+        pushMention(jid)
       }
       if (mentionJids.length > 0) {
         opts.mentions = mentionJids
@@ -2347,7 +2349,7 @@ function startOutboundServer() {
       try {
         sent = await sendOutbound(text, opts)
       } catch (err) {
-        // Group quote/mention can fail; retry same body without rich opts (keep Hi, @tag order).
+        // Group quote/mention can fail; retry same body without rich opts (keep @tag order).
         if (opts.quotedMessageId || opts.mentions) {
           console.error('[spike] outbound rich send failed, plain retry:', formatErr(err))
           sent = await sendOutbound(text)
@@ -2356,8 +2358,9 @@ function startOutboundServer() {
         }
       }
       rememberBotOutboundId(sent)
-      console.log(`[spike] outbound ok to=${chatId} chars=${text.length}`)
-      sendJson(200, { ok: true, to: chatId })
+      const messageId = messageSerializedId(sent)
+      console.log(`[spike] outbound ok to=${chatId} chars=${text.length} id=${messageId || 'none'}`)
+      sendJson(200, { ok: true, to: chatId, message_id: messageId })
     } catch (err) {
       console.error('[spike] outbound failed:', err.message || err)
       sendJson(500, { ok: false, error: String(err.message || err) })

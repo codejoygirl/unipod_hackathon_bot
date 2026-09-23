@@ -181,78 +181,17 @@ async def reply_text_safe(message, text: str, *, mention: bool | None = None) ->
     await message.reply_text(plain)
 
 
-# /start + /help: short, member-facing (no admin commands).
-# On Telegram we advertise WhatsApp + Web chat (not Telegram again).
-
-def _env_flag(name: str, default: str = "true") -> bool:
-    return (os.getenv(name, default) or default).strip().lower() in ("1", "true", "yes", "on")
+# /start + /help: same Laravel card as WhatsApp (abilities + rotating examples).
 
 
-def _telegram_other_channels(*, in_group: bool = False) -> str:
-    lines: list[str] = []
-    wa_url = (os.getenv("ZAK_WHATSAPP_URL") or "").strip()
-    wa_label = (os.getenv("ZAK_WHATSAPP_LABEL") or "WhatsApp").strip() or "WhatsApp"
-    if wa_url:
-        lines.append(f"• {wa_label}: {wa_url}")
-    else:
-        lines.append(f"• {wa_label}")
-
-    if _env_flag("ZAK_SHOW_WEB_CHAT", "true"):
-        web_url = (
-            (os.getenv("ZAK_WEB_CHAT_URL") or "").strip()
-            or (os.getenv("FRONTEND_URL") or "").strip()
-        )
-        web_label = (os.getenv("ZAK_WEB_CHAT_LABEL") or "Web chat").strip() or "Web chat"
-        if web_url:
-            lines.append(f"• {web_label}: {web_url}")
-        else:
-            lines.append(f"• {web_label}")
-
-    if in_group:
-        handle = (os.getenv("ZAK_TELEGRAM_HANDLE") or "").strip().lstrip("@")
-        tg_url = (os.getenv("ZAK_TELEGRAM_URL") or "").strip()
-        if not tg_url and handle:
-            tg_url = f"https://t.me/{handle}"
-        if tg_url:
-            lines.append(f"• Private chat: {tg_url}")
-
-    if not lines:
-        return ""
-    return "Also reach me on:\n" + "\n".join(lines)
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message:
+        await send_via_laravel(update, context, "/start")
 
 
-def _member_help_text(*, in_group: bool = False) -> str:
-    channels = _telegram_other_channels(in_group=in_group)
-    return (
-        "Hi - I'm Zak\n\n"
-        "I help with community schedules, updates, links, and what's been shared.\n"
-        "You can ask in any language; I'll reply in the same one.\n\n"
-        "You can ask me things like:\n"
-        "• When is the next session?\n"
-        "• What's the meeting link?\n"
-        "• Share today's updates\n"
-        "• Who should I talk to about X?\n\n"
-        + ((channels + "\n\n") if channels else "")
-        + "Quick commands:\n"
-        "/ask - ask a community question\n"
-        "/share - tell the community something worth knowing\n"
-        "/feature - request a new feature or improve an existing one\n"
-        "/join - connect with an invite code\n"
-        "/help - show this message\n\n"
-        "Or just type in plain language - no command needed."
-    )
-
-
-def _welcome_text(*, in_group: bool = False) -> str:
-    channels = _telegram_other_channels(in_group=in_group)
-    return (
-        "Hi - I'm Zak.\n\n"
-        "I help with community schedules, updates, links, and what's been shared.\n"
-        "You can ask in any language; I'll reply in the same one.\n\n"
-        + ((channels + "\n\n") if channels else "")
-        + "Just ask whenever you're ready.\n"
-        "Need a quick tour? Send /help."
-    )
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message:
+        await send_via_laravel(update, context, "/help")
 
 
 async def call_laravel_inbound(
@@ -305,9 +244,12 @@ async def call_laravel_inbound(
         body = res.json()
     except Exception:
         body = {}
-    if res.status_code >= 400:
+    if res.status_code >= 400 and res.status_code != 202:
         raise RuntimeError(f"Laravel inbound {res.status_code}: {body}")
     data = body.get("data") or {}
+    if data.get("queued") is True:
+        print(f"[zak] laravel queued=yes from={from_id} (worker will send)")
+        return None
     return data.get("reply")
 
 
@@ -458,23 +400,9 @@ async def send_via_laravel(
         print(f"[zak] error: {exc}")
         await reply_text_safe(
             update.message,
-            "I hit a snag answering that just now. "
-            "Mind sending it again in a moment?",
+            "Thanks — I've got your message 🙂\n\n"
+            "I'll reply as soon as I can. No need to send it again.",
         )
-
-
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message:
-        chat_type = (update.effective_chat.type if update.effective_chat else "private") or "private"
-        in_group = chat_type in ("group", "supergroup")
-        await reply_text_safe(update.message, _welcome_text(in_group=in_group))
-
-
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message:
-        chat_type = (update.effective_chat.type if update.effective_chat else "private") or "private"
-        in_group = chat_type in ("group", "supergroup")
-        await reply_text_safe(update.message, _member_help_text(in_group=in_group))
 
 
 async def id_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
