@@ -232,11 +232,30 @@ final class WebChatTest extends TestCase
             'lifecycle_status' => KnowledgeLifecycleStatus::Published,
             'content' => "UNIPOD COMMUNITY RESOURCES\n\nhttps://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs\n\nOfficial folder.",
             'content_sha256' => hash('sha256', 'test'),
-            'published_at' => now(),
+            'published_at' => now()->subDay(),
             'metadata' => [
                 'asset_kind' => 'folder',
                 'asset_identity' => 'gfolder:123',
                 'delivery_url' => 'https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs',
+            ],
+        ]);
+
+        // Auto-indexed chat message (e.g. from WhatsApp/Telegram) should NOT be returned as a community resource
+        KnowledgeSource::query()->create([
+            'tenant_id' => $community->tenant_id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'Admin update 2026-09-23 17:43',
+            'uri' => 'whatsapp://admin-auto/test1234',
+            'source_type' => 'markdown',
+            'authority_tier' => KnowledgeAuthorityTier::OfficialAnnouncement,
+            'lifecycle_status' => KnowledgeLifecycleStatus::Published,
+            'content' => "Needs Assessment workshop: https://meet.google.com/abc-def-ghi",
+            'content_sha256' => hash('sha256', 'test2'),
+            'published_at' => now(),
+            'metadata' => [
+                'origin' => 'admin_auto_index',
+                'channel' => 'whatsapp',
             ],
         ]);
 

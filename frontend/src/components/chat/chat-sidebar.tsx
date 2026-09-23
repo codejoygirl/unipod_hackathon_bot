@@ -169,9 +169,9 @@ export function ChatSidebar({
               </div>
             </div>
 
-            {/* Clear thread — one assistant per community, not a chat list */}
+            {/* Clear thread / New chat */}
             <Tooltip
-              content="Clear this thread and ask your community assistant again"
+              content="Start a new chat conversation"
               position="bottom"
             >
               <button
@@ -181,19 +181,19 @@ export function ChatSidebar({
                   onNewChat?.();
                 }}
                 className="mb-2 flex w-full items-center gap-2.5 rounded-full bg-zinc-100/95 px-3 py-2 text-xs font-semibold text-zinc-800 shadow-2xs hover:bg-zinc-200/90 hover:text-zinc-950 dark:bg-zinc-800/90 dark:text-zinc-200 dark:hover:bg-zinc-800 transition active:scale-[0.99] cursor-pointer"
-                aria-label="Fresh start — clear conversation"
+                aria-label="New chat"
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="text-emerald-600 dark:text-emerald-400 shrink-0">
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
-                <span>Fresh start</span>
+                <span>New chat</span>
               </button>
             </Tooltip>
 
             {/* Navigation Links - Shifted comfortably down from top */}
             <nav className="mt-1 space-y-1.5 flex-1 overflow-y-auto no-scrollbar" aria-label="Sidebar navigation">
-              {/* Community assistant (home) */}
+              {/* Chat (home) */}
               <Link
                 href={withPhoneQuery("/", memberPhone)}
                 onClick={handleNavClick}
@@ -210,7 +210,7 @@ export function ChatSidebar({
                       strokeLinejoin="round"
                     />
                   </svg>
-                  <span className="truncate">Assistant</span>
+                  <span className="truncate">Chat</span>
                 </div>
                 {isAssistantHome ? (
                   <span className="shrink-0 whitespace-nowrap rounded bg-zinc-300/80 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-800 dark:bg-zinc-600 dark:text-zinc-100">
@@ -466,13 +466,13 @@ export function ChatSidebar({
               </Link>
             </Tooltip>
 
-            {/* Fresh start — clear thread */}
-            <Tooltip content="Fresh start (clear conversation)" position="right">
+            {/* New chat */}
+            <Tooltip content="New chat" position="right">
               <button
                 type="button"
                 onClick={onNewChat}
                 className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900 active:scale-95 transition dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
-                aria-label="Fresh start — clear conversation"
+                aria-label="New chat"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <line x1="12" y1="5" x2="12" y2="19" />
@@ -484,7 +484,7 @@ export function ChatSidebar({
             <div className="w-8 h-px bg-zinc-200 dark:bg-zinc-800 my-0.5" />
 
             {/* Navigation Icons */}
-            <Tooltip content="Assistant" position="right">
+            <Tooltip content="Chat" position="right">
               <Link
                 href={withPhoneQuery("/", memberPhone)}
                 className={navIconRailClass(isAssistantHome)}
