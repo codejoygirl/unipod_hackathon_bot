@@ -316,7 +316,12 @@ class AnswerSynthesizer:
             return True
         if "@" in plain and re.search(r"@\w*bot\b", plain, flags=re.I):
             return True
+        # "Speaker: long chat message" export crumbs used as titles.
+        if re.match(r"^[^:\n]{1,48}:\s+\S.{24,}$", plain) and plain.count(" ") >= 4:
+            return True
         # Long sentence fragments are not link titles.
+        if len(plain) > 60 and plain.count(" ") >= 6:
+            return True
         if len(plain) > 72 and plain.count(" ") >= 8:
             return True
         if len(words) <= 3 and len(plain) <= 48:
@@ -523,16 +528,73 @@ class AnswerSynthesizer:
 
     @classmethod
     def _fallback_label(cls, url: str) -> str:
+        """Host-shape fallback only when no meaningful caption exists (not a language catalog)."""
         lower = url.lower()
         if cls._is_meeting_join_url(url):
             return "Microsoft Teams meeting"
+        if "linkedin.com/" in lower:
+            return "LinkedIn profile"
+        if "github.com/" in lower:
+            return "GitHub profile"
+        if "tiktok.com/" in lower:
+            return "TikTok"
+        if "chat.whatsapp.com/" in lower or "wa.me/" in lower:
+            return "WhatsApp invite"
+        if "docs.google.com/spreadsheets" in lower:
+            return "Google Sheet"
+        if "docs.google.com/forms" in lower or "forms.gle/" in lower:
+            return "Google Form"
+        if "drive.google.com" in lower:
+            return "Google Drive file"
         if "youtu" in lower:
             return "YouTube recording"
-        if "drive.google.com" in lower:
-            return "Google Drive recording"
         if "meetingrecap" in lower or "recap" in lower:
             return "Teams recording"
+        host = urlsplit(url).netloc.lower().removeprefix("www.")
+        if host:
+            return host
         return "Shared link"
+
+    @classmethod
+    def _parse_link_list_from_answer(cls, answer: str) -> list[tuple[str, str]]:
+        """Extract (url, caption) pairs from a numbered link list draft."""
+        lines = (answer or "").splitlines()
+        pairs: list[tuple[str, str]] = []
+        i = 0
+        while i < len(lines):
+            trimmed = lines[i].strip()
+            m = re.match(r"^\d+[\).\:\-]\s+(.+)$", trimmed)
+            if m:
+                rest = m.group(1).strip()
+                # Same-line "caption: https://..." (common model slip).
+                same = re.match(r"^(.+?)\s*:\s*(https?://\S+)\s*$", rest)
+                if same:
+                    label = same.group(1).strip()
+                    url = cls._normalize_url_text(same.group(2).rstrip(".,);]}>'\"")).rstrip(
+                        ".,);]}>'\" "
+                    )
+                    pairs.append((url, label))
+                    i += 1
+                    continue
+                if rest.startswith("http://") or rest.startswith("https://"):
+                    pairs.append((cls._normalize_url_text(rest.rstrip(".,);]}>'\"")), ""))
+                    i += 1
+                    continue
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines):
+                    nxt = lines[j].strip()
+                    if nxt.startswith("http://") or nxt.startswith("https://"):
+                        url = cls._normalize_url_text(nxt.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
+                        pairs.append((url, rest))
+                        i = j + 1
+                        continue
+            elif trimmed.startswith("http://") or trimmed.startswith("https://"):
+                url = cls._normalize_url_text(trimmed.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
+                pairs.append((url, ""))
+            i += 1
+        return pairs
 
     @classmethod
     def _complete_link_answer_from_evidence(
@@ -606,6 +668,35 @@ class AnswerSynthesizer:
                     best_label = cls._prefer_better_label(prev_label, label)
                     evidence_by_key[key] = (chosen, best_label)
 
+        # Keep captions + URLs the model already listed (e.g. LinkedIn on an assets ask
+        # where social hosts are filtered from evidence extraction).
+        for url, model_label in cls._parse_link_list_from_answer(answer or ""):
+            if mode == "meetings" and not cls._is_meeting_join_url(url):
+                continue
+            if mode == "recordings" and (
+                cls._is_meeting_join_url(url) or not cls._is_likely_recording_url(url)
+            ):
+                continue
+            key = cls._url_dedupe_key(url)
+            clean_model = (
+                ""
+                if not model_label or cls._is_weak_link_label(model_label)
+                else model_label.strip()
+            )
+            if key not in evidence_by_key:
+                evidence_by_key[key] = (url, clean_model)
+                url_evidence_ids.setdefault(key, [])
+            else:
+                prev_url, prev_label = evidence_by_key[key]
+                chosen = cls._prefer_cleaner_stored_url(prev_url, url)
+                best_label = cls._prefer_better_label(prev_label, clean_model)
+                # Prefer a strong model caption over a chat-crumb evidence label.
+                if clean_model and (
+                    not prev_label or cls._is_weak_link_label(prev_label)
+                ):
+                    best_label = clean_model
+                evidence_by_key[key] = (chosen, best_label)
+
         # Collapse light-meetings?p=… into /meet/{id}?p=… when both share a passcode.
         pass_to_meet: dict[str, str] = {}
         for key, (url, _label) in evidence_by_key.items():
@@ -641,7 +732,9 @@ class AnswerSynthesizer:
         answer_keys = {cls._url_dedupe_key(u) for u in answer_urls}
         missing = [u for key, (u, _) in evidence_by_key.items() if key not in answer_keys]
         raw_answer_url_count = cls._raw_http_url_count(answer or "", mode=mode)
-        # Rebuild when the draft still has duplicate Teams shapes or weak "Diane"-style titles.
+        # Rebuild for duplicate URL shapes, orphan URLs, or weak titles that need
+        # evidence labels. Captions that are merely chat pastes are swapped for
+        # stronger evidence titles when available; the writer pass still polishes.
         needs_rebuild = wants_any and (
             raw_answer_url_count > len(answer_keys)
             or cls._answer_has_weak_link_titles(answer or "")
@@ -680,12 +773,17 @@ class AnswerSynthesizer:
         emit_items: list[tuple[str, tuple[str, str]]] = list(evidence_by_key.items())
         wants_full_list = bool(
             re.search(r"\blinks\b", q)
-            or re.search(r"\b(meetings|recordings)\b", q)
-            or re.search(r"\b(all|every)\b.{0,40}\b(link|meeting|recording)s?\b", q)
+            or re.search(r"\b(meetings|recordings|handles|profiles)\b", q)
+            or re.search(r"\b(all|every)\b.{0,40}\b(link|meeting|recording|handle|profile)s?\b", q)
         )
+        # Shape-only singular gate (not meaning): "first/main link" or singular "link".
+        # Do not treat a bare "the" as singular ("the social media handles").
         singular_ask = (not wants_full_list) and bool(
-            re.search(r"\b(the|first|initial|main|primary)\b", q)
-            or re.search(r"\blink\b", q)
+            re.search(r"\b(first|initial|main|primary)\b", q)
+            or (
+                re.search(r"\blink\b", q)
+                and not re.search(r"\blinks\b", q)
+            )
         )
         if mode in {"assets", "meetings", "recordings"} and singular_ask:
             ordered: list[tuple[str, tuple[str, str]]] = []
@@ -709,11 +807,15 @@ class AnswerSynthesizer:
             emit_items = emit_items[:3]
 
         for i, (key, (url, label)) in enumerate(emit_items, start=1):
-            display_label = (
-                label
-                if label and not cls._is_weak_link_label(label)
-                else cls._fallback_label(url)
-            )
+            # Strong captions win. Long weak drafts (CTA / intro) are kept so the
+            # writer can derive a real caption from them + the URL. Short weak
+            # crumbs ("Diane") fall back to host-shape labels.
+            if label and not cls._is_weak_link_label(label):
+                display_label = label.strip()
+            elif label and len(re.findall(r"[\w'’-]+", label, flags=re.UNICODE)) >= 5:
+                display_label = label.strip()
+            else:
+                display_label = cls._fallback_label(url)
             display_label = cls._scrub_broken_chars(display_label) or cls._fallback_label(url)
             link_lines.append(f"{i}. {display_label}")
             link_lines.append(url)

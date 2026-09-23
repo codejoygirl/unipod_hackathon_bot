@@ -2307,7 +2307,10 @@ function startOutboundServer() {
       const askerJid = mentionRaw ? pushMention(mentionRaw) : null
       for (const m of mentionListRaw) pushMention(m)
 
-      if (askerJid) {
+      // Structured admin cards already embed @tags (Name / Cc:). Do not prepend
+      // another leading @asker — only ensure mentions[] includes every body tag.
+      const isAdminCard = /Request ID:|Member ID:|\*Member requested/i.test(text)
+      if (askerJid && !isAdminCard) {
         const mentionUser = idUserPart(askerJid)
         const tag = `@${(mentionUser || '').replace(/\D+/g, '') || mentionUser}`
         // Fix inverted "@id, Hi," from older clients / failed blends.
@@ -2317,6 +2320,10 @@ function startOutboundServer() {
           const gap = text.startsWith('\n') ? '' : '\n\n'
           text = `${tag},${gap}${text}`.replace(/\n{3,}/g, '\n\n')
         }
+      }
+      // Also harvest any @digits already in the body (Cc:, Name:, etc.).
+      for (const jid of mentionJidsFromText(text)) {
+        pushMention(jid)
       }
       if (mentionJids.length > 0) {
         opts.mentions = mentionJids

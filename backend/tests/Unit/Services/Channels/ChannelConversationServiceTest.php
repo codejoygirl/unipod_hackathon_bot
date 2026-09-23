@@ -310,6 +310,16 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('Joy leads the cohort.', $fromTag);
     }
 
+    public function test_prefer_green_mention_tags_upgrades_lid_to_phone(): void
+    {
+        $svc = new ChannelConversationService;
+        $out = $svc->preferGreenMentionTags(
+            'Cc: @80599524048943 please',
+            [['id' => '80599524048943', 'name' => 'Joy', 'phone' => '2348166710953']],
+        );
+        $this->assertSame('Cc: @2348166710953 please', $out);
+    }
+
     public function test_member_facing_question_strips_follow_up_envelope(): void
     {
         $svc = new ChannelConversationService;
@@ -690,6 +700,9 @@ class ChannelConversationServiceTest extends TestCase
         $admin = $svc->helpTextFor('whatsapp', 'whatsapp', true);
         $this->assertStringContainsString('/import', $admin);
         $this->assertStringContainsString('knowledge draft', $admin);
+        $this->assertStringContainsString('/publish', $admin);
+        $this->assertStringContainsString('/knowledge', $admin);
+        $this->assertStringContainsString('/features', $admin);
         $this->assertStringContainsString('/approve', $admin);
         $this->assertStringContainsString('/reply', $admin);
         $this->assertStringContainsString('Admin', $admin);

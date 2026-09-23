@@ -99,3 +99,33 @@ class IngestionResponse(BaseModel):
     chunks_created: int
     message: str
     execution_time_ms: float
+
+
+class PurgeKnowledgeRequest(BaseModel):
+    """Ops request to wipe indexed knowledge (+ embeddings) for a scope."""
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    community_id: str | None = Field(default=None, max_length=36)
+    tenant_id: str | None = Field(default=None, max_length=36)
+    all: bool = Field(
+        default=False,
+        description="Delete every knowledge source/chunk/embedding in the AI DB.",
+    )
+    include_glossary: bool = Field(
+        default=True,
+        description="Also delete glossary_entries (tenant-scoped; ignored for community-only).",
+    )
+
+
+class PurgeKnowledgeResponse(BaseModel):
+    """Counts of rows removed from the AI knowledge tables."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sources_deleted: int
+    versions_deleted: int
+    chunks_deleted: int
+    glossary_deleted: int
+    scope: str
+    message: str

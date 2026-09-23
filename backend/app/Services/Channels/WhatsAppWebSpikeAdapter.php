@@ -31,6 +31,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         private readonly ChannelCommandAccess $commandAccess,
         private readonly AdminMessageKnowledgeIndexer $adminIndexer,
         private readonly VoiceNoteNormalizer $voiceNormalizer,
+        private readonly AdminKnowledgeDesk $knowledgeDesk,
     ) {}
 
     public function channelName(): string
@@ -227,6 +228,11 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             return $this->handleShare($message);
         }
 
+        // FEATURES (admin list) before FEATURE (member request).
+        if (str_starts_with($upper, 'FEATURES') || str_starts_with($upper, '/FEATURES')) {
+            return $this->handleAdminKnowledgeDesk($message);
+        }
+
         if (str_starts_with($upper, 'FEATURE') || str_starts_with($upper, '/FEATURE')) {
             return $this->handleFeature($message);
         }
@@ -238,6 +244,13 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
 
         if (str_starts_with($upper, 'ASSET') || str_starts_with($upper, '/ASSET')) {
             return $this->handleAdminAsset($message);
+        }
+
+        if (str_starts_with($upper, 'PUBLISH') || str_starts_with($upper, '/PUBLISH')
+            || str_starts_with($upper, 'KNOWLEDGE') || str_starts_with($upper, '/KNOWLEDGE')
+            || str_starts_with($upper, 'KB') || str_starts_with($upper, '/KB')
+            || str_starts_with($upper, 'FEATURES') || str_starts_with($upper, '/FEATURES')) {
+            return $this->handleAdminKnowledgeDesk($message);
         }
 
         if (str_starts_with($upper, 'ASK') || str_starts_with($upper, '/ASK')) {
@@ -1293,6 +1306,8 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
 
         $fromName = trim((string) ($message->raw['from_name'] ?? ''));
         $fromPhone = trim((string) ($message->raw['from_phone'] ?? ''));
+        $mentionRows = is_array($message->raw['mentions'] ?? null) ? $message->raw['mentions'] : [];
+        $body = $this->conversation->preferGreenMentionTags($body, $mentionRows);
         $notify = $this->escalationNotifier->notifyFeatureRequest(
             channel: $this->channelName(),
             from: $message->externalUserId,
@@ -1381,7 +1396,31 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
 
         Log::info('whatsapp_web_spike.import_draft', ['knowledge_id' => $source->id]);
 
-        return 'Saved as draft knowledge '.$source->id.' (submit-review → publish in Laravel).';
+        return $this->knowledgeDesk->draftCreatedReply($source, 'whatsapp');
+    }
+
+    private function handleAdminKnowledgeDesk(InboundMessage $message): string
+    {
+        if (! $this->commandAccess->isAdmin(
+            $this->channelName(),
+            $message->externalUserId,
+            array_merge(is_array($message->raw) ? $message->raw : [], ['text' => $message->text]),
+        )) {
+            return $this->commandAccess->adminOnlyDenial('whatsapp');
+        }
+
+        $user = $this->resolveUser();
+        $community = $this->resolveLinkedCommunity($message);
+        if ($user === null || $community === null) {
+            return 'Link a community with a minted JOIN token before using knowledge admin commands.';
+        }
+
+        $result = $this->knowledgeDesk->tryHandle($message->text, $user, $community, 'whatsapp');
+        if ($result === null) {
+            return 'Try /publish, /knowledge, or /features.';
+        }
+
+        return (string) ($result['reply'] ?? 'Done.');
     }
 
     private function handleAdminAsset(InboundMessage $message): string

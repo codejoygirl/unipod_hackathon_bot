@@ -86,6 +86,10 @@ def test_system_prompt_contains_critical_invariants():
     assert "DATES AND TIMES" in prompt
     assert "CURRENT TIME" in prompt
     assert "WHEN THAT MESSAGE WAS SENT" in prompt
+    assert "LINK CAPTIONS" in prompt
+    assert "MEANING CHECK" in prompt
+    assert "same language as the answer body" in prompt.lower() or "SAME language as the rest of the answer" in prompt
+    assert "Shared link" in prompt
 
 
 def test_format_reference_clock_uses_client_timezone_and_instant():

@@ -6,4 +6,9 @@ Product requirements: [../prd.md](../prd.md).
 
 ## Deploy
 
-- [Contabo + CloudPanel (interim production)](./contabo-cloudpanel.md) — PHP site + Docker Postgres/Redis/AI until Phase 7 images exist. Current VPS: `zak-app` @ `zak-app.xerotek.io`.
+- [Deploy this VPS (zak-app.xerotek.io)](./deploy-zak-app-xerotek.md) — numbered steps, one URL, Telegram + Zavu on.
+- [Contabo + CloudPanel (background)](./contabo-cloudpanel.md) — why this layout exists until Phase 7.
+
+## Day-2 ops
+
+- [Purge knowledge base + embeddings](./purge-knowledge.md) — `php artisan zak:purge-knowledge` (community / tenant / all).

@@ -376,6 +376,37 @@ final class ChannelConversationService
     }
 
     /**
+     * Prefer green-capable @phone tags over opaque LIDs when the inbound mention
+     * roster includes a phone. Leaves unknown @ids untouched (never invents tags).
+     *
+     * @param  list<array{id?: string, name?: string|null, phone?: string|null}>  $mentions
+     */
+    public function preferGreenMentionTags(string $text, array $mentions): string
+    {
+        $out = $text;
+        if ($out === '' || $mentions === []) {
+            return $out;
+        }
+
+        foreach ($mentions as $mention) {
+            if (! is_array($mention)) {
+                continue;
+            }
+            $id = preg_replace('/\D+/', '', (string) ($mention['id'] ?? '')) ?? '';
+            $phone = preg_replace('/\D+/', '', (string) ($mention['phone'] ?? '')) ?? '';
+            if ($id === '' || $phone === '' || strlen($phone) < 10 || strlen($phone) > 13) {
+                continue;
+            }
+            if ($id === $phone) {
+                continue;
+            }
+            $out = preg_replace('/@'.preg_quote($id, '/').'(?!\d)/u', '@'.$phone, $out) ?? $out;
+        }
+
+        return $out;
+    }
+
+    /**
      * Person-ish asks used only as offline fallback when model classify is down.
      */
     public function looksLikePersonLookup(string $text): bool
@@ -2516,15 +2547,18 @@ final class ChannelConversationService
     /**
      * Rotating sample invocations for admin /commands.
      *
-     * @return array{import: string, asset: string, approve: string, decline: string, reply: string}
+     * @return array{import: string, asset: string, publish: string, knowledge: string, features: string, approve: string, decline: string, reply: string}
      */
     public function rotatingAdminCommandExamples(): array
     {
-        /** @var list<array{import: string, asset: string, approve: string, decline: string, reply: string}> $sets */
+        /** @var list<array{import: string, asset: string, publish: string, knowledge: string, features: string, approve: string, decline: string, reply: string}> $sets */
         $sets = [
             [
                 'import' => '/import [paste the WhatsApp/Telegram export text]',
                 'asset' => '/asset handbook UniPods Handbook https://drive.google.com/file/d/...',
+                'publish' => '/publish ABC123',
+                'knowledge' => '/knowledge drafts',
+                'features' => '/features open',
                 'approve' => '/approve H7G74Y',
                 'decline' => '/decline H7G74Y',
                 'reply' => '/reply H7G74Y The session is at 4pm',
@@ -2532,6 +2566,9 @@ final class ChannelConversationService
             [
                 'import' => '/import [paste chat export here]',
                 'asset' => '/asset form Signup form https://drive.google.com/file/d/...',
+                'publish' => '/publish latest',
+                'knowledge' => '/knowledge assets',
+                'features' => '/features',
                 'approve' => '/approve W7X1YT',
                 'decline' => '/decline W7X1YT',
                 'reply' => '/reply W7X1YT Yes - open until Friday',
@@ -2539,6 +2576,9 @@ final class ChannelConversationService
             [
                 'import' => '/import [full export dump]',
                 'asset' => '/asset slides Week 1 deck https://drive.google.com/file/d/...',
+                'publish' => '/publish',
+                'knowledge' => '/knowledge published',
+                'features' => '/features decided',
                 'approve' => '/approve 9D5GWS',
                 'decline' => '/decline 9D5GWS',
                 'reply' => '/reply 9D5GWS Mentors are listed in the Drive folder',
@@ -2601,7 +2641,10 @@ final class ChannelConversationService
 
         return $heading
             .$this->formatCommandWithExample('/import', 'paste chat export as a knowledge draft', $ex['import'], $style)."\n"
+            .$this->formatCommandWithExample('/publish', 'publish a draft into the knowledge base', $ex['publish'], $style)."\n"
+            .$this->formatCommandWithExample('/knowledge', 'list drafts, published docs, or files', $ex['knowledge'], $style)."\n"
             .$this->formatCommandWithExample('/asset', 'publish Drive file links (or /asset import list)', $ex['asset'], $style)."\n"
+            .$this->formatCommandWithExample('/features', 'list open or decided feature requests', $ex['features'], $style)."\n"
             .$this->formatCommandWithExample('/approve', 'publish a share or feature (Request ID)', $ex['approve'], $style)."\n"
             .$this->formatCommandWithExample('/decline', 'reject a share or feature (Request ID)', $ex['decline'], $style)."\n"
             .$this->formatCommandWithExample('/reply', 'answer an escalated member question', $ex['reply'], $style);

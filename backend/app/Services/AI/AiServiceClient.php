@@ -683,6 +683,41 @@ class AiServiceClient
         return $response->json();
     }
 
+    /**
+     * Wipe AI knowledge sources, versions, chunks (embeddings), and optionally glossary.
+     *
+     * @return array{sources_deleted: int, versions_deleted: int, chunks_deleted: int, glossary_deleted: int, scope: string, message: string}
+     */
+    public function purgeKnowledge(
+        ?string $communityId = null,
+        ?string $tenantId = null,
+        bool $all = false,
+        bool $includeGlossary = true,
+    ): array {
+        $payloadArray = [
+            'community_id' => $communityId,
+            'tenant_id' => $tenantId,
+            'all' => $all,
+            'include_glossary' => $includeGlossary,
+        ];
+        $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        $response = $this->http
+            ->timeout(max(60.0, $this->timeout))
+            ->connectTimeout($this->connectTimeout)
+            ->withHeaders($headers)
+            ->withBody($rawBody, 'application/json')
+            ->post("{$this->baseUrl}/ingestion/purge");
+
+        if ($response->failed()) {
+            throw new AiServiceException('Purge knowledge failed: '.$response->body());
+        }
+
+        /** @var array{sources_deleted: int, versions_deleted: int, chunks_deleted: int, glossary_deleted: int, scope: string, message: string} */
+        return $response->json();
+    }
+
     protected function multipartCanonicalPayload(
         string $tenantId,
         string $communityId,

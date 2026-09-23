@@ -49,6 +49,10 @@ HARD RULES:
   non-English question. If there is no member_question, keep the draft's language.
   member_question is the LATEST ask only — never switch language because an older turn or
   draft used Yoruba/French/etc. English member_question → keep or translate the draft to English.
+  Link captions ARE part of the reply: write every caption in that same reply language.
+  Do not leave English-only captions (or host placeholders like "LinkedIn profile") on a
+  non-English reply — rewrite them into the member's language while keeping URLs and proper
+  nouns exact.
 - WHATSAPP FORMATTING (not Markdown):
   - Bold uses a SINGLE asterisk on each side: *like this*
   - NEVER use double asterisks **like this** (WhatsApp shows the stars literally).
@@ -69,8 +73,10 @@ WRITING QUALITY (this is why you exist):
 - Correct grammar, spelling, and punctuation. No typos.
 - Clear, complete sentences a careful human would send.
 - Easy to skim on a phone: short lead line, blank line, then numbered items when listing.
-- For link lists: "1. Clean professional title" then the URL on the next line.
-- Titles must be full session/event names (e.g. "MIT Universal AI Welcome", "Needs Assessment Workshop"), never a lone person name ("Diane", "Saidu"), a chat message crumb ("Can you send me…", "Good morning everyone…"), or a sentence fragment ("Your contribution will help…"). If the draft title is weak, rewrite it to the clearest session name present in the draft; if none, use "Microsoft Teams meeting".
+- For link lists: "1. Clean meaningful caption" then the URL on the next line (never "caption: https://..." on one line).
+- Captions must help a member know what the link is, everywhere a caption appears (social, forms, meetings, recordings, sites). Read the draft and the URL: if a chat intro, greeting, self-intro, OR a promo/CTA line sits as the title, rewrite into a short caption naming who or what the account/page/file is. Use meaning already in the draft and clues in the URL path/handle when helpful. Never paste the CTA or greeting as the title. Never invent people or roles that are not in the draft. Captions must be in the SAME language as the rest of the reply.
+- Session/event lists still use full session names (e.g. "MIT Universal AI Welcome", "Needs Assessment Workshop"), never a lone person name ("Diane", "Saidu"), a chat message crumb ("Can you send me…", "Good morning everyone…"), or a sentence fragment ("Your contribution will help…"). If a draft title is a raw chat paste or CTA, rewrite it to a meaningful caption from the same draft; only if nothing useful remains, use a short host-based label rewritten into the reply language - never leave "Shared link" when the draft has enough context.
+- Match the member's ask: if they asked for a TikTok / LinkedIn / form / meeting link, keep the reply focused on that kind of link; do not leave unrelated dumps.
 - When the member asks for one specific link (e.g. the first / initial onboarding link), keep the reply focused: one best matching link (or a short tight set), not a dump of every URL in the notes.
 - Deduplicate: never list the same meeting twice. If two URLs are clearly the same join (e.g. Teams /meet/ and light-meetings for one session), keep one cleaner link and one title.
 - Warm and human, not stiff or robotic. One light emoji only if the draft already used one or it clearly fits; never spam.
@@ -156,6 +162,13 @@ class AnswerPolisher:
         )
 
         text = _MD_LINK.sub(r"\1\n\2", text)
+        # Long "caption: https://..." on one line → caption then URL (CTA/intro pastes).
+        # Keep short "Link: https://..." key-value lines intact.
+        text = re.sub(
+            r"(?m)^(\d+[\).\:\-]\s+)((?:\S+\s+){3,}\S.*?)\s*:\s*(https?://\S+)\s*$",
+            r"\1\2\n\3",
+            text,
+        )
         # Markdown **bold** → WhatsApp *bold* (never leave double asterisks).
         text = _MD_BOLD.sub(r"*\1*", text)
         text = re.sub(r"__([^_\n]+?)__", r"*\1*", text)
@@ -166,19 +179,20 @@ class AnswerPolisher:
         text = _MD_ITALIC_UNDERSCORE.sub(r"\1", text)
 
         fixed_lines: list[str] = []
-        skip_next_url = False
         for line in text.split("\n"):
-            if skip_next_url and re.match(r"^https?://", line.strip()):
-                skip_next_url = False
-                fixed_lines.append("Shared link")
-                fixed_lines.append(line.strip())
-                continue
-            skip_next_url = False
-            if _MIDWORD_TITLE.match(line) or _CRUMB_TITLE.match(line):
+            if _MIDWORD_TITLE.match(line):
                 m = re.match(r"^(\d+[\).\:\-]\s+)", line)
                 prefix = m.group(1) if m else ""
                 fixed_lines.append(f"{prefix}Shared link")
                 continue
+            if _CRUMB_TITLE.match(line):
+                # Timestamp / "~ Name" crumbs only — leave caption-like lines alone.
+                m = re.match(r"^(\d+[\).\:\-]\s+)(.+)$", line.strip())
+                body = (m.group(2) if m else "").strip()
+                if re.match(r"^\[?\d{1,2}[/\-.]\d{1,2}", body) or re.match(r"^~\s*\S", body):
+                    prefix = m.group(1) if m else ""
+                    fixed_lines.append(f"{prefix}Shared link")
+                    continue
             fixed_lines.append(line)
         text = "\n".join(fixed_lines)
 
@@ -231,6 +245,13 @@ class AnswerPolisher:
                 "show the clear official name, use the notes' spelling."
             )
         parts.append(fence_untrusted("draft_reply", draft, max_chars=6000))
+        parts.append(
+            "Final pass: every numbered link caption must be a short meaningful label "
+            "(who/what the link is), never a greeting, self-intro, or promo/CTA sentence. "
+            "Captions must be in the same language as the rest of the reply "
+            "(match member_question when present). "
+            "Put each https URL on its own line under its caption."
+        )
         response = await self._chat.generate(
             ChatRequest(
                 messages=[

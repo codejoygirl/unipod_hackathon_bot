@@ -27,6 +27,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         private readonly ChannelCommandAccess $commandAccess,
         private readonly AdminMessageKnowledgeIndexer $adminIndexer,
         private readonly VoiceNoteNormalizer $voiceNormalizer,
+        private readonly AdminKnowledgeDesk $knowledgeDesk,
     ) {}
 
     public function channelName(): string
@@ -201,6 +202,10 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             return $this->handleShareStub($message);
         }
 
+        if (str_starts_with($upper, 'FEATURES') || str_starts_with($upper, '/FEATURES')) {
+            return $this->handleAdminKnowledgeDesk($message);
+        }
+
         if (str_starts_with($upper, 'FEATURE') || str_starts_with($upper, '/FEATURE')) {
             return $this->handleFeature($message);
         }
@@ -212,6 +217,12 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
         if (str_starts_with($upper, 'ASSET') || str_starts_with($upper, '/ASSET')) {
             return $this->handleAdminAsset($message);
+        }
+
+        if (str_starts_with($upper, 'PUBLISH') || str_starts_with($upper, '/PUBLISH')
+            || str_starts_with($upper, 'KNOWLEDGE') || str_starts_with($upper, '/KNOWLEDGE')
+            || str_starts_with($upper, 'KB') || str_starts_with($upper, '/KB')) {
+            return $this->handleAdminKnowledgeDesk($message);
         }
 
         if (str_starts_with($upper, 'ASK') || str_starts_with($upper, '/ASK')) {
@@ -1982,7 +1993,36 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
         Log::info('telegram_spike.admin_import_draft', ['knowledge_id' => $source->id]);
 
-        return 'Saved as draft knowledge '.$source->id.' (submit-review → publish in Laravel).';
+        return $this->knowledgeDesk->draftCreatedReply($source, 'plain');
+    }
+
+    private function handleAdminKnowledgeDesk(InboundMessage $message): string
+    {
+        if (! $this->commandAccess->isAdmin($this->channelName(), $message->externalUserId)) {
+            return $this->commandAccess->adminOnlyDenial('plain');
+        }
+
+        $user = $this->resolveUser();
+        $link = Cache::get($this->linkCacheKey($message->externalUserId));
+        $communityId = is_array($link)
+            ? (string) ($link['community_id'] ?? '')
+            : (string) config('telegram_spike.default_community_id');
+
+        if ($user === null || $communityId === '') {
+            return 'Link a community with /join before using knowledge admin commands.';
+        }
+
+        $community = Community::query()->find($communityId);
+        if ($community === null) {
+            return 'I could not find that linked community.';
+        }
+
+        $result = $this->knowledgeDesk->tryHandle($message->text, $user, $community, 'plain');
+        if ($result === null) {
+            return 'Try /publish, /knowledge, or /features.';
+        }
+
+        return (string) ($result['reply'] ?? 'Done.');
     }
 
     private function handleAdminAsset(InboundMessage $message): string

@@ -177,6 +177,19 @@ def test_complete_link_answer_singular_meeting_keeps_one():
     assert set(ids) == {"E1"}
 
 
+def test_weak_link_label_rejects_speaker_chat_paste():
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Jackson: Hello everyone, am Ssekyanzi Jackson a Software Engineer"
+    )
+    assert AnswerSynthesizer._is_weak_link_label(
+        "Fleva: Hey. I am Yemima and I am from Togo. I am"
+    )
+    assert not AnswerSynthesizer._is_weak_link_label(
+        "Jackson (software engineer) - LinkedIn"
+    )
+    assert not AnswerSynthesizer._is_weak_link_label("MIT Universal AI onboarding call")
+
+
 def test_weak_link_label_rejects_meeting_chat_crumbs():
     assert AnswerSynthesizer._is_weak_link_label(
         "Reminder! Today at *3pm CAT (2pm WA / 4pm EA local time) we"
@@ -191,6 +204,68 @@ def test_weak_link_label_rejects_meeting_chat_crumbs():
         "Genial: *Genial joined from the community*"
     )
     assert not AnswerSynthesizer._is_weak_link_label("MIT Universal AI onboarding call")
+
+
+def test_complete_link_answer_keeps_social_urls_from_answer_on_assets_ask():
+    linkedin = "https://www.linkedin.com/in/ssekyanzi-jackson"
+    chunks = [
+        _chunk(
+            "E1",
+            "Jackson: Hello everyone, am Ssekyanzi Jackson a Software Engineer\n" + linkedin,
+        ),
+        _chunk("E2", "Signup https://example.com/form"),
+    ]
+    completed, _ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Give me the social media handles of the platform",
+        answer=(
+            "Here are the social handles shared in the community:\n\n"
+            "1. Jackson (software engineer) - LinkedIn\n"
+            f"{linkedin}\n\n"
+            "2. Signup form\n"
+            "https://example.com/form"
+        ),
+        evidence_chunks=chunks,
+        link_mode="assets",
+    )
+    assert linkedin in completed
+    assert "Jackson (software engineer) - LinkedIn" in completed
+    assert "Hello everyone, am Ssekyanzi" not in completed
+
+
+def test_fallback_label_uses_host_shape_for_profiles():
+    assert (
+        AnswerSynthesizer._fallback_label("https://www.linkedin.com/in/someone")
+        == "LinkedIn profile"
+    )
+    assert AnswerSynthesizer._fallback_label("https://github.com/kiongosss") == "GitHub profile"
+
+
+def test_parse_link_list_same_line_caption_url():
+    pairs = AnswerSynthesizer._parse_link_list_from_answer(
+        "1. Follow, like, repost and share our videos so we can reach even more: "
+        "https://www.tiktok.com/@timbuktoounipods?r=1&_t=ZS-99cbj4oT5lc"
+    )
+    assert len(pairs) == 1
+    url, label = pairs[0]
+    assert "tiktok.com/@timbuktoounipods" in url
+    assert "Follow, like, repost" in label
+    assert AnswerSynthesizer._is_weak_link_label(label)
+
+
+def test_polisher_splits_same_line_caption_url():
+    from ai_service.generation.polisher import AnswerPolisher
+
+    raw = (
+        "The TikTok handle shared for the UniPods platform is:\n\n"
+        "1. Follow, like, repost and share our videos so we can reach even more: "
+        "https://www.tiktok.com/@timbuktoounipods?r=1&_t=ZS-99cbj4oT5lc\n"
+    )
+    out = AnswerPolisher.deterministic_cleanup(raw)
+    assert ":\nhttps://www.tiktok.com/@timbuktoounipods" not in out.replace(" ", "")
+    assert re.search(
+        r"1\.\s+Follow, like, repost[^\n]+\nhttps://www\.tiktok\.com/@timbuktoounipods",
+        out,
+    )
 
 
 def test_complete_link_answer_skips_teams_meet_joins_for_recordings():
