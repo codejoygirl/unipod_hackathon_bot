@@ -7,6 +7,8 @@ namespace App\Jobs;
 use App\DTOs\Channels\InboundMessage;
 use App\Services\Channels\WhatsAppZavuAdapter;
 use App\Services\Channels\Zavu\ZavuClient;
+use App\Services\Channels\Zavu\ZavuInboundMediaHydrator;
+use App\Services\Channels\Zavu\ZavuInboundPayloadMapper;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
@@ -38,8 +40,12 @@ final class ProcessZavuInboundMessage implements ShouldQueue
         $this->onQueue((string) config('zak.queues.channels', 'channels'));
     }
 
-    public function handle(WhatsAppZavuAdapter $adapter, ZavuClient $zavu): void
-    {
+    public function handle(
+        WhatsAppZavuAdapter $adapter,
+        ZavuClient $zavu,
+        ZavuInboundPayloadMapper $mapper,
+        ZavuInboundMediaHydrator $mediaHydrator,
+    ): void {
         $eventId = (string) ($this->event['id'] ?? '');
         if ($eventId !== '') {
             $lockKey = 'wa_zavu_event:'.$eventId;
@@ -64,17 +70,32 @@ final class ProcessZavuInboundMessage implements ShouldQueue
         }
 
         $from = trim((string) ($data['from'] ?? ''));
-        $text = trim((string) ($data['text'] ?? ''));
-        if ($from === '' || $text === '') {
+        $text = $mapper->inboundText($data);
+        if ($from === '' || ($text === '' && ! $mapper->hasMedia($data))) {
             return;
+        }
+
+        $raw = $mediaHydrator->hydrate($mapper->mapRaw($data));
+
+        $inboundMessageId = trim((string) ($data['messageId'] ?? $data['id'] ?? ''));
+        if ($inboundMessageId !== ''
+            && filter_var(config('whatsapp_zavu.typing_indicator', true), FILTER_VALIDATE_BOOLEAN)) {
+            try {
+                $zavu->showTypingIndicator($inboundMessageId);
+            } catch (Throwable $typingError) {
+                Log::debug('whatsapp_zavu.typing_skipped', [
+                    'message_id' => $inboundMessageId,
+                    'exception' => $typingError->getMessage(),
+                ]);
+            }
         }
 
         $message = new InboundMessage(
             channel: 'whatsapp_zavu',
             externalUserId: $from,
             text: $text,
-            messageId: isset($data['messageId']) ? (string) $data['messageId'] : null,
-            raw: $data,
+            messageId: $inboundMessageId !== '' ? $inboundMessageId : null,
+            raw: $raw,
         );
 
         try {

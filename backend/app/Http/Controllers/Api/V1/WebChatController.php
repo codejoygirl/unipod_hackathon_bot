@@ -318,8 +318,7 @@ final class WebChatController extends Controller
                 return $this->directAnswerResponse((string) ($adminCmd['reply'] ?? 'Done.'), $community, $communityId);
             }
 
-            if ($this->listenGate->startsWithSlashCommand($query, 'import')
-                || $this->listenGate->startsWithSlashCommand($query, 'export')) {
+            if ($this->listenGate->startsWithImportOrExport($query)) {
                 $body = $this->stripCommandPrefix($query, ['import', 'export']);
                 if ($body === '') {
                     return $this->directAnswerResponse(

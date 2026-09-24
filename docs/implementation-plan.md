@@ -231,6 +231,18 @@ Maps to: PRD §40 Priority 7 + §39 remaining criteria. Owners: All.
 - Commit `uv.lock`; separate `.env` per service
 - Do not claim equal quality for every language without evaluation (PRD §19.1)
 
+## Active slices (channels + temporal knowledge)
+
+| Slice | Status | Notes |
+| --- | --- | --- |
+| Dual WhatsApp reach (`GET /api/v1/public/reach`, `zak_whatsapp.php`, WA outbound `*bold*`) | Done | Set distinct `WHATSAPP_ZAVU_PHONE` vs `WHATSAPP_WEB_SPIKE_BOT_NUMBER`; `ZAK_WHATSAPP_PRIMARY` for web chip |
+| Session turn timestamps in knowledge query envelope | Done | `ChannelConversationService::remember()` + `buildKnowledgeQuery()` |
+| Ingest-time `content_occurred_*` + retrieval `message_at` XML | Done (new imports) | Re-import chat exports after purge for existing index |
+| Legacy `EXPORT`/`IMPORT` routing (no leading slash) | Done | `ChannelListenGate::startsWithImportOrExport()` |
+| Full Zavu `MemberChannelPipeline` parity (voice/image, admin desk, group listen) | Done (Zavu) | `MemberChannelPipeline` + voice/image normalizers; groups N/A on Cloud DM path |
+| Optional `/conversation/temporal-plan` preflight | Done | Classify `needs_temporal_resolution` + preflight before grounded ask |
+| Purge + re-import UniPods `_chat.txt` | Ops | `zak:purge-knowledge --community=…` then `zak:import-knowledge-chats --path=…` |
+
 ## Immediate next step
 
 Start **Phase 3 (Member experience)**: chat UI, citations drawer, community selector, TanStack Query client from OpenAPI.

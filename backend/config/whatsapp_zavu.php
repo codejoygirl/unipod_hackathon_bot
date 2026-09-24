@@ -37,10 +37,20 @@ return [
     'phone_number' => env('WHATSAPP_ZAVU_PHONE', ''),
 
     /*
+    | Admin senders (E.164 digits). Defaults to WHATSAPP_WEB_SPIKE_ADMIN_PHONES when unset.
+    */
+    'admin_phones' => env('WHATSAPP_ZAVU_ADMIN_PHONES', ''),
+
+    /*
     | When true, handle inbound in-request (local/dev). Prefer queue + afterResponse
     | in production so Zavu gets 200 within 30s.
     */
     'process_sync' => (bool) env('WHATSAPP_ZAVU_PROCESS_SYNC', false),
 
     'webhook_max_age_seconds' => (int) env('WHATSAPP_ZAVU_WEBHOOK_MAX_AGE', 300),
+
+    /*
+    | POST /v1/messages/{id}/typing while preparing LLM replies (WhatsApp only).
+    */
+    'typing_indicator' => (bool) env('WHATSAPP_ZAVU_TYPING_INDICATOR', true),
 ];

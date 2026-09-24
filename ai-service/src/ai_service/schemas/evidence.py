@@ -38,6 +38,14 @@ class MediaLocator(BaseModel):
 
     timestamp_seconds: float | None = None
     timecode: str | None = None
+    message_at: str | None = Field(
+        default=None,
+        description="ISO8601 when chat/export content occurred (start of window).",
+    )
+    message_end: str | None = Field(
+        default=None,
+        description="ISO8601 end of chat window when available.",
+    )
     media_url: str | None = None
     bounding_box: list[float] | None = None
     page_number: int | None = None

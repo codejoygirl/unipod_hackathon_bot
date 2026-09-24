@@ -35,6 +35,7 @@ final class VoiceNoteNormalizer
 
         $kind = strtolower(trim((string) ($media['kind'] ?? '')));
         $mime = strtolower(trim((string) ($media['mime_type'] ?? $media['mimetype'] ?? '')));
+        $mime = explode(';', $mime, 2)[0];
         $isVoice = in_array($kind, ['voice', 'ptt', 'audio'], true)
             || str_starts_with($mime, 'audio/');
 
@@ -43,6 +44,9 @@ final class VoiceNoteNormalizer
         }
 
         $b64 = trim((string) ($media['data_base64'] ?? $media['base64'] ?? ''));
+        if (str_starts_with(strtolower($b64), 'data:') && str_contains($b64, ',')) {
+            $b64 = trim(substr($b64, (int) strpos($b64, ',') + 1));
+        }
         if ($b64 === '') {
             return [
                 'message' => $message,

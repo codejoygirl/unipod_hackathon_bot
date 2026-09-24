@@ -72,6 +72,7 @@ final class ChannelConversationService
         $turns[] = [
             'role' => $role,
             'text' => mb_substr(trim($text), 0, 500),
+            'at' => now()->toIso8601String(),
         ];
         if (count($turns) > self::MAX_TURNS) {
             $turns = array_slice($turns, -self::MAX_TURNS);
@@ -119,6 +120,10 @@ final class ChannelConversationService
         }
 
         if ($this->isPurelySocial($stripped)) {
+            return self::INTENT_CONVERSATIONAL;
+        }
+
+        if ($this->isDeskClockAsk($stripped)) {
             return self::INTENT_CONVERSATIONAL;
         }
 
@@ -815,6 +820,51 @@ final class ChannelConversationService
     }
 
     /**
+     * English-only offline shape: date/time desk utilities (not programme schedules).
+     * Online routing is owned by classify; this prevents mis-firing knowledge search.
+     */
+    public function isDeskClockAsk(string $text): bool
+    {
+        $q = mb_strtolower(trim($text));
+        $q = str_replace(["\u{2019}", "\u{2018}", '`'], "'", $q);
+        $q = preg_replace('/\s+/u', ' ', $q) ?? $q;
+        $q = rtrim($q, " \t\n\r\0\x0B.!？?~");
+
+        if ($q === '') {
+            return false;
+        }
+
+        if (preg_match(
+            '/^(?:what(?:\'?s| is)|tell me) (?:the )?(?:date|day(?: of the week)?)\b/u',
+            $q
+        ) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\btoday\'?s date\b/u', $q) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^(?:what(?:\'?s| is)|tell me) (?:the )?time\b/u', $q) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\bwhat time is it\b/u', $q) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\b(?:current|local) time\b/u', $q) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\btime in [a-z]/u', $q) === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Questions that are not about community knowledge should not escalate.
      */
     public function isClearlyOutOfScope(string $text): bool
@@ -897,7 +947,7 @@ final class ChannelConversationService
         $q = str_replace(["\u{2019}", "\u{2018}", '`'], "'", $q);
         $q = rtrim($q, " \t\n\r\0\x0B.!？?~");
 
-        if ($q === '' || $this->isClearlyOutOfScope($q)) {
+        if ($q === '' || $this->isClearlyOutOfScope($q) || $this->isDeskClockAsk($q)) {
             return false;
         }
 
@@ -1000,6 +1050,10 @@ final class ChannelConversationService
         $offlineLink = $this->inferLinkMode($query);
         $offlineIntent = $this->classifyIntent($query, $communityDescription);
         $resolved['link_mode'] = (string) ($resolved['link_mode'] ?? 'none');
+        $resolved['needs_temporal_resolution'] = filter_var(
+            $resolved['needs_temporal_resolution'] ?? false,
+            FILTER_VALIDATE_BOOLEAN,
+        );
         $prior = $this->lastRetrievableUserQuestion($turns);
 
         if ($classified === null) {
@@ -1033,6 +1087,10 @@ final class ChannelConversationService
             $linkFocus = 'na';
         }
         $followUp = filter_var($classified['follow_up'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $resolved['needs_temporal_resolution'] = filter_var(
+            $classified['needs_temporal_resolution'] ?? false,
+            FILTER_VALIDATE_BOOLEAN,
+        );
 
         $applyFocus = function (array $resolved) use ($linkFocus): array {
             $mode = (string) ($resolved['link_mode'] ?? 'none');
@@ -1095,6 +1153,13 @@ final class ChannelConversationService
         if ($modelIntent === self::INTENT_CONVERSATIONAL
             || $modelIntent === self::INTENT_PERSONAL_HELP) {
             $resolved['intent'] = $modelIntent;
+            $resolved['link_mode'] = 'none';
+
+            return $applyFocus($resolved);
+        }
+
+        if ($this->isDeskClockAsk($query)) {
+            $resolved['intent'] = self::INTENT_CONVERSATIONAL;
             $resolved['link_mode'] = 'none';
 
             return $applyFocus($resolved);
@@ -1897,7 +1962,6 @@ final class ChannelConversationService
         }
 
         if ($style === 'whatsapp') {
-            // Bold stands out more than monospace for scan-heavy /help cards.
             return '*'.$command.'*';
         }
 
@@ -2224,16 +2288,29 @@ final class ChannelConversationService
         ?string $currentChannel = null,
         ?string $chatType = null,
         ?string $memberPhoneForWeb = null,
+        ?string $inboundChannelKey = null,
     ): array {
         $entries = [];
         $inGroup = in_array(strtolower((string) $chatType), ['group', 'supergroup'], true);
         $webPhone = $inGroup ? null : $memberPhoneForWeb;
+        $presence = app(WhatsAppPresence::class);
 
         if ($currentChannel !== 'whatsapp') {
-            $entries[] = [
-                'label' => (string) config('zak_presence.whatsapp_label', 'WhatsApp'),
-                'url' => $this->whatsappPublicUrl(),
-            ];
+            foreach ($presence->memberFacingReachEntries(true) as $wa) {
+                $entries[] = [
+                    'label' => (string) $wa['label'],
+                    'url' => (string) $wa['url'],
+                ];
+            }
+            if ($entries === []) {
+                $fallback = $this->whatsappPublicUrl(inboundChannelKey: null);
+                if ($fallback !== '') {
+                    $entries[] = [
+                        'label' => (string) config('zak_presence.whatsapp_label', 'WhatsApp'),
+                        'url' => $fallback,
+                    ];
+                }
+            }
         }
 
         if ($currentChannel !== 'telegram') {
@@ -2254,14 +2331,19 @@ final class ChannelConversationService
             ];
         }
 
-        // Groups: same "reach me" section; invite a private 1:1 on this platform.
-        if ($inGroup) {
-            $dmUrl = '';
-            if ($currentChannel === 'whatsapp') {
-                $dmUrl = $this->whatsappPublicUrl();
-            } elseif ($currentChannel === 'telegram') {
-                $dmUrl = $this->telegramPublicUrl();
+        if ($currentChannel === 'whatsapp') {
+            $dmUrl = $this->whatsappPublicUrl(
+                inboundChannelKey: $inboundChannelKey,
+                preferClickable: true,
+            );
+            if ($dmUrl !== '') {
+                $entries[] = [
+                    'label' => 'Private chat',
+                    'url' => $dmUrl,
+                ];
             }
+        } elseif ($inGroup && $currentChannel === 'telegram') {
+            $dmUrl = $this->telegramPublicUrl();
             if ($dmUrl !== '') {
                 $entries[] = [
                     'label' => 'Private chat',
@@ -2281,10 +2363,16 @@ final class ChannelConversationService
      *
      * @param  'whatsapp'|'telegram'|'web'|null  $currentChannel
      */
-    public function privateChatUrl(?string $currentChannel, ?string $memberPhoneForWeb = null): string
-    {
+    public function privateChatUrl(
+        ?string $currentChannel,
+        ?string $memberPhoneForWeb = null,
+        ?string $inboundChannelKey = null,
+    ): string {
         return match ($currentChannel) {
-            'whatsapp' => $this->whatsappPublicUrl(preferClickable: true),
+            'whatsapp' => $this->whatsappPublicUrl(
+                inboundChannelKey: $inboundChannelKey,
+                preferClickable: true,
+            ),
             'telegram' => $this->telegramPublicUrl(),
             'web' => $this->webChatInviteUrl($memberPhoneForWeb),
             default => '',
@@ -2391,14 +2479,16 @@ final class ChannelConversationService
      * @param  bool  $preferClickable  When true, prefer api.whatsapp.com so phone
      *                                 autodetection does not split wa.me links.
      */
-    public function whatsappPublicUrl(bool $preferClickable = false): string
-    {
-        $url = trim((string) config('zak_presence.whatsapp_url', ''));
-        if ($url === '') {
-            $botNumber = preg_replace('/\D+/', '', (string) config('whatsapp_web_spike.bot_number', '')) ?? '';
-            $url = $botNumber !== '' ? 'https://wa.me/'.$botNumber : '';
-        }
+    public function whatsappPublicUrl(
+        bool $preferClickable = false,
+        ?string $inboundChannelKey = null,
+    ): string {
+        return app(WhatsAppPresence::class)->urlForInboundChannel($inboundChannelKey, $preferClickable);
+    }
 
+    public function applyWhatsAppInviteParams(string $url, bool $preferClickable = false): string
+    {
+        $url = trim($url);
         if ($url === '') {
             return '';
         }
@@ -2408,7 +2498,6 @@ final class ChannelConversationService
             return $this->whatsappClickableUrl($url, $prefill);
         }
 
-        // Keep wa.me when callers want the short form, but still prefill the composer.
         if (preg_match('#wa\.me/(\d+)#i', $url, $m) === 1) {
             return 'https://wa.me/'.$m[1].'?text='.rawurlencode($prefill);
         }
@@ -2497,9 +2586,10 @@ final class ChannelConversationService
         ?string $currentChannel = null,
         ?string $chatType = null,
         ?string $memberPhoneForWeb = null,
+        ?string $inboundChannelKey = null,
     ): string {
         $parts = [];
-        foreach ($this->channelAccessEntries($currentChannel, $chatType, $memberPhoneForWeb) as $entry) {
+        foreach ($this->channelAccessEntries($currentChannel, $chatType, $memberPhoneForWeb, $inboundChannelKey) as $entry) {
             $parts[] = $this->formatAccessEntry(
                 (string) ($entry['label'] ?? ''),
                 (string) ($entry['url'] ?? ''),
@@ -2532,8 +2622,9 @@ final class ChannelConversationService
         ?string $currentChannel = null,
         ?string $chatType = null,
         ?string $memberPhoneForWeb = null,
+        ?string $inboundChannelKey = null,
     ): string {
-        $channels = $this->channelsAccessBlock($style, $currentChannel, $chatType, $memberPhoneForWeb);
+        $channels = $this->channelsAccessBlock($style, $currentChannel, $chatType, $memberPhoneForWeb, $inboundChannelKey);
         $scope = $this->friendlyScopeSummary(null);
         $bot = $this->botDisplayName();
         $examples = $this->formatHelpExampleLines($this->rotatingHelpExamples());
@@ -2555,7 +2646,7 @@ final class ChannelConversationService
                 ."*Try asking*\n"
                 .$examples."\n\n"
                 .($channels !== '' ? $channels."\n\n" : '')
-                ."*Quick commands*\n"
+                ."*Quick commands*\n\n"
                 .$this->formatMemberCommandHelp('whatsapp')."\n\n"
                 ."Or just type in plain language - no command needed.\n"
                 .'In group chats, '.$this->emphasisLabel('@mention', 'whatsapp')
@@ -2579,7 +2670,7 @@ final class ChannelConversationService
             ."Try asking:\n"
             .$examples."\n\n"
             .($channels !== '' ? $channels."\n\n" : '')
-            ."Quick commands:\n"
+            ."Quick commands:\n\n"
             .$this->formatMemberCommandHelp('plain')."\n\n"
             ."Or just type in plain language - no command needed.\n"
             .'In group chats, @mention me or reply to my message so I know you mean me.';
@@ -2691,7 +2782,7 @@ final class ChannelConversationService
         /** @var list<array{import: string, asset: string, publish: string, knowledge: string, features: string, approve: string, decline: string, reply: string}> $sets */
         $sets = [
             [
-                'import' => '/import [paste the WhatsApp/Telegram export text]',
+                'import' => '/import [paste export text, or attach PDF/image/video/audio/.txt]',
                 'asset' => '/asset handbook UniPods Handbook https://drive.google.com/file/d/YOUR_FILE_ID/view',
                 'publish' => '/publish ABC123',
                 'knowledge' => '/knowledge',
@@ -2734,12 +2825,16 @@ final class ChannelConversationService
     public function formatMemberCommandHelp(string $style = 'plain'): string
     {
         $ex = $this->rotatingMemberCommandExamples();
+        $sep = $style === 'whatsapp' ? "\n\n" : "\n";
+        $lines = [
+            $this->formatCommandWithExample('/ask', 'ask about schedules, links, or updates', $ex['ask'], $style),
+            $this->formatCommandWithExample('/share', 'share a tip with the community (admin reviews first)', $ex['share'], $style),
+            $this->formatCommandWithExample('/feature', 'request a feature or suggest an improvement', $ex['feature'], $style),
+            $this->formatCommandWithExample('/assets', 'list published program files (forms, slides, handbooks)', $ex['assets'], $style),
+            $this->formatCommandWithExample('/help', 'show this guide again', null, $style),
+        ];
 
-        return $this->formatCommandWithExample('/ask', 'ask about schedules, links, or updates', $ex['ask'], $style)."\n"
-            .$this->formatCommandWithExample('/share', 'share a tip with the community (admin reviews first)', $ex['share'], $style)."\n"
-            .$this->formatCommandWithExample('/feature', 'request a feature or suggest an improvement', $ex['feature'], $style)."\n"
-            .$this->formatCommandWithExample('/assets', 'list published program files (forms, slides, handbooks)', $ex['assets'], $style)."\n"
-            .$this->formatCommandWithExample('/help', 'show this guide again', null, $style);
+        return implode($sep, $lines);
     }
 
     /**
@@ -2753,7 +2848,7 @@ final class ChannelConversationService
     ): string {
         $cmd = $this->highlightCommand($command, $style === 'whatsapp' ? 'whatsapp' : 'plain');
         if ($style === 'whatsapp') {
-            $line = "{$cmd}  {$blurb}";
+            $line = "{$cmd}\n{$blurb}";
             if ($example !== null && $example !== '') {
                 $exCmd = $this->highlightCommand(
                     (string) (preg_split('/\s+/', $example, 2)[0] ?? $command),
@@ -2761,7 +2856,7 @@ final class ChannelConversationService
                 );
                 $exRest = trim((string) preg_replace('/^\/\S+\s*/u', '', $example));
                 $line .= $exRest !== ''
-                    ? "\n  _e.g._ {$exCmd} {$exRest}"
+                    ? "\n  _e.g._ {$exCmd}  {$exRest}"
                     : "\n  _e.g._ {$exCmd}";
             }
 
@@ -2785,19 +2880,22 @@ final class ChannelConversationService
     {
         $ex = $this->rotatingAdminCommandExamples();
         $wa = $style === 'whatsapp';
-        $heading = $wa ? "\n\n*Admin*\n" : "\n\nAdmin:\n";
+        $heading = $wa ? "\n\n*Admin*\n\n" : "\n\nAdmin:\n\n";
+        $sep = $wa ? "\n\n" : "\n";
+        $lines = [
+            $this->formatCommandWithExample('/import', 'paste a chat export to create a draft', $ex['import'], $style),
+            $this->formatCommandWithExample('/publish', 'make a draft live for members', $ex['publish'], $style),
+            $this->formatCommandWithExample('/unpublish', 'archive a published doc or Drive file', $ex['unpublish'] ?? '/unpublish ABC123', $style),
+            $this->formatCommandWithExample('/knowledge', 'see drafts and published knowledge', $ex['knowledge'], $style),
+            $this->formatCommandWithExample('/asset', 'add a Drive file link for members', $ex['asset'], $style),
+            $this->formatCommandWithExample('/features', 'list open or decided feature requests', $ex['features'], $style),
+            $this->formatCommandWithExample('/approve', 'approve a share or feature (Request ID)', $ex['approve'], $style),
+            $this->formatCommandWithExample('/decline', 'decline a share or feature (Request ID)', $ex['decline'], $style),
+            $this->formatCommandWithExample('/reply', 'answer an escalated member question', $ex['reply'], $style),
+            $this->formatCommandWithExample('/logins', 'view admin phones and web login passwords', $ex['logins'] ?? '/logins', $style),
+        ];
 
-        return $heading
-            .$this->formatCommandWithExample('/import', 'paste a chat export to create a draft', $ex['import'], $style)."\n"
-            .$this->formatCommandWithExample('/publish', 'make a draft live for members', $ex['publish'], $style)."\n"
-            .$this->formatCommandWithExample('/unpublish', 'archive a published doc or Drive file', $ex['unpublish'] ?? '/unpublish ABC123', $style)."\n"
-            .$this->formatCommandWithExample('/knowledge', 'see drafts and published knowledge', $ex['knowledge'], $style)."\n"
-            .$this->formatCommandWithExample('/asset', 'add a Drive file link for members', $ex['asset'], $style)."\n"
-            .$this->formatCommandWithExample('/features', 'list open or decided feature requests', $ex['features'], $style)."\n"
-            .$this->formatCommandWithExample('/approve', 'approve a share or feature (Request ID)', $ex['approve'], $style)."\n"
-            .$this->formatCommandWithExample('/decline', 'decline a share or feature (Request ID)', $ex['decline'], $style)."\n"
-            .$this->formatCommandWithExample('/reply', 'answer an escalated member question', $ex['reply'], $style)."\n"
-            .$this->formatCommandWithExample('/logins', 'view admin phones and web login passwords', $ex['logins'] ?? '/logins', $style);
+        return $heading.implode($sep, $lines)."\n\n";
     }
 
     /**
@@ -2813,8 +2911,9 @@ final class ChannelConversationService
         bool $isAdmin = false,
         ?string $chatType = null,
         ?string $memberPhoneForWeb = null,
+        ?string $inboundChannelKey = null,
     ): string {
-        $body = $this->memberHelpText($style, $currentChannel, $chatType, $memberPhoneForWeb);
+        $body = $this->memberHelpText($style, $currentChannel, $chatType, $memberPhoneForWeb, $inboundChannelKey);
 
         return $isAdmin ? $body.$this->adminHelpAppendix($style) : $body;
     }
@@ -3139,7 +3238,12 @@ final class ChannelConversationService
             if (mb_strlen($text) > 400) {
                 $text = mb_substr($text, 0, 400).'…';
             }
-            $lines[] = "{$role}: {$text}";
+            $at = trim((string) ($turn['at'] ?? ''));
+            $prefix = $role;
+            if ($at !== '') {
+                $prefix = "{$role} @ {$at}";
+            }
+            $lines[] = "{$prefix}: {$text}";
         }
 
         if ($lines === []) {
@@ -3149,6 +3253,8 @@ final class ChannelConversationService
         return "Recent chat (use only to resolve references like \"it\" / \"that\"; "
             ."answer ONLY the current question from what the community has shared; "
             ."do not reuse the previous answer pattern unless the current question asks for the same thing; "
+            ."relative words in Recent chat (today/tomorrow/etc.) are anchored to each turn's @ timestamp, "
+            ."not the member's calendar today; "
             ."REPLY LANGUAGE: match the Current question only "
             ."(English Current question → English reply; French → French; "
             ."ignore earlier Assistant turns in other languages):\n"

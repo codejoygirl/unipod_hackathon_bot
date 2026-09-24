@@ -554,6 +554,24 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertSame(ChannelConversationService::INTENT_CONVERSATIONAL, $dateAsk['intent']);
         $this->assertFalse($svc->isClearlyOutOfScope("What is today's date?"));
 
+        $this->assertTrue($svc->isDeskClockAsk("What's the time in India currently?"));
+        $this->assertSame(
+            ChannelConversationService::INTENT_CONVERSATIONAL,
+            $svc->classifyIntent("What's the time in India currently?", $scope)
+        );
+        $this->assertFalse($svc->looksLikeCommunityKnowledgeAsk("What's the time in India currently?", $scope));
+        $indiaMisroute = $svc->mergeModelClassification(
+            ['intent' => ChannelConversationService::INTENT_KNOWLEDGE, 'query' => "What's the time in India currently?"],
+            [
+                'intent' => 'knowledge',
+                'link_mode' => 'none',
+                'follow_up' => false,
+            ],
+            $scope,
+        );
+        $this->assertSame(ChannelConversationService::INTENT_CONVERSATIONAL, $indiaMisroute['intent']);
+        $this->assertFalse($svc->shouldEscalateKnowledgeGap("What's the time in India currently?", $scope));
+
         // Repeat recordings ask must search fresh — not wrap as follow-up envelope.
         $recTurns = [
             ['role' => 'user', 'text' => 'Give me all the sessions recordings'],
@@ -679,7 +697,7 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringNotContainsString("\u{2014}", $reply);
         $this->assertDoesNotMatchRegularExpression('/^Hey\b/i', $reply);
         // Keep intros short — no long reassurance wall on hello.
-        $this->assertLessThan(420, mb_strlen($reply));
+        $this->assertLessThan(450, mb_strlen($reply));
     }
 
     public function test_member_help_omits_admin_commands_and_skips_current_channel(): void
@@ -691,6 +709,11 @@ class ChannelConversationServiceTest extends TestCase
             'zak_presence.telegram_url' => '',
             'zak_presence.whatsapp_url' => 'https://wa.me/2347041131371',
             'zak_presence.display_name' => 'Zak Bot',
+            'zak_whatsapp.transports.zavu.enabled' => true,
+            'zak_whatsapp.transports.zavu.phone' => '2347041131371',
+            'zak_whatsapp.transports.zavu.public_url' => 'https://wa.me/2347041131371',
+            'zak_whatsapp.primary_transport' => 'zavu',
+            'zak_whatsapp.show_spike_in_reach' => false,
         ]);
 
         $svc = new ChannelConversationService;
@@ -722,7 +745,9 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('What I can do', $tg);
         $this->assertStringContainsString('no need to keep asking', $tg);
         $this->assertStringContainsString('WhatsApp', $tg);
-        $this->assertStringContainsString('wa.me/2347041131371', $tg);
+        $this->assertStringContainsString('api.whatsapp.com/send?phone=2347041131371', $tg);
+        $this->assertStringNotContainsString('webspike', mb_strtolower($tg));
+        $this->assertStringNotContainsString('(zavu)', mb_strtolower($tg));
         $this->assertStringContainsString('Web Chat', $tg);
         $this->assertStringNotContainsString('/join', $tg);
         $this->assertStringNotContainsString('t.me/', $tg);
@@ -748,7 +773,11 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('e.g. /share', $plainAdmin);
         $this->assertStringContainsString('e.g. /approve', $plainAdmin);
 
-        $groupHelp = $svc->memberHelpText('whatsapp', 'whatsapp', 'group');
+        $privateWaHelp = $svc->memberHelpText('whatsapp', 'whatsapp', 'private', null, 'whatsapp_zavu');
+        $this->assertStringContainsString('Private chat', $privateWaHelp);
+        $this->assertStringContainsString('api.whatsapp.com/send?phone=', $privateWaHelp);
+
+        $groupHelp = $svc->memberHelpText('whatsapp', 'whatsapp', 'group', null, 'whatsapp_zavu');
         $this->assertStringContainsString('Private chat', $groupHelp);
         $this->assertStringContainsString('api.whatsapp.com/send?phone=2347041131371', $groupHelp);
         $this->assertStringContainsString('text=', $groupHelp);

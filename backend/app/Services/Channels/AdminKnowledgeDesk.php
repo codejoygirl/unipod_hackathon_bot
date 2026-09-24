@@ -9,6 +9,7 @@ use App\Models\Community;
 use App\Models\KnowledgeSource;
 use App\Models\User;
 use App\Services\Knowledge\KnowledgeLifecycleService;
+use App\Services\Knowledge\KnowledgeReplaceSuggestionService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -21,6 +22,7 @@ final class AdminKnowledgeDesk
     public function __construct(
         private readonly KnowledgeLifecycleService $lifecycle,
         private readonly ChannelConversationService $conversation,
+        private readonly KnowledgeReplaceSuggestionService $replaceSuggestions,
     ) {}
 
     /**
@@ -181,6 +183,72 @@ final class AdminKnowledgeDesk
     }
 
     /**
+     * After /import when published sources might overlap the new draft.
+     *
+     * @param  list<array{short_id: string, name: string, reason: string}>  $suggestions
+     * @param  'whatsapp'|'plain'|'telegram_html'  $style
+     */
+    public function draftCreatedOverlapReply(
+        KnowledgeSource $source,
+        array $suggestions,
+        string $style = 'whatsapp',
+    ): string {
+        $short = $this->shortId($source);
+        $name = trim((string) $source->name) ?: 'Imported knowledge';
+
+        $lines = [];
+        foreach ($suggestions as $row) {
+            $sid = strtoupper(trim((string) ($row['short_id'] ?? '')));
+            if ($sid === '') {
+                continue;
+            }
+            $title = trim((string) ($row['name'] ?? 'Published source'));
+            $lines[] = $style === 'whatsapp'
+                ? "• `{$sid}` — {$title}"
+                : "• {$sid} — {$title}";
+        }
+
+        $unpub = $this->conversation->highlightCommand('/unpublish', $style === 'whatsapp' ? 'whatsapp' : 'plain');
+
+        if ($style === 'whatsapp') {
+            return "*Imported.*\n\n"
+                ."*{$name}*\n"
+                ."Draft: `{$short}`\n\n"
+                ."*Already live (might overlap):*\n"
+                .implode("\n", $lines)."\n\n"
+                ."*New import:* swipe-reply *publish* or\n"
+                ."```\n"
+                ."/publish latest\n"
+                ."```\n\n"
+                ."*Remove an old one:*\n"
+                ."```\n"
+                ."/unpublish OLD123\n"
+                ."```\n\n"
+                ."*Or go live and drop in one step:*\n"
+                ."```\n"
+                ."/publish latest drop OLD123\n"
+                ."/publish latest drop all\n"
+                ."```\n\n"
+                ."Publish + unpublish can be separate, or use `drop` on publish.";
+        }
+
+        return "Imported.\n\n{$name}\nDraft: {$short}\n\n"
+            ."Already live (might overlap):\n".implode("\n", $lines)."\n\n"
+            ."New import: /publish latest\n"
+            ."Remove old: {$unpub} <ID>\n"
+            ."One step: /publish latest drop ID1,ID2 or drop all";
+    }
+
+    /** @deprecated Use draftCreatedOverlapReply */
+    public function draftCreatedReplaceReply(
+        KnowledgeSource $source,
+        array $suggestions,
+        string $style = 'whatsapp',
+    ): string {
+        return $this->draftCreatedOverlapReply($source, $suggestions, $style);
+    }
+
+    /**
      * @return array{ok: bool, reply: string}
      */
     private function handlePublish(
@@ -190,7 +258,8 @@ final class AdminKnowledgeDesk
         string $style,
     ): array {
         $pub = $this->conversation->highlightCommand('/publish', $style === 'whatsapp' ? 'whatsapp' : 'plain');
-        $arg = trim($arg);
+        $publishParsed = KnowledgeReplaceSuggestionService::parsePublishArgs($arg);
+        $arg = trim($publishParsed['target']);
 
         if ($arg === '' || strcasecmp($arg, 'help') === 0) {
             return [
@@ -265,6 +334,17 @@ final class AdminKnowledgeDesk
             ];
         }
 
+        $archived = [];
+        if ($publishParsed['use_suggested'] || $publishParsed['archive_short_ids'] !== null) {
+            $archived = $this->replaceSuggestions->archiveAfterPublish(
+                $user,
+                $community,
+                $published,
+                $publishParsed['archive_short_ids'],
+                $publishParsed['use_suggested'],
+            );
+        }
+
         $parts = (int) (($published->metadata['ingest_part_count'] ?? 0) ?: 0);
         $name = trim((string) $published->name);
         if ($name === '') {
@@ -273,20 +353,29 @@ final class AdminKnowledgeDesk
 
         if ($style === 'whatsapp') {
             $extra = $parts > 1 ? "\n(Large import — stored in {$parts} parts.)" : '';
+            $archiveNote = '';
+            if ($archived !== []) {
+                $archiveNote = "\n\n*Archived:* ".implode(', ', array_map(
+                    static fn (string $id): string => '`'.$id.'`',
+                    $archived,
+                ));
+            }
 
             return [
                 'ok' => true,
                 'reply' => "*Published.*\n\n"
                     ."*{$name}* is live. Members can ask about it now."
-                    .$extra,
+                    .$extra
+                    .$archiveNote,
             ];
         }
 
         $extra = $parts > 1 ? " Large import stored in {$parts} parts." : '';
+        $archiveNote = $archived !== [] ? ' Archived: '.implode(', ', $archived).'.' : '';
 
         return [
             'ok' => true,
-            'reply' => "Published. {$name} is live — members can ask about it now.".$extra,
+            'reply' => "Published. {$name} is live — members can ask about it now.".$extra.$archiveNote,
         ];
     }
 
@@ -478,9 +567,11 @@ final class AdminKnowledgeDesk
         if ($style === 'whatsapp') {
             $body = "*Publish a knowledge draft*\n\n"
                 ."```\n"
-                ."/publish <ID>\n"
                 ."/publish latest\n"
-                ."```\n\n";
+                ."/publish <ID>\n"
+                ."```\n\n"
+                ."Remove live source: `/unpublish <ID>`\n"
+                ."Or on publish: `/publish latest drop ID1,ID2` · `/publish latest drop all`\n\n";
             if ($lines === []) {
                 return $body.'No drafts waiting. Paste an export with /import first.';
             }
@@ -488,7 +579,11 @@ final class AdminKnowledgeDesk
             return $body."*Waiting:*\n".implode("\n", $lines);
         }
 
-        $body = "Publish a knowledge draft:\n  {$pub} <ID>\n  {$pub} latest\n\n";
+        $body = "Publish a knowledge draft:\n"
+            ."  {$pub} latest\n"
+            ."  {$pub} <ID>\n\n"
+            ."Remove live source: /unpublish <ID>\n"
+            ."Or: {$pub} latest drop ID1,ID2 · {$pub} latest drop all\n\n";
         if ($lines === []) {
             return $body.'No drafts waiting. Paste an export with /import first.';
         }
