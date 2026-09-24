@@ -73,6 +73,7 @@ def test_windows_keep_speaker_and_time():
     assert first["media_type"] == "chat_window"
     assert "speakers" in first
     assert any("Diane" in (s or "") for s in first["speakers"])
+    assert first["locator"].get("message_at", "").startswith("2026-09-04")
 
 
 def test_windows_split_on_inactivity_gap():

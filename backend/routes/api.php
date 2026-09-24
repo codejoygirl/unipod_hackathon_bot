@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\AssistantController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\CommunityController;
 use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\PublicReachController;
 use App\Http\Controllers\Api\V1\Internal\TelegramSpikeController;
 use App\Http\Controllers\Api\V1\Internal\WhatsAppWebSpikeController;
 use App\Http\Controllers\Api\V1\Internal\WhatsAppZavuController;
@@ -28,6 +29,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('/health/live', [HealthController::class, 'live'])->name('health.live');
+    Route::get('/public/reach', PublicReachController::class)->name('public.reach');
 
     Route::post('/auth/register', [AuthController::class, 'register'])->name('auth.register');
     Route::post('/auth/login', [AuthController::class, 'login'])->name('auth.login');
@@ -91,6 +93,12 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     | WhatsApp via Zavu (official BSP). Gated by WHATSAPP_ZAVU.
     | Webhook verifies X-Zavu-Signature. Spikes remain independently env-gated.
     */
+    Route::get('/webhooks/whatsapp-zavu', static fn () => response()->json([
+        'status' => 'ok',
+        'message' => 'Zavu webhook is active. Events must be POST with X-Zavu-Signature.',
+    ]))->middleware(EnsureWhatsAppZavuEnabled::class)
+        ->name('webhooks.whatsapp_zavu.probe');
+
     Route::post('/webhooks/whatsapp-zavu', WhatsAppZavuWebhookController::class)
         ->middleware(EnsureWhatsAppZavuEnabled::class)
         ->name('webhooks.whatsapp_zavu');

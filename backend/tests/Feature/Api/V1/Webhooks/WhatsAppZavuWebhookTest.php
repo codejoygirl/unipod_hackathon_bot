@@ -68,6 +68,13 @@ class WhatsAppZavuWebhookTest extends TestCase
     public function test_webhook_ask_sends_cited_reply_via_zavu(): void
     {
         Http::fake([
+            '*/conversation/classify' => Http::response([
+                'intent' => 'knowledge',
+                'link_mode' => 'none',
+                'follow_up' => false,
+                'link_focus' => 'na',
+                'needs_temporal_resolution' => false,
+            ], 200),
             '*/retrieval/grounded-answer' => Http::response([
                 'query' => 'When is clinic open?',
                 'detected_language' => 'en',
@@ -191,6 +198,95 @@ class WhatsAppZavuWebhookTest extends TestCase
         $this->assertIsString($join);
         $this->assertStringStartsWith('JOIN-', $join);
         $this->assertStringContainsString('wa.me/15559876543', (string) $response->json('data.wa_me_link'));
+    }
+
+    public function test_webhook_voice_note_resolves_media_and_transcribes(): void
+    {
+        Http::fake([
+            'https://api.zavu.dev/v1/messages/msg_voice_in' => Http::response([
+                'messageId' => 'msg_voice_in',
+                'content' => [
+                    'mediaUrl' => 'https://cdn.zavu.dev/inbound.ogg',
+                    'mimeType' => 'audio/ogg',
+                ],
+            ], 200),
+            'https://cdn.zavu.dev/inbound.ogg' => Http::response('voice-bytes', 200),
+            '*/conversation/transcribe' => Http::response([
+                'text' => 'When is the next session?',
+                'language' => 'en',
+            ], 200),
+            '*/conversation/classify' => Http::response([
+                'intent' => 'knowledge',
+                'link_mode' => 'none',
+                'follow_up' => false,
+                'link_focus' => 'na',
+                'needs_temporal_resolution' => false,
+            ], 200),
+            '*/retrieval/grounded-answer' => Http::response([
+                'query' => 'When is the next session?',
+                'detected_language' => 'en',
+                'execution_time_ms' => 5.0,
+                'total_chunks_retrieved' => 0,
+                'validated_payload' => [
+                    'state' => 'INSUFFICIENT_EVIDENCE',
+                    'answer' => '',
+                    'confidence_score' => 0.0,
+                    'needs_escalation' => true,
+                    'escalation_reason' => 'gap',
+                    'citations' => [],
+                    'conflicts' => [],
+                ],
+            ], 200),
+            'https://api.zavu.dev/v1/messages' => Http::response(['id' => 'msg_out_voice'], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create(['email' => 'demo@zak.test']);
+        Membership::factory()->forCommunity($community, MembershipRole::Member)->create([
+            'user_id' => $user->id,
+        ]);
+
+        config([
+            'whatsapp_zavu.enabled' => true,
+            'whatsapp_zavu.webhook_secret' => 'whsec_test',
+            'whatsapp_zavu.api_key' => 'zv_test',
+            'whatsapp_zavu.default_user_email' => 'demo@zak.test',
+            'whatsapp_zavu.default_community_id' => $community->id,
+        ]);
+
+        $body = json_encode([
+            'id' => 'evt_voice_1',
+            'type' => 'message.inbound',
+            'data' => [
+                'messageId' => 'msg_voice_in',
+                'from' => '+15551234567',
+                'channel' => 'whatsapp',
+                'messageType' => 'audio',
+                'text' => '',
+                'content' => [
+                    'mediaId' => 'wa_audio_1',
+                    'mimeType' => 'audio/ogg',
+                ],
+            ],
+        ], JSON_THROW_ON_ERROR);
+
+        $sig = ZavuWebhookSignature::signV2($body, 'whsec_test');
+
+        $this->call(
+            'POST',
+            '/api/v1/webhooks/whatsapp-zavu',
+            [],
+            [],
+            [],
+            [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_X_ZAVU_SIGNATURE' => $sig,
+            ],
+            $body,
+        )->assertOk();
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/conversation/transcribe'));
     }
 
     public function test_spikes_still_disabled_independently(): void

@@ -40,6 +40,9 @@ backend/bootstrap/cache/*.php
 !backend/storage/framework/views/.gitignore
 !backend/storage/logs/.gitignore
 !backend/bootstrap/cache/.gitignore
+# WhatsApp chat exports for `php artisan zak:import-knowledge-chats` (see ImportKnowledgeChatsCommand)
+!backend/storage/app/knowledge-import/
+!backend/storage/app/knowledge-import/**
 
 # Local data and tooling
 data/

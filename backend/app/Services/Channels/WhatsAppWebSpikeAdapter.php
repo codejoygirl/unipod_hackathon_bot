@@ -33,6 +33,8 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         private readonly VoiceNoteNormalizer $voiceNormalizer,
         private readonly ImageNoteNormalizer $imageNormalizer,
         private readonly AdminKnowledgeDesk $knowledgeDesk,
+        private readonly WhatsAppKnowledgeImportService $whatsAppImport,
+        private readonly WhatsAppOutboundFormatter $whatsAppOutbound,
     ) {}
 
     public function channelName(): string
@@ -48,7 +50,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
                 return $reply;
             }
 
-            return $this->formatWhatsAppCommands($reply);
+            return $this->whatsAppOutbound->format($reply);
         } catch (\Throwable $e) {
             Log::error('whatsapp_web_spike.inbound_failed', [
                 'from' => $message->externalUserId,
@@ -63,6 +65,15 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
 
     private function dispatchInbound(InboundMessage $message): ?string
     {
+        if ($this->whatsAppImport->isAdminImportWithAttachment(
+            $this->channelName(),
+            $message,
+            $this->commandAccess,
+            $this->listenGate,
+        )) {
+            return $this->handleAdminImport($message);
+        }
+
         $voice = $this->voiceNormalizer->normalize($message);
         if (($voice['error'] ?? null) !== null) {
             Log::info('whatsapp_web_spike.voice_failed', [
@@ -264,8 +275,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             return $this->handleMemberAssets($message);
         }
 
-        if ($this->listenGate->startsWithSlashCommand($message->text, 'import')
-            || $this->listenGate->startsWithSlashCommand($message->text, 'export')) {
+        if ($this->listenGate->startsWithImportOrExport($message->text)) {
             return $this->handleAdminImport($message);
         }
 
@@ -659,6 +669,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             $showAdmin,
             $chatType,
             $this->memberPhoneForWeb($message),
+            $this->channelName(),
         );
     }
 
@@ -1438,35 +1449,13 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             return 'You are not a member of that community in '.$this->conversation->botDisplayName().'.';
         }
 
-        $body = trim($message->text);
-        foreach (['/IMPORT', 'IMPORT', '/EXPORT', 'EXPORT'] as $prefix) {
-            if (str_starts_with(strtoupper($body), $prefix)) {
-                $body = trim(substr($body, strlen($prefix)));
-                break;
-            }
-        }
-
-        if ($body === '') {
-            return 'Usage: /import <pasted chat export text>';
-        }
-
-        $source = $this->lifecycle->import($user, [
-            'tenant_id' => $community->tenant_id,
-            'community_id' => $community->id,
-            'name' => $this->knowledgeDesk->suggestImportTitle($body),
-            'uri' => 'whatsapp-web-spike://import/'.Str::ulid(),
-            'source_type' => 'whatsapp',
-            'content' => $body,
-            'metadata' => [
-                'channel' => 'whatsapp_web_spike',
-                'from' => $message->externalUserId,
-                'origin' => 'admin_import',
-            ],
-        ]);
-
-        Log::info('whatsapp_web_spike.import_draft', ['knowledge_id' => $source->id]);
-
-        return $this->knowledgeDesk->draftCreatedReply($source, 'whatsapp');
+        return $this->whatsAppImport->adminImportFromInbound(
+            $this->channelName(),
+            $message,
+            $user,
+            $community,
+            'whatsapp-web-spike://import/',
+        );
     }
 
     /**

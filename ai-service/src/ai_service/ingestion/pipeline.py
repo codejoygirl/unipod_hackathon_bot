@@ -199,8 +199,11 @@ class IngestionPipeline:
                 "community_id": str(request.community_id),
                 "authority_tier": request.authority_tier.value,
                 "locator": locator,
-                "media_type": media_type
+                "media_type": media_type,
             }
+            for key in ("content_occurred_at", "content_occurred_end"):
+                if locator.get(key):
+                    chunk_meta[key] = locator[key]
 
             k_chunk = KnowledgeChunk(
                 id=uuid.uuid4(),

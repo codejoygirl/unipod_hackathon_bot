@@ -1295,6 +1295,8 @@ class AnswerSynthesizer:
                     locator=MediaLocator(
                         media_url=cand.media_url,
                         timestamp_seconds=cand.timestamp_seconds,
+                        message_at=cand.message_at,
+                        message_end=cand.message_end,
                         bounding_box=cand.bounding_box,
                     ),
                 )

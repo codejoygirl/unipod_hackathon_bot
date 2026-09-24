@@ -13,6 +13,7 @@ Industry default for chat → RAG (unthreaded WhatsApp-style):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 import re
 from typing import Any
@@ -402,6 +403,8 @@ class ChatExportNormalizer:
         locator_base = {"media_url": uri} if uri else {}
         for w in windows:
             w["media_type"] = "chat_window"
+            start_iso = self.normalize_export_timestamp(w.get("window_start"))
+            end_iso = self.normalize_export_timestamp(w.get("window_end"))
             w["locator"] = {
                 **locator_base,
                 "export_type": detected.value,
@@ -409,6 +412,12 @@ class ChatExportNormalizer:
                 "window_end": w.get("window_end"),
                 "speakers": w.get("speakers"),
             }
+            if start_iso:
+                w["locator"]["content_occurred_at"] = start_iso
+                w["locator"]["message_at"] = start_iso
+            if end_iso:
+                w["locator"]["content_occurred_end"] = end_iso
+                w["locator"]["message_end"] = end_iso
             w["export_type"] = detected.value
         return detected, windows
 
@@ -602,6 +611,32 @@ class ChatExportNormalizer:
         if speaker and body.lower().startswith(speaker.lower()) and _SYSTEM_HINTS.search(body):
             return True
         return False
+
+    _EXPORT_TS_FORMATS: tuple[str, ...] = (
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y %I:%M:%S %p",
+        "%d/%m/%Y %I:%M %p",
+        "%d.%m.%Y %H:%M:%S",
+        "%d.%m.%Y %H:%M",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+    )
+
+    @classmethod
+    def normalize_export_timestamp(cls, raw: str | None) -> str | None:
+        """Best-effort ISO8601 for export-native timestamps (WhatsApp/Telegram text)."""
+        if raw is None:
+            return None
+        text = " ".join(str(raw).split())
+        if not text:
+            return None
+        for fmt in cls._EXPORT_TS_FORMATS:
+            try:
+                return datetime.strptime(text, fmt).isoformat(timespec="seconds")
+            except ValueError:
+                continue
+        return None
 
     @staticmethod
     def _scrub_plain(text: str) -> str:

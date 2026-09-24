@@ -101,6 +101,8 @@ class CandidateChunk(BaseModel):
     media_type: str | None = Field(default=None, description="'text', 'image', 'audio', or 'video'")
     media_url: str | None = None
     timestamp_seconds: float | None = None
+    message_at: str | None = None
+    message_end: str | None = None
     bounding_box: list[float] | None = None
 
     # Intermediate scores for telemetry and auditability

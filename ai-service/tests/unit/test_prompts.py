@@ -67,6 +67,26 @@ def test_build_evidence_context_xml_formatting():
     assert "&lt;urgent&gt;!" in xml
 
 
+def test_build_evidence_context_xml_includes_message_at():
+    valid_uuid = uuid.uuid4()
+    chunks = [
+        EvidenceChunk(
+            evidence_id="E1",
+            chunk_id=valid_uuid,
+            source_id=valid_uuid,
+            source_name="Chat.txt",
+            source_uri="s3://bucket/chat.txt",
+            source_type="whatsapp",
+            content="Session starts at 9am.",
+            authority_tier=AuthorityTier.COMMUNITY_DISCUSSION,
+            retrieval_score=0.8,
+            locator=MediaLocator(message_at="2026-09-04T12:22:17"),
+        ),
+    ]
+    xml = build_evidence_context_xml(chunks)
+    assert 'message_at="2026-09-04T12:22:17"' in xml
+
+
 def test_system_prompt_contains_critical_invariants():
     prompt = build_grounded_system_prompt()
     assert INSUFFICIENT_EVIDENCE_SENTINEL in prompt
