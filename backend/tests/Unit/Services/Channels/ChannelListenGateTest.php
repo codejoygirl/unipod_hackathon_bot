@@ -150,4 +150,12 @@ class ChannelListenGateTest extends TestCase
         $this->assertTrue($gate->startsWithRecognizedCommand('/share tip'));
         $this->assertFalse($gate->startsWithRecognizedCommand('Share me links'));
     }
+
+    public function test_legacy_import_export_prefix_without_slash(): void
+    {
+        $gate = new ChannelListenGate;
+        $this->assertTrue($gate->startsWithImportOrExport('EXPORT UniPods chat paste'));
+        $this->assertTrue($gate->startsWithImportOrExport('/import pasted text'));
+        $this->assertFalse($gate->startsWithImportOrExport('please export my data'));
+    }
 }

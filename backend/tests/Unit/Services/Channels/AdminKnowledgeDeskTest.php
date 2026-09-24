@@ -126,6 +126,38 @@ class AdminKnowledgeDeskTest extends TestCase
         $this->assertStringContainsString('drive.google.com/file/d/abc', $assets['reply']);
     }
 
+    public function test_draft_created_replace_reply_lists_suggestions_and_publish_options(): void
+    {
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+        $source = KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'Cohort 7 export',
+            'uri' => 'whatsapp-web-spike://import/replace',
+            'source_type' => 'whatsapp',
+            'lifecycle_status' => KnowledgeLifecycleStatus::Draft,
+            'language' => 'en',
+            'content' => 'export body',
+            'content_sha256' => hash('sha256', 'export body'),
+            'metadata' => ['import_mode' => 'replace_candidate'],
+        ]);
+
+        $desk = app(AdminKnowledgeDesk::class);
+        $reply = $desk->draftCreatedOverlapReply($source, [
+            ['short_id' => 'OLD123', 'name' => 'Cohort 6 export', 'reason' => 'Older cohort dump'],
+        ], 'whatsapp');
+
+        $this->assertStringContainsString('Imported', $reply);
+        $this->assertStringContainsString('OLD123', $reply);
+        $this->assertStringContainsString('/unpublish', $reply);
+        $this->assertStringContainsString('/publish latest', $reply);
+        $this->assertStringContainsString('drop all', $reply);
+        $this->assertStringContainsString($desk->shortId($source), $reply);
+    }
+
     public function test_publish_latest_syncs_to_ai_index(): void
     {
         Http::fake([
@@ -170,6 +202,71 @@ class AdminKnowledgeDeskTest extends TestCase
             'ai_source_id' => '11111111-1111-1111-1111-111111111111',
         ]);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ingestion/sync'));
+    }
+
+    public function test_publish_with_replace_suggested_archives_listed_sources(): void
+    {
+        Http::fake([
+            '*/ingestion/sync' => Http::response([
+                'source_id' => '44444444-4444-4444-4444-444444444444',
+                'version_id' => '55555555-5555-5555-5555-555555555555',
+                'status' => 'completed',
+            ], 200),
+            '*/ingestion/deactivate/*' => Http::response(['status' => 'archived'], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+
+        $old = KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'Cohort 6 export',
+            'uri' => 'whatsapp-web-spike://import/old',
+            'source_type' => 'whatsapp',
+            'lifecycle_status' => KnowledgeLifecycleStatus::Published,
+            'language' => 'en',
+            'content' => 'old body',
+            'content_sha256' => hash('sha256', 'old body'),
+            'ai_source_id' => '66666666-6666-6666-6666-666666666666',
+            'published_at' => now()->subDay(),
+            'metadata' => [],
+        ]);
+
+        $oldShort = app(AdminKnowledgeDesk::class)->shortId($old);
+
+        KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'Cohort 7 export',
+            'uri' => 'whatsapp-web-spike://import/new',
+            'source_type' => 'whatsapp',
+            'lifecycle_status' => KnowledgeLifecycleStatus::Draft,
+            'language' => 'en',
+            'content' => 'new body',
+            'content_sha256' => hash('sha256', 'new body'),
+            'metadata' => [
+                'replace_suggestions' => [
+                    ['short_id' => $oldShort, 'name' => 'Cohort 6 export', 'reason' => 'Superseded'],
+                ],
+            ],
+        ]);
+
+        $desk = app(AdminKnowledgeDesk::class);
+        $result = $desk->tryHandle('/publish latest drop all', $user, $community, 'whatsapp');
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('Published', $result['reply']);
+        $this->assertStringContainsString('Archived', $result['reply']);
+        $this->assertStringContainsString($oldShort, $result['reply']);
+
+        $this->assertDatabaseHas('knowledge_documents', [
+            'id' => $old->id,
+            'lifecycle_status' => KnowledgeLifecycleStatus::Archived->value,
+        ]);
     }
 
     public function test_features_lists_open_requests_for_community(): void

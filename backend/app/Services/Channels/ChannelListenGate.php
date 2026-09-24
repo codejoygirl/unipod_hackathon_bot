@@ -249,6 +249,26 @@ final class ChannelListenGate
     }
 
     /**
+     * /import, /export, or legacy IMPORT/EXPORT prefix (admin chat paste).
+     */
+    public function startsWithImportOrExport(string $text): bool
+    {
+        if ($this->startsWithSlashCommand($text, 'import')
+            || $this->startsWithSlashCommand($text, 'export')) {
+            return true;
+        }
+
+        $trimmed = ltrim($text);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        $upper = strtoupper($trimmed);
+
+        return str_starts_with($upper, 'IMPORT') || str_starts_with($upper, 'EXPORT');
+    }
+
+    /**
      * Text after a leading /command (empty when the message is only /command).
      */
     public function slashCommandBody(string $text, string $command): string

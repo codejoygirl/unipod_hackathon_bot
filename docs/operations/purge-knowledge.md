@@ -85,7 +85,7 @@ curl -sS http://127.0.0.1:8001/health
 
 Admin DM with Zak:
 
-1. Chat export: `/import` → paste → `/publish latest`
+1. Chat export: `/import` → paste **or** attach file (PDF, image, video, audio, .txt) with optional caption → `/publish latest`
 2. Drive files: `/asset handbook Title https://drive.google.com/file/d/…`
 3. Staged chats: `php artisan zak:import-knowledge-chats` (reads `storage/app/knowledge-import/`, mints token, publishes)
 4. Or API: `POST /api/v1/knowledge-sources/import` then `submit-review` + `publish`

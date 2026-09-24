@@ -82,6 +82,13 @@ def test_classify_prompt_treats_today_date_as_conversational():
     assert "What is today's date?" in prompt
     assert "conversational|none|no|na" in prompt
     assert "NOT today's date" in prompt or "NOT today" in prompt
+    assert "What's the time in India currently?" in prompt
+
+
+def test_social_prompt_covers_named_timezone_clock():
+    prompt = _system_prompt("social", "Demo Community", "schedules")
+    assert "another city/country/timezone" in prompt.lower() or "India" in prompt
+    assert "CURRENT TIME" in prompt
 
 def test_system_prompt_keeps_scope_topics_in_bounds():
     prompt = _system_prompt(

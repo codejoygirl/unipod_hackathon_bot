@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -101,6 +102,10 @@ class ConversationClassifyResponse(BaseModel):
         default="na",
         description="one | many | na — model decides if the ask wants a single match or a list",
     )
+    needs_temporal_resolution: bool = Field(
+        default=False,
+        description="True when grounded search should anchor calendar-relative wording.",
+    )
 
 
 _ALLOWED_INTENTS = frozenset(
@@ -120,11 +125,13 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
     )
     return (
         "You route messages for Zak, a private community chat assistant.\n"
-        "Return EXACTLY one line: INTENT|LINK_MODE|FOLLOW_UP|LINK_FOCUS\n"
+        "Return EXACTLY one line: INTENT|LINK_MODE|FOLLOW_UP|LINK_FOCUS|TEMPORAL\n"
         "INTENT is one of: conversational, knowledge, out_of_scope, clarify, personal_help\n"
         "LINK_MODE is one of: none, recordings, meetings, assets\n"
         "FOLLOW_UP is yes or no\n"
         "LINK_FOCUS is one of: one, many, na\n"
+        "TEMPORAL is yes or no — yes when the ask depends on calendar words (today, tonight, "
+        "this week, tomorrow, yesterday, now) or relative scheduling vs chat history.\n"
         "No other words.\n\n"
         f"Community display name: {label}\n"
         f"{scope_line}\n\n"
@@ -137,7 +144,8 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
         "questions about what Zak can do or whether Zak accepts voice notes / voice messages / photos / images, "
         "tone feedback, frustration/insults aimed at Zak, 'do you speak X'), "
         "AND lightweight desk-assistant utilities any human community helper would answer briefly "
-        "(today's date, day of week, current time — not programme schedules). Any language. "
+        "(today's date, day of week, current time here or in a named place like India, Lagos, London — "
+        "not programme session schedules). Any language. "
         "Never treat insults or 'are you dumb/mad' as knowledge or follow-ups.\n"
         "- knowledge: anything about this community's people, schedules, sessions, deadlines, "
         "recordings, links, announcements, programme/hackathon rules, bots in the group, "
@@ -150,8 +158,9 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
         "These are helpful coaching asks, not retrieved community notes. "
         "Do NOT use personal_help for on-demand jokes, riddles, poems, romance, math, or world trivia.\n"
         "- out_of_scope: ONLY math, romance aimed at the bot, theology with no community angle, "
-        "world trivia (World Cup, capitals), weather, jokes/poems/riddles on demand. "
-        "NOT today's date, NOT day-of-week, NOT 'what time is it' — those are conversational. "
+        "world trivia (World Cup, capitals), weather, jokes/poems/riddles on demand, "
+        "long general-knowledge essays unrelated to the community. "
+        "NOT today's date, NOT day-of-week, NOT current time (any city/country) — those are conversational. "
         "If unsure whether it is community-related, choose knowledge (never out_of_scope) "
         "ONLY when the message clearly asks something a human would ask a community assistant. "
         "If the message is opaque, accidental, or has no clear ask, choose clarify — never invent a topic.\n"
@@ -203,6 +212,7 @@ def _classify_system_prompt(community_name: str | None, community_scope: str | N
         "User: Give me the only hackathon guidelines document → knowledge|assets|no|one\n"
         "User: UniPods Video Demo Guide link → knowledge|assets|no|one\n"
         "User: What is today's date? → conversational|none|no|na\n"
+        "User: What's the time in India currently? → conversational|none|no|na\n"
         "User: Quelle est la date aujourd'hui ? → conversational|none|no|na\n"
         "User: Ekaro oo → conversational|none|no|na\n"
         "User: Gracias → conversational|none|no\n"
@@ -320,6 +330,22 @@ def _parse_link_focus(raw: str) -> str:
         if focus in text.split():
             return focus
     return "na"
+
+
+def _parse_temporal_resolution(raw: str) -> bool:
+    text = (raw or "").strip().lower()
+    text = text.replace("\u2014", "-").replace("\u2013", "-")
+    if "|" in text:
+        parts = [p.strip() for p in text.split("|")]
+        if len(parts) >= 5:
+            flag = re.sub(r"[^a-z0-9_]+", "", parts[4])
+            if flag in {"yes", "true", "1", "y", "temporal"}:
+                return True
+            if flag in {"no", "false", "0", "n"}:
+                return False
+    if re.search(r"\btemporal\b.{0,12}\b(yes|true)\b", text) is not None:
+        return True
+    return False
 
 
 def _parse_follow_up(raw: str) -> bool:
@@ -485,9 +511,10 @@ def _system_prompt(mode: str, community_name: str | None, community_scope: str |
         "say yes briefly in the SAME language as their question (English here), and invite them to continue. "
         "Do not switch into the language they named unless they wrote the question in that language. "
         "If they say you seem unfriendly, apologize briefly and reset warmly. "
-        "If they ask today's date, the day of the week, or the current time, answer briefly using "
-        "the CURRENT TIME block in the user message when present; one or two sentences, then offer "
-        "to help with community topics if useful. "
+        "If they ask today's date, the day of the week, or the current time (including another "
+        "city/country/timezone), answer briefly using the CURRENT TIME block when present; "
+        "for other places, derive from that clock and standard offsets — one or two sentences, "
+        "then offer to help with community topics if useful. Do not refuse as out of scope. "
         "If the message is just 'ok' / 'thanks' / 'cool', keep it to one short friendly line. "
         "Do NOT say 'thanks for joining' or welcome them as if they just arrived, unless they said hello/hi. "
         "If the member pastes programme info or asks about the hackathon / UniPods / schedules, "
@@ -653,6 +680,7 @@ async def conversation_classify(
         link_mode = _parse_link_mode(response.content)
         follow_up = _parse_follow_up(response.content)
         link_focus = _parse_link_focus(response.content)
+        needs_temporal = _parse_temporal_resolution(response.content)
         if intent is None:
             logger.warning(
                 "conversation classify returned unusable label (chars=%s)",
@@ -664,6 +692,7 @@ async def conversation_classify(
                 link_mode="none",
                 follow_up=False,
                 link_focus="na",
+                needs_temporal_resolution=False,
             )
         if follow_up:
             # Follow-ups always continue community knowledge; never clarify/OOS.
@@ -679,11 +708,14 @@ async def conversation_classify(
         elif link_focus == "na":
             # Model omitted focus on a URL ask — default to a list, not a forced single.
             link_focus = "many"
+        if intent != "knowledge":
+            needs_temporal = False
         return ConversationClassifyResponse(
             intent=intent,
             link_mode=link_mode,
             follow_up=follow_up,
             link_focus=link_focus,
+            needs_temporal_resolution=needs_temporal,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("conversation classify failed: %s", exc, exc_info=True)
@@ -692,7 +724,198 @@ async def conversation_classify(
             link_mode="none",
             follow_up=False,
             link_focus="na",
+            needs_temporal_resolution=False,
         )
+
+
+class ConversationTemporalPlanRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    message: str = Field(..., min_length=1, max_length=2000)
+    reference_time_iso: str | None = Field(default=None, max_length=64)
+    timezone_name: str | None = Field(default=None, max_length=64)
+    prior_question: str | None = Field(default=None, max_length=1000)
+
+
+class ConversationTemporalPlanResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    needs_resolution: bool = True
+    temporal_context: str = Field(
+        default="",
+        description="Short trusted note for grounded retrieval (not shown to members).",
+    )
+
+
+@router.post(
+    "/temporal-plan",
+    response_model=ConversationTemporalPlanResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_hmac)],
+    summary="Optional preflight: anchor calendar-relative member asks",
+)
+async def conversation_temporal_plan(
+    request: ConversationTemporalPlanRequest,
+) -> ConversationTemporalPlanResponse:
+    from ai_service.generation.prompts import format_reference_clock
+
+    clock = format_reference_clock(
+        timezone_name=request.timezone_name,
+        reference_time_iso=request.reference_time_iso,
+    )
+    system = (
+        "You help Zak ground calendar-relative community questions.\n"
+        "Return EXACTLY one JSON object (no markdown): "
+        '{"needs_resolution":true|false,"temporal_context":"..."}\n'
+        "temporal_context is 1-3 English sentences for the retrieval step only: "
+        "anchor the member's relative wording (today, tonight, in N minutes/hours/days, "
+        "this week — any language) to CURRENT TIME including timezone; note that chat "
+        "evidence message_at values are when facts were said, not necessarily 'now'.\n"
+        f"{_UNTRUSTED_SAFETY}\n"
+    )
+    user = (
+        f"{clock}\n\n"
+        f"{fence_untrusted('member_message', request.message, max_chars=2000)}\n"
+    )
+    if request.prior_question:
+        user += "\n"+fence_untrusted(
+            "prior_question", request.prior_question or "", max_chars=1000
+        )
+    try:
+        response = await _chat_model.generate(
+            ChatRequest(
+                messages=[
+                    ChatMessage(role="system", content=system),
+                    ChatMessage(role="user", content=user),
+                ],
+                temperature=0.0,
+                max_tokens=180,
+            )
+        )
+        raw = (response.content or "").strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        data = json.loads(raw)
+        needs = bool(data.get("needs_resolution", True))
+        ctx = str(data.get("temporal_context") or "").strip()
+        if ctx == "":
+            needs = False
+        return ConversationTemporalPlanResponse(
+            needs_resolution=needs,
+            temporal_context=ctx[:1200],
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("conversation temporal-plan failed: %s", exc, exc_info=True)
+        return ConversationTemporalPlanResponse(
+            needs_resolution=False,
+            temporal_context="",
+        )
+
+
+class PublishedKnowledgeHint(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    short_id: str = Field(..., min_length=4, max_length=12)
+    name: str = Field(..., min_length=1, max_length=200)
+    excerpt: str = Field(default="", max_length=1500)
+    published_at: str | None = Field(default=None, max_length=64)
+
+
+class KnowledgeReplaceSuggestRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    community_name: str | None = Field(default=None, max_length=120)
+    new_import_name: str = Field(..., min_length=1, max_length=200)
+    new_import_excerpt: str = Field(default="", max_length=2000)
+    published_sources: list[PublishedKnowledgeHint] = Field(default_factory=list, max_length=25)
+
+
+class KnowledgeReplaceSuggestionItem(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    short_id: str
+    reason: str = Field(default="", max_length=400)
+
+
+class KnowledgeReplaceSuggestResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    suggestions: list[KnowledgeReplaceSuggestionItem] = Field(default_factory=list)
+
+
+@router.post(
+    "/knowledge-replace-suggest",
+    response_model=KnowledgeReplaceSuggestResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_hmac)],
+    summary="Suggest published knowledge sources an import may supersede",
+)
+async def conversation_knowledge_replace_suggest(
+    request: KnowledgeReplaceSuggestRequest,
+) -> KnowledgeReplaceSuggestResponse:
+    if not request.published_sources:
+        return KnowledgeReplaceSuggestResponse(suggestions=[])
+
+    allowed = {h.short_id.upper(): h for h in request.published_sources}
+    catalog_lines = []
+    for hint in request.published_sources[:25]:
+        catalog_lines.append(
+            f"- {hint.short_id.upper()}: {hint.name} | excerpt: "
+            f"{sanitize_untrusted_text(hint.excerpt or '', max_chars=400)}"
+        )
+    catalog = "\n".join(catalog_lines)
+
+    system = (
+        "You help a community admin replace outdated knowledge with a new import.\n"
+        "Return EXACTLY one JSON object (no markdown):\n"
+        '{"suggestions":[{"short_id":"ABC123","reason":"..."}]}\n'
+        "Pick zero or more short_id values ONLY from the published catalog below.\n"
+        "Choose sources the new import likely supersedes (same chat export, same programme, "
+        "older cohort dump, duplicate topic). Skip Drive assets unless clearly the same doc.\n"
+        "reason: one short English sentence for the admin (not shown to members).\n"
+        f"{_UNTRUSTED_SAFETY}\n"
+    )
+    user = (
+        f"Community: {request.community_name or 'community'}\n"
+        f"New import title: {sanitize_untrusted_text(request.new_import_name, max_chars=200)}\n"
+        f"New import excerpt:\n"
+        f"{fence_untrusted('new_import', request.new_import_excerpt or '', max_chars=2000)}\n\n"
+        f"Published catalog (short_id is authoritative):\n{catalog}"
+    )
+    try:
+        response = await _chat_model.generate(
+            ChatRequest(
+                messages=[
+                    ChatMessage(role="system", content=system),
+                    ChatMessage(role="user", content=user),
+                ],
+                temperature=0.0,
+                max_tokens=400,
+            )
+        )
+        raw = (response.content or "").strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        data = json.loads(raw)
+        items = data.get("suggestions") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            return KnowledgeReplaceSuggestResponse(suggestions=[])
+
+        out: list[KnowledgeReplaceSuggestionItem] = []
+        for row in items[:8]:
+            if not isinstance(row, dict):
+                continue
+            sid = str(row.get("short_id") or "").strip().upper()
+            if sid not in allowed:
+                continue
+            reason = str(row.get("reason") or "").strip()[:400]
+            out.append(KnowledgeReplaceSuggestionItem(short_id=sid, reason=reason))
+        return KnowledgeReplaceSuggestResponse(suggestions=out)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("knowledge-replace-suggest failed: %s", exc, exc_info=True)
+        return KnowledgeReplaceSuggestResponse(suggestions=[])
 
 
 class ConversationAddressedRequest(BaseModel):

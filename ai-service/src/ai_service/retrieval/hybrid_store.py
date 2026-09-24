@@ -126,6 +126,8 @@ async def execute_hybrid_search(
                 media_type=meta.get("media_type"),
                 media_url=locator.get("media_url"),
                 timestamp_seconds=locator.get("timestamp_seconds"),
+                message_at=locator.get("message_at") or meta.get("content_occurred_at"),
+                message_end=locator.get("message_end") or meta.get("content_occurred_end"),
                 bounding_box=locator.get("bounding_box"),
             )
         )
@@ -278,6 +280,8 @@ async def fetch_url_bearing_chunks(
                 media_type=meta.get("media_type"),
                 media_url=locator.get("media_url"),
                 timestamp_seconds=locator.get("timestamp_seconds"),
+                message_at=locator.get("message_at") or meta.get("content_occurred_at"),
+                message_end=locator.get("message_end") or meta.get("content_occurred_end"),
                 bounding_box=locator.get("bounding_box"),
             )
         )

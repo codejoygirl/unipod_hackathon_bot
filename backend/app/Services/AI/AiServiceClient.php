@@ -145,6 +145,7 @@ class AiServiceClient
             $tz = (string) config('app.timezone', 'UTC');
         }
         $payloadArray['timezone'] = $tz;
+        $payloadArray['reference_time'] = now()->toIso8601String();
         $lang = is_string($targetLanguage) ? trim($targetLanguage) : '';
         if ($lang !== '' && strtolower($lang) !== 'auto') {
             $payloadArray['target_language'] = $lang;
@@ -185,7 +186,7 @@ class AiServiceClient
     /**
      * Classify an ambiguous chat turn. Null on hard failure (caller keeps heuristics).
      *
-     * @return array{intent: 'conversational'|'knowledge'|'out_of_scope'|'clarify'|'personal_help', link_mode: 'none'|'recordings'|'meetings'|'assets', follow_up: bool, link_focus: 'one'|'many'|'na'}|null
+     * @return array{intent: 'conversational'|'knowledge'|'out_of_scope'|'clarify'|'personal_help', link_mode: 'none'|'recordings'|'meetings'|'assets', follow_up: bool, link_focus: 'one'|'many'|'na', needs_temporal_resolution: bool}|null
      */
     public function classifyConversationIntent(
         string $message,
@@ -232,6 +233,10 @@ class AiServiceClient
             $linkMode = strtolower(trim((string) ($response->json('link_mode') ?? 'none')));
             $linkFocus = strtolower(trim((string) ($response->json('link_focus') ?? 'na')));
             $followUp = filter_var($response->json('follow_up') ?? false, FILTER_VALIDATE_BOOLEAN);
+            $needsTemporal = filter_var(
+                $response->json('needs_temporal_resolution') ?? false,
+                FILTER_VALIDATE_BOOLEAN,
+            );
             $allowedIntent = ['conversational', 'knowledge', 'out_of_scope', 'clarify', 'personal_help'];
             $allowedLink = ['none', 'recordings', 'meetings', 'assets'];
             $allowedFocus = ['one', 'many', 'na'];
@@ -258,6 +263,7 @@ class AiServiceClient
                 $linkMode = 'none';
                 $followUp = false;
                 $linkFocus = 'na';
+                $needsTemporal = false;
             }
 
             if ($linkMode === 'none') {
@@ -271,9 +277,132 @@ class AiServiceClient
                 'link_mode' => $linkMode,
                 'follow_up' => $followUp,
                 'link_focus' => $linkFocus,
+                'needs_temporal_resolution' => $needsTemporal,
             ];
         } catch (Throwable $e) {
             Log::warning('AI Service /conversation/classify unreachable', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Optional preflight when classify marks a calendar-relative knowledge ask.
+     *
+     * @return array{needs_resolution: bool, temporal_context: string}|null
+     */
+    public function conversationTemporalPlan(
+        string $message,
+        ?string $priorQuestion = null,
+        ?string $timezone = null,
+        ?string $referenceTimeIso = null,
+    ): ?array {
+        $payloadArray = [
+            'message' => trim($message),
+            'prior_question' => $priorQuestion !== null && trim($priorQuestion) !== ''
+                ? mb_substr(trim($priorQuestion), 0, 1000)
+                : null,
+            'timezone_name' => $timezone ?: (string) config('app.timezone', 'UTC'),
+            'reference_time_iso' => $referenceTimeIso ?: now()->toIso8601String(),
+        ];
+
+        $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        try {
+            $response = $this->http
+                ->timeout(min($this->timeout, 8.0))
+                ->connectTimeout($this->connectTimeout)
+                ->withHeaders($headers)
+                ->withBody($rawBody, 'application/json')
+                ->post("{$this->baseUrl}/conversation/temporal-plan");
+
+            if ($response->failed()) {
+                Log::warning('AI Service /conversation/temporal-plan failed', [
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            return [
+                'needs_resolution' => filter_var($response->json('needs_resolution') ?? false, FILTER_VALIDATE_BOOLEAN),
+                'temporal_context' => trim((string) ($response->json('temporal_context') ?? '')),
+            ];
+        } catch (Throwable $e) {
+            Log::warning('AI Service /conversation/temporal-plan unreachable', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * @param  list<array{short_id: string, name: string, excerpt: string, published_at: string|null}>  $publishedCatalog
+     * @return list<array{short_id: string, reason: string}>|null
+     */
+    public function suggestKnowledgeReplaceCandidates(
+        ?string $communityName,
+        string $newImportName,
+        string $newImportExcerpt,
+        array $publishedCatalog,
+    ): ?array {
+        if ($publishedCatalog === []) {
+            return [];
+        }
+
+        $payloadArray = [
+            'community_name' => $communityName,
+            'new_import_name' => trim($newImportName),
+            'new_import_excerpt' => mb_substr(trim($newImportExcerpt), 0, 2000),
+            'published_sources' => array_slice($publishedCatalog, 0, 25),
+        ];
+
+        $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        try {
+            $response = $this->http
+                ->timeout(min($this->timeout, 12.0))
+                ->connectTimeout($this->connectTimeout)
+                ->withHeaders($headers)
+                ->withBody($rawBody, 'application/json')
+                ->post("{$this->baseUrl}/conversation/knowledge-replace-suggest");
+
+            if ($response->failed()) {
+                Log::warning('AI Service /conversation/knowledge-replace-suggest failed', [
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $rows = $response->json('suggestions');
+            if (! is_array($rows)) {
+                return null;
+            }
+
+            $out = [];
+            foreach ($rows as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $sid = strtoupper(trim((string) ($row['short_id'] ?? '')));
+                if ($sid === '') {
+                    continue;
+                }
+                $out[] = [
+                    'short_id' => $sid,
+                    'reason' => trim((string) ($row['reason'] ?? '')),
+                ];
+            }
+
+            return $out;
+        } catch (Throwable $e) {
+            Log::warning('AI Service /conversation/knowledge-replace-suggest unreachable', [
                 'exception' => $e->getMessage(),
             ]);
 

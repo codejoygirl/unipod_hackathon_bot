@@ -39,11 +39,17 @@ class ImportKnowledgeChatsCommand extends Command
             'name' => 'Wadhwani UniPod AI Program Africa chat',
             'source_type' => 'whatsapp',
         ],
+        [
+            'file' => 'meti-cohort-7_chat.txt',
+            'name' => 'UniPods METI AI Program 2026 Cohort 7 chat',
+            'source_type' => 'whatsapp',
+        ],
     ];
 
     protected $signature = 'zak:import-knowledge-chats
                             {--email= : Demo user email (default: WHATSAPP_WEB_SPIKE_DEFAULT_USER_EMAIL or TELEGRAM_SPIKE_DEFAULT_USER_EMAIL)}
                             {--password=password123 : Password when creating the demo user}
+                            {--path= : Import one chat export (.txt) from this absolute path (copied into staging)}
                             {--setup-only : Only ensure scope + user + token; do not import files}
                             {--token-only : Refresh bearer token only (skip file import)}';
 
@@ -70,6 +76,18 @@ class ImportKnowledgeChatsCommand extends Command
             $stagePath = storage_path('app/'.self::STAGE_DIR);
             if (! is_dir($stagePath)) {
                 File::ensureDirectoryExists($stagePath);
+            }
+
+            $oneOff = trim((string) $this->option('path'));
+            if ($oneOff !== '') {
+                if (! is_file($oneOff)) {
+                    $this->components->error("File not found: {$oneOff}");
+
+                    return self::FAILURE;
+                }
+                $destName = 'meti-cohort-7_chat.txt';
+                File::copy($oneOff, $stagePath.DIRECTORY_SEPARATOR.$destName);
+                $this->components->info("Staged {$oneOff} → {$destName}");
             }
 
             foreach (self::CHAT_IMPORTS as $spec) {

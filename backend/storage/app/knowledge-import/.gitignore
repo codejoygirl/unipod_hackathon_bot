@@ -1,0 +1,4 @@
+# Version chat exports only; ignore accidental secrets or local scratch files.
+*
+!.gitignore
+!*.txt

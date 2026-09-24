@@ -76,6 +76,15 @@ final class ChannelCommandAccess
             return $adminChatId !== '' && $senderId === $adminChatId;
         }
 
+        if ($channel === 'whatsapp_zavu') {
+            $configured = trim((string) config('whatsapp_zavu.admin_phones', ''));
+            $phones = $configured !== ''
+                ? self::parsePhoneList($configured)
+                : $this->whatsappAdminPhones();
+
+            return $this->matchesAnyPhone($senderId, $phones);
+        }
+
         return false;
     }
 

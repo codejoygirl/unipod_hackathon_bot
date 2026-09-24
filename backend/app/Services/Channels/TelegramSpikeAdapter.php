@@ -257,8 +257,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             return $this->handleMemberAssets($message);
         }
 
-        if ($this->listenGate->startsWithSlashCommand($message->text, 'import')
-            || $this->listenGate->startsWithSlashCommand($message->text, 'export')) {
+        if ($this->listenGate->startsWithImportOrExport($message->text)) {
             return $this->handleAdminImport($message);
         }
 
