@@ -1636,11 +1636,14 @@ final class SpikeEscalationNotifier
      */
     private function channelDisplayName(string $channel): string
     {
-        return match (trim($channel)) {
-            'telegram_spike' => 'Telegram',
-            'whatsapp_web_spike', 'whatsapp_zavu' => 'WhatsApp',
+        $key = trim($channel);
+
+        return match ($key) {
+            'telegram_spike' => (string) config('zak_presence.telegram_label', 'Telegram'),
+            'whatsapp_web_spike', 'whatsapp_zavu' => (string) config('zak_presence.whatsapp_label', 'WhatsApp'),
+            'web_chat', 'web' => (string) config('zak_presence.web_chat_label', 'Web Chat'),
             '' => '',
-            default => trim($channel),
+            default => $key,
         };
     }
 

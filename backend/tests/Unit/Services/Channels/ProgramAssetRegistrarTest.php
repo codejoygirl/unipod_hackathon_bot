@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\Channels;
 
+use App\Enums\KnowledgeLifecycleStatus;
 use App\Models\Community;
 use App\Models\KnowledgeSource;
 use App\Models\Tenant;
@@ -234,5 +235,103 @@ class ProgramAssetRegistrarTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame($canonical, $row->metadata['delivery_url'] ?? null);
         $this->assertSame('gfolder:'.strtolower($folderId), $row->metadata['asset_identity'] ?? null);
+    }
+
+    public function test_updates_existing_asset_by_title_with_new_url(): void
+    {
+        $this->fakeAi();
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+
+        // 1. First register with old URL
+        $oldUrl = 'https://drive.google.com/drive/folders/oldFolder123';
+        app(ProgramAssetRegistrar::class)->registerFromCommand(
+            'whatsapp_web_spike',
+            '/asset handbook UniPods Info Pack '.$oldUrl,
+            $user,
+            $community,
+            'whatsapp',
+        );
+
+        $this->assertSame(1, KnowledgeSource::query()->where('community_id', $community->id)->count());
+
+        // 2. Re-register same title with a brand new URL
+        $newUrl = 'https://drive.google.com/file/d/1q1wsNCblgit9s7nw-YeGKsOpkTIyPm6N/view';
+        $result = app(ProgramAssetRegistrar::class)->registerFromCommand(
+            'whatsapp_web_spike',
+            '/asset handbook UniPods Info Pack '.$newUrl,
+            $user,
+            $community,
+            'whatsapp',
+        );
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('Updated', $result['reply']);
+        $this->assertStringContainsString('https://drive.google.com/file/d/1q1wsNCblgit9s7nw-YeGKsOpkTIyPm6N/view', $result['reply']);
+
+        // Should NOT create duplicate rows
+        $this->assertSame(1, KnowledgeSource::query()->where('community_id', $community->id)->count());
+
+        $updated = KnowledgeSource::query()
+            ->where('community_id', $community->id)
+            ->where('name', 'UniPods Info Pack')
+            ->first();
+        $this->assertNotNull($updated);
+        $this->assertSame('https://drive.google.com/file/d/1q1wsNCblgit9s7nw-YeGKsOpkTIyPm6N/view', $updated->metadata['delivery_url'] ?? null);
+        $this->assertSame('gdrive:1q1wsncblgit9s7nw-yegksopktiypm6n', $updated->metadata['asset_identity'] ?? null);
+    }
+
+    public function test_member_assets_lists_published_only_without_admin_ids(): void
+    {
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+        $registrar = app(ProgramAssetRegistrar::class);
+
+        KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'Draft form',
+            'uri' => 'community://'.$community->id.'/asset/draft1',
+            'source_type' => 'markdown',
+            'lifecycle_status' => KnowledgeLifecycleStatus::Draft,
+            'language' => 'en',
+            'content' => 'draft',
+            'content_sha256' => hash('sha256', 'draft'),
+            'metadata' => [
+                'asset_identity' => 'gdrive:draft1',
+                'asset_kind' => 'form',
+                'delivery_url' => 'https://drive.google.com/file/d/draft1/view',
+            ],
+        ]);
+
+        KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'Signup form',
+            'uri' => 'community://'.$community->id.'/asset/pub1',
+            'source_type' => 'markdown',
+            'lifecycle_status' => KnowledgeLifecycleStatus::Published,
+            'language' => 'en',
+            'content' => 'form',
+            'content_sha256' => hash('sha256', 'form'),
+            'published_at' => now(),
+            'metadata' => [
+                'asset_identity' => 'gdrive:pub1',
+                'asset_kind' => 'form',
+                'delivery_url' => 'https://drive.google.com/file/d/pub1/view',
+            ],
+        ]);
+
+        $reply = $registrar->memberCatalogReply($community, 'form', 'plain');
+
+        $this->assertStringContainsString('Signup form', $reply);
+        $this->assertStringContainsString('https://drive.google.com/file/d/pub1/view', $reply);
+        $this->assertStringNotContainsString('Draft form', $reply);
+        $this->assertStringNotContainsString('`', $reply);
     }
 }

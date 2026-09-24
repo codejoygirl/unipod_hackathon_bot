@@ -4,17 +4,35 @@ import React, { useState } from "react";
 import type { QuotedMessage } from "@/lib/web-chat/storage";
 import { Tooltip } from "@/components/ui/tooltip";
 import { FormattedMessage } from "./formatted-message";
+import { ImagePreviewLightbox } from "./image-preview-lightbox";
 
 interface UserMessageProps {
   id: string;
   text: string;
   sentAt: string;
   quote?: QuotedMessage;
+  imagePreview?: string;
+  imagePreviews?: string[];
   onQuote?: (quote: QuotedMessage) => void;
 }
 
-export function UserMessage({ id, text, sentAt, quote, onQuote }: UserMessageProps) {
+export function UserMessage({
+  id,
+  text,
+  sentAt,
+  quote,
+  imagePreview,
+  imagePreviews,
+  onQuote,
+}: UserMessageProps) {
   const [copied, setCopied] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const previews =
+    imagePreviews && imagePreviews.length > 0
+      ? imagePreviews
+      : imagePreview
+        ? [imagePreview]
+        : [];
 
   function handleCopy() {
     navigator.clipboard?.writeText(text);
@@ -54,14 +72,47 @@ export function UserMessage({ id, text, sentAt, quote, onQuote }: UserMessagePro
           </div>
         )}
 
-        <FormattedMessage content={text} isUser={true} />
+        {previews.length > 0 ? (
+          <div
+            className={`grid gap-1.5 ${previews.length > 1 ? "grid-cols-2" : "grid-cols-1"} ${
+              text && !/^\d+ photos?$/.test(text) && text !== "Photo" ? "mb-2.5" : ""
+            }`}
+          >
+            {previews.map((url, i) => (
+              <button
+                key={`${url.slice(0, 32)}-${i}`}
+                type="button"
+                onClick={() => setLightboxUrl(url)}
+                className="overflow-hidden rounded-2xl ring-1 ring-white/10 transition hover:ring-white/30"
+                aria-label="View attached photo"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt=""
+                  className="max-h-56 w-full object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {text && !/^\d+ photos?$/.test(text) && text !== "Photo" ? (
+          <FormattedMessage content={text} isUser={true} />
+        ) : null}
+        {!text && previews.length === 0 ? <FormattedMessage content={text} isUser={true} /> : null}
+
+        {lightboxUrl ? (
+          <ImagePreviewLightbox
+            previewUrl={lightboxUrl}
+            filename={text || "Attached photo"}
+            onClose={() => setLightboxUrl(null)}
+          />
+        ) : null}
 
         {/* Timestamp */}
         <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-zinc-400 select-none dark:text-blue-200/80">
           <time>{sentAt}</time>
-          <span className="text-[10px] text-emerald-400 font-semibold" aria-label="Sent">
-            ✓✓
-          </span>
         </div>
       </div>
 
@@ -71,7 +122,7 @@ export function UserMessage({ id, text, sentAt, quote, onQuote }: UserMessagePro
           <Tooltip content="Reply" position="bottom">
             <button
               type="button"
-              onClick={() => onQuote({ id, sender: "You", text })}
+              onClick={() => onQuote({ id, sender: "You", text: text || "Photo" })}
               className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-800 transition cursor-pointer dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
               aria-label="Reply to message"
             >

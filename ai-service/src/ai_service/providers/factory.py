@@ -32,7 +32,11 @@ class ModelFactory:
         """Instantiate the requested provider."""
 
         if provider_name == "openai":
-            return OpenAIProvider()
+            return OpenAIProvider(
+                chat_model=settings.CHAT_MODEL_NAME,
+                embedding_model=settings.EMBEDDING_MODEL_NAME,
+                embedding_dimension=settings.EMBEDDING_DIMENSION,
+            )
 
         if provider_name == "gemini":
             return GeminiProvider()

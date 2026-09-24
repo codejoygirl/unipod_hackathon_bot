@@ -32,6 +32,25 @@ class MockChatModel(ChatModel):
     async def generate(self, request: ChatRequest) -> ChatResponse:
         import json
         user_msg = request.messages[-1].content if request.messages else ""
+        if not isinstance(user_msg, str):
+            parts = []
+            has_media = False
+            for part in user_msg or []:
+                text = getattr(part, "text", None)
+                if text:
+                    parts.append(str(text))
+                if getattr(part, "type", "") in {"media", "image_url"} or getattr(
+                    part, "media_data", None
+                ):
+                    has_media = True
+            joined = " ".join(parts).strip()
+            if has_media:
+                return ChatResponse(
+                    content="When is the next session?",
+                    model="mock-llm-v1",
+                    finish_reason="stop",
+                )
+            user_msg = joined
 
         if "INJECTION_ATTACK" in user_msg:
             resp = {

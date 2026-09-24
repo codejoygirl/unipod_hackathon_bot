@@ -27,6 +27,7 @@ final class WhatsAppZavuAdapter implements ChannelAdapter
         private readonly KnowledgeLifecycleService $lifecycle,
         private readonly ChannelConversationService $conversation,
         private readonly SpikeEscalationNotifier $escalationNotifier,
+        private readonly ChannelListenGate $listenGate,
     ) {}
 
     public function channelName(): string
@@ -46,16 +47,15 @@ final class WhatsAppZavuAdapter implements ChannelAdapter
             return $this->handleJoin($message);
         }
 
-        if (str_starts_with($upper, 'SHARE')
-            || str_starts_with($upper, '/SHARE')
-            || str_starts_with($upper, 'IMPORT')
-            || str_starts_with($upper, '/IMPORT')
-            || str_starts_with($upper, 'EXPORT')
-            || str_starts_with($upper, '/EXPORT')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'share')) {
             return $this->handleShare($message);
         }
 
-        if (str_starts_with($upper, 'ASK') || str_starts_with($upper, '/ASK')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'assets')) {
+            return $this->handleMemberAssets($message);
+        }
+
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'ask')) {
             return $this->handleMemberAsk($message);
         }
 
@@ -103,13 +103,7 @@ final class WhatsAppZavuAdapter implements ChannelAdapter
 
     private function handleMemberAsk(InboundMessage $message): string
     {
-        $body = trim($message->text);
-        foreach (['/ASK', 'ASK'] as $prefix) {
-            if (str_starts_with(strtoupper($body), $prefix)) {
-                $body = trim(substr($body, strlen($prefix)));
-                break;
-            }
-        }
+        $body = $this->listenGate->slashCommandBody($message->text, 'ask');
 
         if ($body === '') {
             $reply = "Send your question like this:\n"
@@ -363,6 +357,18 @@ final class WhatsAppZavuAdapter implements ChannelAdapter
         return $answer;
     }
 
+    private function handleMemberAssets(InboundMessage $message): string
+    {
+        $community = $this->resolveLinkedCommunity($message);
+        if ($community === null) {
+            return 'Link a community with a JOIN token before using /assets.';
+        }
+
+        $arg = $this->listenGate->slashCommandBody($message->text, 'assets');
+
+        return app(ProgramAssetRegistrar::class)->memberCatalogReply($community, $arg, 'whatsapp');
+    }
+
     private function handleShare(InboundMessage $message): string
     {
         $user = $this->resolveUser();
@@ -380,13 +386,7 @@ final class WhatsAppZavuAdapter implements ChannelAdapter
         }
 
         $community = Community::query()->findOrFail($communityId);
-        $body = $message->text;
-        foreach (['SHARE', '/SHARE', 'IMPORT', '/IMPORT', 'EXPORT', '/EXPORT'] as $prefix) {
-            if (str_starts_with(strtoupper($body), $prefix)) {
-                $body = trim(substr($body, strlen($prefix)));
-                break;
-            }
-        }
+        $body = $this->listenGate->slashCommandBody($message->text, 'share');
 
         if ($body === '') {
             return "Share something the community should know, like:\n"

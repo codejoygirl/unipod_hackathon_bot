@@ -85,7 +85,8 @@ def test_system_prompt_contains_critical_invariants():
     assert "UNRELATED OR NON-QUESTION INPUT" in prompt
     assert "DATES AND TIMES" in prompt
     assert "CURRENT TIME" in prompt
-    assert "WHEN THAT MESSAGE WAS SENT" in prompt
+    assert "CURRENT TIME" in prompt
+    assert "two different" in prompt.lower() or "two clocks" in prompt.lower()
     assert "LINK CAPTIONS" in prompt
     assert "MEANING CHECK" in prompt
     assert "same language as the answer body" in prompt.lower() or "SAME language as the rest of the answer" in prompt
@@ -118,6 +119,7 @@ def test_build_user_prompt_includes_trusted_clock():
     assert "2026-09-23 10:00" in prompt
     assert "IANA Africa/Lagos" in prompt
     assert "trusted system clock" in prompt
+    assert "DATE RESOLUTION" in prompt
     assert xml in prompt
 
 

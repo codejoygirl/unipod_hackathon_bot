@@ -31,6 +31,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         private readonly ChannelCommandAccess $commandAccess,
         private readonly AdminMessageKnowledgeIndexer $adminIndexer,
         private readonly VoiceNoteNormalizer $voiceNormalizer,
+        private readonly ImageNoteNormalizer $imageNormalizer,
         private readonly AdminKnowledgeDesk $knowledgeDesk,
     ) {}
 
@@ -82,8 +83,27 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             ]);
         }
 
+        $image = $this->imageNormalizer->normalize($message);
+        if (($image['error'] ?? null) !== null) {
+            Log::info('whatsapp_web_spike.image_failed', [
+                'from' => $message->externalUserId,
+                'error_preview' => mb_substr((string) $image['error'], 0, 120),
+            ]);
+
+            return (string) $image['error'];
+        }
+        $message = $image['message'];
+        $wasImage = ($message->raw['input_modality'] ?? null) === 'image';
+        if ($wasImage) {
+            Log::info('whatsapp_web_spike.image_ready', [
+                'from' => $message->externalUserId,
+                'chat_type' => $message->raw['chat_type'] ?? null,
+                'extract_preview' => mb_substr($message->text, 0, 240),
+            ]);
+        }
+
         if ($message->text === '') {
-            Log::info('whatsapp_web_spike.empty_after_voice', [
+            Log::info('whatsapp_web_spike.empty_after_media', [
                 'from' => $message->externalUserId,
             ]);
 
@@ -224,41 +244,44 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             return $this->handleJoin($message);
         }
 
-        if (str_starts_with($upper, '/HELP') || $upper === 'HELP'
-            || str_starts_with($upper, '/START') || $upper === 'START') {
+        if ($this->listenGate->startsWithHelpOrStart($message->text)) {
             return $this->helpText($isAdmin, $message);
         }
 
-        if (str_starts_with($upper, 'SHARE') || str_starts_with($upper, '/SHARE')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'share')) {
             return $this->handleShare($message);
         }
 
-        // FEATURES (admin list) before FEATURE (member request).
-        if (str_starts_with($upper, 'FEATURES') || str_starts_with($upper, '/FEATURES')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'features')) {
             return $this->handleAdminKnowledgeDesk($message);
         }
 
-        if (str_starts_with($upper, 'FEATURE') || str_starts_with($upper, '/FEATURE')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'feature')) {
             return $this->handleFeature($message);
         }
 
-        if (str_starts_with($upper, 'IMPORT') || str_starts_with($upper, '/IMPORT')
-            || str_starts_with($upper, 'EXPORT') || str_starts_with($upper, '/EXPORT')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'assets')) {
+            return $this->handleMemberAssets($message);
+        }
+
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'import')
+            || $this->listenGate->startsWithSlashCommand($message->text, 'export')) {
             return $this->handleAdminImport($message);
         }
 
-        if (str_starts_with($upper, 'ASSET') || str_starts_with($upper, '/ASSET')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'asset')) {
             return $this->handleAdminAsset($message);
         }
 
-        if (str_starts_with($upper, 'PUBLISH') || str_starts_with($upper, '/PUBLISH')
-            || str_starts_with($upper, 'KNOWLEDGE') || str_starts_with($upper, '/KNOWLEDGE')
-            || str_starts_with($upper, 'KB') || str_starts_with($upper, '/KB')
-            || str_starts_with($upper, 'FEATURES') || str_starts_with($upper, '/FEATURES')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'publish')
+            || $this->listenGate->startsWithSlashCommand($message->text, 'unpublish')
+            || $this->listenGate->startsWithSlashCommand($message->text, 'archive')
+            || $this->listenGate->startsWithSlashCommand($message->text, 'knowledge')
+            || $this->listenGate->startsWithSlashCommand($message->text, 'kb')) {
             return $this->handleAdminKnowledgeDesk($message);
         }
 
-        if (str_starts_with($upper, 'ASK') || str_starts_with($upper, '/ASK')) {
+        if ($this->listenGate->startsWithSlashCommand($message->text, 'ask')) {
             return $this->handleMemberAsk($message);
         }
 
@@ -286,6 +309,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         Log::info('whatsapp_web_spike.routed', [
             'from' => $message->externalUserId,
             'voice' => $wasVoice,
+            'image' => $wasImage,
             'intent' => $intent,
             'link_mode' => $resolved['link_mode'] ?? 'none',
             'inbound_preview' => mb_substr($inboundText, 0, 160),
@@ -838,13 +862,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
 
     private function handleMemberAsk(InboundMessage $message): string
     {
-        $body = trim($message->text);
-        foreach (['/ASK', 'ASK'] as $prefix) {
-            if (str_starts_with(strtoupper($body), $prefix)) {
-                $body = trim(substr($body, strlen($prefix)));
-                break;
-            }
-        }
+        $body = $this->listenGate->slashCommandBody($message->text, 'ask');
 
         if ($body === '') {
             $reply = "Ask a community question like this:\n"
@@ -1248,7 +1266,10 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             || $q === '[voice note]'
             || $q === '[voice]'
             || $q === '(voice note)'
-            || preg_match('/^\[?\s*voice(?:\s+note)?\s*\]?$/u', $q) === 1;
+            || $q === '[photo]'
+            || $q === '[image]'
+            || preg_match('/^\[?\s*voice(?:\s+note)?\s*\]?$/u', $q) === 1
+            || preg_match('/^\[?\s*(?:photo|image|picture)\s*\]?$/u', $q) === 1;
     }
 
     private function isBareBotMention(string $text): bool
@@ -1260,6 +1281,18 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
         ) ?? '');
 
         return $stripped === '';
+    }
+
+    private function handleMemberAssets(InboundMessage $message): string
+    {
+        $community = $this->resolveLinkedCommunity($message);
+        if ($community === null) {
+            return 'Please link a community first with /join, then try /assets again.';
+        }
+
+        $arg = $this->listenGate->slashCommandBody($message->text, 'assets');
+
+        return app(ProgramAssetRegistrar::class)->memberCatalogReply($community, $arg, 'whatsapp');
     }
 
     private function handleShare(InboundMessage $message): string
@@ -1275,13 +1308,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             return 'You are not a member of that community in '.$this->conversation->botDisplayName().'.';
         }
 
-        $body = trim($message->text);
-        foreach (['/SHARE', 'SHARE'] as $prefix) {
-            if (str_starts_with(strtoupper($body), $prefix)) {
-                $body = trim(substr($body, strlen($prefix)));
-                break;
-            }
-        }
+        $body = $this->listenGate->slashCommandBody($message->text, 'share');
 
         if ($body === '') {
             return "Share something the community should know, like:\n"
@@ -1341,13 +1368,7 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
                 .' again.';
         }
 
-        $body = trim($message->text);
-        foreach (['/FEATURE', 'FEATURE'] as $prefix) {
-            if (str_starts_with(strtoupper($body), $prefix)) {
-                $body = trim(substr($body, strlen($prefix)));
-                break;
-            }
-        }
+        $body = $this->listenGate->slashCommandBody($message->text, 'feature');
 
         if ($body === '') {
             return $this->conversation->featureUsageReply('whatsapp');

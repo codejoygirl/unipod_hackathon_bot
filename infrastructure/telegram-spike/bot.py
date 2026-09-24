@@ -282,6 +282,14 @@ def _message_mentions_bot(message, bot_id: int | None, bot_username: str | None)
 
 # Keep binary under ~2.5MB so base64 stays within Laravel validation (3.5M chars).
 _MAX_VOICE_BYTES = 2_500_000
+_MAX_IMAGE_BYTES = 2_500_000
+_ALLOWED_IMAGE_MIMES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+}
 
 
 async def _download_voice_media(message, bot) -> dict[str, Any] | None:
@@ -315,6 +323,49 @@ async def _download_voice_media(message, bot) -> dict[str, Any] | None:
         return None
     print(
         f"[zak] voice downloaded kind={kind} bytes={len(raw)} "
+        f"mime={mime} file={filename}"
+    )
+    return {
+        "kind": kind,
+        "mime_type": mime,
+        "filename": filename,
+        "data_base64": base64.b64encode(raw).decode("ascii"),
+    }
+
+
+async def _download_image_media(message, bot) -> dict[str, Any] | None:
+    """Download Telegram photo or image document as base64 for Laravel vision."""
+    kind = None
+    file_id = None
+    mime = "image/jpeg"
+    filename = "photo.jpg"
+    if message.photo:
+        kind = "photo"
+        file_id = message.photo[-1].file_id
+        mime = "image/jpeg"
+        filename = "photo.jpg"
+    elif message.document is not None:
+        doc_mime = (message.document.mime_type or "").strip().lower().split(";")[0]
+        if doc_mime in _ALLOWED_IMAGE_MIMES:
+            kind = "image"
+            file_id = message.document.file_id
+            mime = "image/jpeg" if doc_mime == "image/jpg" else doc_mime
+            filename = message.document.file_name or "image.jpg"
+    if not kind or not file_id:
+        return None
+    try:
+        tg_file = await bot.get_file(file_id)
+        raw = bytes(await tg_file.download_as_bytearray())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[zak] image download failed: {exc}")
+        return None
+    if not raw:
+        return None
+    if len(raw) > _MAX_IMAGE_BYTES:
+        print(f"[zak] image too large ({len(raw)} bytes); skip")
+        return None
+    print(
+        f"[zak] image downloaded kind={kind} bytes={len(raw)} "
         f"mime={mime} file={filename}"
     )
     return {
@@ -368,11 +419,13 @@ async def send_via_laravel(
     if in_group and not bot_mentioned and not reply_to_bot and not (text or "").strip().startswith("/"):
         # Undirected group chatter (incl. voice) — stay silent.
         if media and not (text or "").strip():
-            print(f"[zak] silent voice from={from_id} chat={chat_type} (not directed)")
+            kind = str((media or {}).get("kind") or "media")
+            print(f"[zak] silent {kind} from={from_id} chat={chat_type} (not directed)")
             return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    preview = (text or ("[voice]" if media else ""))[:80]
+    media_label = str((media or {}).get("kind") or "media") if media else ""
+    preview = (text or (f"[{media_label}]" if media else ""))[:80]
     print(
         f"[zak] inbound from={from_id} chat={chat_type}"
         f" mentioned={bot_mentioned} reply_to_bot={reply_to_bot}"
@@ -592,6 +645,38 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await send_via_laravel(update, context, caption, media=media)
 
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Photo or image document → download → Laravel vision → same text pipeline."""
+    if update.message is None or update.effective_chat is None:
+        return
+    chat_type = update.effective_chat.type or "private"
+    in_group = chat_type in ("group", "supergroup")
+    bot = context.bot
+    bot_id = bot.id if bot else None
+    bot_username = bot.username if bot else None
+    reply_to_bot, _ = _reply_targets_bot(update.message, bot_id)
+    bot_mentioned = _message_mentions_bot(update.message, bot_id, bot_username) or reply_to_bot
+    caption = (update.message.caption or "").strip()
+    if in_group and not bot_mentioned and not reply_to_bot:
+        print(f"[zak] silent photo chat={chat_type} (group needs @mention or reply-to-bot)")
+        return
+
+    media = await _download_image_media(update.message, context.bot)
+    if media is None and not caption:
+        print("[zak] photo: download empty and no caption")
+        await reply_text_safe(
+            update.message,
+            "I couldn't download that photo. Mind trying again?",
+        )
+        return
+    print(
+        f"[zak] photo → Laravel caption={caption[:80]!r} "
+        f"media={'yes' if media else 'no'} mentioned={bot_mentioned} "
+        f"reply_to_bot={reply_to_bot}"
+    )
+    await send_via_laravel(update, context, caption, media=media)
+
+
 def main() -> None:
     print("===================================================")
     print(" Zak Telegram bot (local)")
@@ -616,6 +701,8 @@ def main() -> None:
     for admin_cmd in (
         "asset",
         "publish",
+        "unpublish",
+        "archive",
         "knowledge",
         "kb",
         "features",
@@ -631,6 +718,7 @@ def main() -> None:
         app.add_handler(CommandHandler(admin_cmd, admin_laravel_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo))
     print("[zak] Polling... message your bot in Telegram.")
     try:
         asyncio.get_event_loop()

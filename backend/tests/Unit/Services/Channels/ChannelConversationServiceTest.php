@@ -106,7 +106,7 @@ class ChannelConversationServiceTest extends TestCase
         $tone = $svc->conversationalReply('Why are you not friendly?');
         $this->assertStringContainsString('Sorry if I came across', $tone);
         $this->assertStringContainsString('any language', mb_strtolower($tone));
-        $this->assertStringContainsString('Web chat', $tone);
+        $this->assertStringContainsString('Web Chat', $tone);
         $this->assertStringContainsString('Telegram', $tone);
         $this->assertLessThan(420, mb_strlen($tone));
 
@@ -542,6 +542,18 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertSame(ChannelConversationService::INTENT_CONVERSATIONAL, $insult['intent']);
         $this->assertFalse($svc->shouldEscalateKnowledgeGap('Are you dumb?', $scope));
 
+        $dateAsk = $svc->mergeModelClassification(
+            ['intent' => ChannelConversationService::INTENT_KNOWLEDGE, 'query' => "What is today's date?"],
+            [
+                'intent' => 'out_of_scope',
+                'link_mode' => 'none',
+                'follow_up' => false,
+            ],
+            $scope,
+        );
+        $this->assertSame(ChannelConversationService::INTENT_CONVERSATIONAL, $dateAsk['intent']);
+        $this->assertFalse($svc->isClearlyOutOfScope("What is today's date?"));
+
         // Repeat recordings ask must search fresh — not wrap as follow-up envelope.
         $recTurns = [
             ['role' => 'user', 'text' => 'Give me all the sessions recordings'],
@@ -641,7 +653,7 @@ class ChannelConversationServiceTest extends TestCase
 
         $svc = new ChannelConversationService;
         $entries = $svc->channelAccessEntries('whatsapp', 'private', '2347041131371');
-        $web = collect($entries)->firstWhere('label', 'Web chat');
+        $web = collect($entries)->firstWhere('label', 'Web Chat');
 
         $this->assertIsArray($web);
         $this->assertSame('https://zak-app.test/?phone=2347041131371', (string) $web['url']);
@@ -661,7 +673,7 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('Good to hear from you', $reply);
         $this->assertStringContainsString('schedules', mb_strtolower($reply));
         $this->assertStringContainsString('any language', mb_strtolower($reply));
-        $this->assertStringContainsString('Web chat', $reply);
+        $this->assertStringContainsString('Web Chat', $reply);
         $this->assertStringContainsString('Telegram', $reply);
         $this->assertStringContainsString("What's on your mind", $reply);
         $this->assertStringNotContainsString("\u{2014}", $reply);
@@ -698,7 +710,7 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('*reply*', $wa);
         $this->assertStringContainsString('Telegram', $wa);
         $this->assertStringContainsString('https://t.me/zak_community_bot', $wa);
-        $this->assertStringContainsString('Web chat', $wa);
+        $this->assertStringContainsString('Web Chat', $wa);
         $this->assertStringContainsString('localhost:3000', $wa);
         $this->assertStringNotContainsString('WhatsApp:', $wa);
         $this->assertStringNotContainsString('/import', $wa);
@@ -711,7 +723,7 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString('no need to keep asking', $tg);
         $this->assertStringContainsString('WhatsApp', $tg);
         $this->assertStringContainsString('wa.me/2347041131371', $tg);
-        $this->assertStringContainsString('Web chat', $tg);
+        $this->assertStringContainsString('Web Chat', $tg);
         $this->assertStringNotContainsString('/join', $tg);
         $this->assertStringNotContainsString('t.me/', $tg);
         $this->assertStringNotContainsString('/import', $tg);
@@ -949,7 +961,7 @@ class ChannelConversationServiceTest extends TestCase
 
         $this->assertStringContainsString('*Also reach me on*', $wa);
         $this->assertStringContainsString("*Telegram*\nhttps://t.me/zak_meti_26_bot", $wa);
-        $this->assertStringContainsString("*Web chat*\nhttp://localhost:3000", $wa);
+        $this->assertStringContainsString("*Web Chat*\nhttp://localhost:3000", $wa);
         $this->assertStringContainsString('*Private chat*', $wa);
         $this->assertStringNotContainsString('Also on:', $wa);
         $this->assertStringNotContainsString(' · ', $wa);

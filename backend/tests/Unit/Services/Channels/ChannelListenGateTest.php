@@ -112,4 +112,42 @@ class ChannelListenGateTest extends TestCase
         $this->assertTrue($gate->shouldListen('private', '/ask hi', ['zak'], 'private_only'));
         $this->assertTrue($gate->shouldListen('private', 'hello', ['zak'], 'private_only'));
     }
+
+    public function test_media_payload_needs_inline_reply(): void
+    {
+        $gate = new ChannelListenGate;
+        $this->assertTrue($gate->spikeNeedsInlineReply('', [
+            'media' => [
+                'kind' => 'image',
+                'data_base64' => base64_encode('tiny-photo'),
+            ],
+        ]));
+        $this->assertFalse($gate->spikeNeedsInlineReply('', []));
+        $this->assertTrue($gate->spikeNeedsInlineReply('/ask hours?', []));
+        $this->assertFalse($gate->spikeNeedsInlineReply('Share me the resource links', []));
+    }
+
+    public function test_slash_commands_only_for_share_ask_and_feature(): void
+    {
+        $gate = new ChannelListenGate;
+
+        $this->assertTrue($gate->startsWithSlashCommand('/share Clinic moved to 3pm', 'share'));
+        $this->assertFalse($gate->startsWithSlashCommand('Share me the resources links', 'share'));
+        $this->assertFalse($gate->startsWithSlashCommand('share me links', 'share'));
+
+        $this->assertTrue($gate->startsWithSlashCommand('/ask Who runs onboarding?', 'ask'));
+        $this->assertFalse($gate->startsWithSlashCommand('Ask me anything', 'ask'));
+
+        $this->assertTrue($gate->startsWithSlashCommand('/feature Add reminders', 'feature'));
+        $this->assertFalse($gate->startsWithSlashCommand('Feature request please', 'feature'));
+
+        $this->assertSame('Clinic moved to 3pm', $gate->slashCommandBody('/share Clinic moved to 3pm', 'share'));
+    }
+
+    public function test_recognized_command_requires_leading_slash(): void
+    {
+        $gate = new ChannelListenGate;
+        $this->assertTrue($gate->startsWithRecognizedCommand('/share tip'));
+        $this->assertFalse($gate->startsWithRecognizedCommand('Share me links'));
+    }
 }

@@ -2,6 +2,13 @@
 
 import React, { FormEvent, useEffect, useRef, useState } from "react";
 import type { QuotedMessage } from "@/lib/web-chat/storage";
+import {
+  ALLOWED_CHAT_IMAGE_MIMES,
+  MAX_CHAT_IMAGES,
+  prepareChatImage,
+  type ChatImagePayload,
+} from "@/lib/web-chat/image";
+import { ImagePreviewLightbox } from "./image-preview-lightbox";
 import { CircularLoader } from "@/components/ui/circular-loader";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useTypewriterPlaceholder } from "./typewriter-placeholder";
@@ -14,7 +21,7 @@ interface ChatComposerProps {
   /** Shown on the send control while `sending` (e.g. "Asking Zak…") */
   sendingLabel?: string;
   isAdmin?: boolean;
-  onSend: (text: string, quote?: QuotedMessage) => void;
+  onSend: (text: string, quote?: QuotedMessage, images?: ChatImagePayload[]) => void;
   quotedMessage?: QuotedMessage | null;
   onClearQuote?: () => void;
   onFocus?: () => void;
@@ -76,10 +83,15 @@ export function ChatComposer({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
+  const [pendingImages, setPendingImages] = useState<ChatImagePayload[]>([]);
+  const [previewImage, setPreviewImage] = useState<ChatImagePayload | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Typewriter animated placeholder with programme question examples
   const isInputEmpty = value.length === 0;
@@ -212,12 +224,70 @@ export function ChatComposer({
     setValue("");
   }
 
+  function clearPendingImages() {
+    setPendingImages([]);
+    setImageError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function removePendingImage(index: number) {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
+    setImageError(null);
+  }
+
+  async function attachImageFiles(incoming: FileList | File[] | null | undefined) {
+    if (!incoming || disabled || sending) {
+      return;
+    }
+    const files = Array.from(incoming).filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) {
+      return;
+    }
+
+    const slotsLeft = MAX_CHAT_IMAGES - pendingImages.length;
+    if (slotsLeft <= 0) {
+      setImageError(`You can attach up to ${MAX_CHAT_IMAGES} photos at once.`);
+      return;
+    }
+
+    setImageBusy(true);
+    setImageError(null);
+    try {
+      const batch = files.slice(0, slotsLeft);
+      const prepared: ChatImagePayload[] = [];
+      for (const file of batch) {
+        prepared.push(await prepareChatImage(file));
+      }
+      setPendingImages((prev) => [...prev, ...prepared]);
+      if (files.length > slotsLeft) {
+        setImageError(`Only ${MAX_CHAT_IMAGES} photos per message. Extra files were skipped.`);
+      }
+    } catch (err) {
+      const code = err instanceof Error ? err.message : "failed";
+      if (code === "unsupported_type") {
+        setImageError("Use JPEG, PNG, WebP, or GIF photos.");
+      } else if (code === "too_large") {
+        setImageError("A photo is still too large. Try smaller images.");
+      } else {
+        setImageError("I couldn't read one of those photos. Try again.");
+      }
+    } finally {
+      setImageBusy(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
   function handleSendVoice() {
     stopVoiceRecording();
     const trimmed = value.trim();
-    if (trimmed) {
-      onSend(trimmed, quotedMessage ?? undefined);
+    if (trimmed || pendingImages.length > 0) {
+      onSend(trimmed, quotedMessage ?? undefined, pendingImages.length ? pendingImages : undefined);
       setValue("");
+      setPendingImages([]);
       onClearQuote?.();
     }
   }
@@ -229,12 +299,17 @@ export function ChatComposer({
       return;
     }
     const trimmed = value.trim();
-    if (!trimmed || disabled) {
+    if (disabled || (!trimmed && pendingImages.length === 0)) {
       return;
     }
-    onSend(trimmed, quotedMessage ?? undefined);
+    onSend(trimmed, quotedMessage ?? undefined, pendingImages.length ? pendingImages : undefined);
     setValue("");
+    setPendingImages([]);
     setIsSlashMenuOpen(false);
+    setImageError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
     onClearQuote?.();
   }
 
@@ -269,7 +344,23 @@ export function ChatComposer({
 
   return (
     <div className="relative bg-gradient-to-t from-white via-white/95 to-transparent pt-2 pb-3 backdrop-blur-md dark:from-[#212121] dark:via-[#212121]/95">
-      <form onSubmit={handleSubmit} className="mx-auto max-w-3xl px-3 sm:px-4">
+      <form
+        onSubmit={handleSubmit}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("Files")) {
+            e.preventDefault();
+          }
+        }}
+        onDrop={(e) => {
+          const file = e.dataTransfer.files?.[0];
+          if (!file || !file.type.startsWith("image/")) {
+            return;
+          }
+          e.preventDefault();
+          void attachImageFiles(e.dataTransfer.files);
+        }}
+        className="mx-auto max-w-3xl px-3 sm:px-4"
+      >
         {/* Reply preview banner */}
         {quotedMessage && (
           <div className="mb-2 flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-zinc-50/95 px-3.5 py-2 shadow-2xs dark:border-zinc-700/80 dark:bg-zinc-800/90">
@@ -301,6 +392,78 @@ export function ChatComposer({
           </div>
         )}
 
+        {pendingImages.length > 0 || imageError ? (
+          <div className="mb-2 rounded-2xl border border-zinc-200/90 bg-zinc-50/95 px-2.5 py-2 shadow-2xs dark:border-zinc-700/80 dark:bg-zinc-800/90">
+            {pendingImages.length > 0 ? (
+              <div className="flex flex-wrap items-start gap-2">
+                {pendingImages.map((img, index) => (
+                  <div
+                    key={`${img.filename}-${index}`}
+                    className="flex max-w-[220px] min-w-0 items-center gap-2 rounded-xl bg-white/80 py-1 pl-1 pr-1.5 dark:bg-zinc-900/60"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImage(img)}
+                      className="shrink-0 overflow-hidden rounded-lg ring-1 ring-zinc-200/80 transition hover:ring-emerald-500/60 dark:ring-zinc-600"
+                      title={`Preview ${img.filename}`}
+                      aria-label={`Preview ${img.filename}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.previewUrl}
+                        alt=""
+                        className="h-11 w-11 object-cover"
+                      />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[11px] font-medium text-zinc-800 dark:text-zinc-100">
+                        {img.filename}
+                      </p>
+                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400">Tap to preview</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removePendingImage(index)}
+                      className="shrink-0 rounded-full p-0.5 text-zinc-400 transition hover:bg-zinc-200/70 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+                      title="Remove"
+                      aria-label={`Remove ${img.filename}`}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={clearPendingImages}
+                  className="ml-auto shrink-0 text-[10px] text-zinc-500 underline-offset-2 hover:text-zinc-800 hover:underline dark:hover:text-zinc-200"
+                >
+                  Clear all
+                </button>
+              </div>
+            ) : null}
+            <p
+              className={`text-[11px] text-zinc-500 dark:text-zinc-400 ${
+                pendingImages.length > 0 ? "mt-1.5 px-0.5" : "px-0.5 py-0.5"
+              }`}
+            >
+              {imageError ??
+                (pendingImages.length === 1
+                  ? "Add a caption, or send the photo as-is."
+                  : `${pendingImages.length} photos — add a caption or send as-is.`)}
+            </p>
+          </div>
+        ) : null}
+
+        {previewImage ? (
+          <ImagePreviewLightbox
+            previewUrl={previewImage.previewUrl}
+            filename={previewImage.filename}
+            onClose={() => setPreviewImage(null)}
+          />
+        ) : null}
+
         {/* Slash Command Autocomplete Menu */}
         <div className="relative">
           <SlashCommandMenu
@@ -308,6 +471,11 @@ export function ChatComposer({
             filterText={slashFilter}
             isAdmin={isAdmin}
             onSelect={handleSlashSelect}
+            onAttachPhoto={() => {
+              setIsSlashMenuOpen(false);
+              setSlashFilter("");
+              fileInputRef.current?.click();
+            }}
             onClose={() => setIsSlashMenuOpen(false)}
           />
         </div>
@@ -374,9 +542,22 @@ export function ChatComposer({
               isMultiline ? "items-end pb-1.5" : "items-center"
             } rounded-3xl border border-zinc-300/80 bg-white px-2.5 py-1.5 shadow-sm transition-all focus-within:border-zinc-400 focus-within:shadow-md dark:border-zinc-700 dark:bg-[#2f2f2f] dark:focus-within:border-zinc-500`}
           >
-            {/* Left: Plus (+) Button for Tools & Slash Commands (ChatGPT Style) */}
-            <div className={`shrink-0 ${isMultiline ? "self-end pb-0.5" : ""}`}>
-              <Tooltip content="Quick commands & tools" position="top" shortcut="/">
+            {/* Left: + (commands) and photo attach */}
+            <div
+              className={`flex shrink-0 items-center -space-x-0.5 ${isMultiline ? "self-end pb-0.5" : ""}`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ALLOWED_CHAT_IMAGE_MIMES.join(",")}
+                multiple
+                className="sr-only"
+                tabIndex={-1}
+                onChange={(e) => {
+                  void attachImageFiles(e.target.files);
+                }}
+              />
+              <Tooltip content="Tools & commands" position="top" shortcut="/">
                 <button
                   type="button"
                   onClick={() => setIsSlashMenuOpen((prev) => !prev)}
@@ -388,6 +569,28 @@ export function ChatComposer({
                     <line x1="12" y1="5" x2="12" y2="19" />
                     <line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
+                </button>
+              </Tooltip>
+              <Tooltip content="Attach a photo" position="top">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={disabled || imageBusy}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 active:scale-95 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 cursor-pointer"
+                  aria-label="Attach a photo"
+                >
+                  {imageBusy ? (
+                    <CircularLoader
+                      size="xs"
+                      className="border-zinc-400/40 border-t-zinc-800 dark:border-zinc-300/30 dark:border-t-zinc-100"
+                    />
+                  ) : (
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <path d="M21 15l-5-5L5 21" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
                 </button>
               </Tooltip>
             </div>
@@ -408,6 +611,16 @@ export function ChatComposer({
                   onFocus?.();
                   onTyping?.();
                 }}
+                onPaste={(e) => {
+                  const item = Array.from(e.clipboardData?.items ?? []).find((entry) =>
+                    entry.type.startsWith("image/"),
+                  );
+                  const file = item?.getAsFile();
+                  if (file) {
+                    e.preventDefault();
+                    void attachImageFiles([file]);
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     // If slash menu is open, let menu handle Enter
@@ -424,7 +637,7 @@ export function ChatComposer({
               />
             </div>
 
-            {/* Right: ONLY Microphone Button and Send Button */}
+            {/* Right: mic and send */}
             <div className={`flex items-center gap-1 shrink-0 ${isMultiline ? "self-end pb-0.5" : ""}`}>
               {/* Voice / Mic Button */}
               <Tooltip content="Voice dictation" position="top">
@@ -443,42 +656,29 @@ export function ChatComposer({
                 </button>
               </Tooltip>
 
-              {/* Send / in-flight status */}
-              {sending ? (
-                <span
-                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-zinc-200/95 px-3 text-xs font-medium text-zinc-800 dark:bg-zinc-600 dark:text-zinc-100"
-                  role="status"
-                  aria-live="polite"
+              {/* Send — stays visible; disabled while in flight (ChatGPT-style) */}
+              <Tooltip
+                content={sending ? sendingLabel : value.trim() || pendingImages.length ? "Send message" : "Send message"}
+                position="top"
+                shortcut={!sending && (value.trim() || pendingImages.length) ? "Enter" : undefined}
+              >
+                <button
+                  type="submit"
+                  disabled={disabled || sending || (!value.trim() && pendingImages.length === 0)}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all shadow-xs ${
+                    disabled || sending || (!value.trim() && pendingImages.length === 0)
+                      ? "bg-zinc-100 text-zinc-300 dark:bg-zinc-800 dark:text-zinc-600 cursor-not-allowed"
+                      : "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200 active:scale-95 cursor-pointer"
+                  }`}
+                  aria-label={sending ? sendingLabel : "Send message"}
+                  aria-busy={sending}
                 >
-                  <CircularLoader
-                    size="xs"
-                    className="border-zinc-400/40 border-t-zinc-800 dark:border-zinc-300/30 dark:border-t-zinc-100"
-                  />
-                  <span>{sendingLabel}</span>
-                </span>
-              ) : (
-                <Tooltip
-                  content={value.trim() ? "Send message" : "Send message"}
-                  position="top"
-                  shortcut={value.trim() ? "Enter" : undefined}
-                >
-                  <button
-                    type="submit"
-                    disabled={disabled || !value.trim()}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all shadow-xs ${
-                      value.trim()
-                        ? "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200 active:scale-95 cursor-pointer"
-                        : "bg-zinc-100 text-zinc-300 dark:bg-zinc-800 dark:text-zinc-600 cursor-not-allowed"
-                    }`}
-                    aria-label="Send message"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <line x1="12" y1="19" x2="12" y2="5" />
-                      <polyline points="5 12 12 5 19 12" />
-                    </svg>
-                  </button>
-                </Tooltip>
-              )}
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="12" y1="19" x2="12" y2="5" />
+                    <polyline points="5 12 12 5 19 12" />
+                  </svg>
+                </button>
+              </Tooltip>
             </div>
           </div>
         )}
@@ -497,7 +697,7 @@ export function ChatComposer({
             }}
             className="underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer transition-colors"
           >
-            Changelog
+            What&apos;s new
           </button>
         </p>
       </form>

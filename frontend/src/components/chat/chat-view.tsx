@@ -21,6 +21,7 @@ import { GrokThinkingLoader } from "./grok-thinking-loader";
 import { UserMessage } from "./user-message";
 import { Tooltip } from "@/components/ui/tooltip";
 import { chatSendingLabel } from "@/lib/ui/outbound-status";
+import type { ChatImagePayload } from "@/lib/web-chat/image";
 
 function formatTime(date: Date = new Date()): string {
   try {
@@ -73,24 +74,31 @@ export function ChatView() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
   const hydratedFor = useRef<string | null>(null);
+  /** Pin feed to bottom while a turn is in flight (send → loader → reply). */
+  const pinToBottomRef = useRef(false);
 
-  // Multi-frame robust scroll-to-bottom
-  const scrollToBottom = useCallback((smooth = true) => {
+  const scrollToBottom = useCallback((smooth = false) => {
     const performScroll = () => {
-      if (bottomRef.current) {
-        bottomRef.current.scrollIntoView({
-          behavior: smooth ? "smooth" : "auto",
-          block: "end",
-        });
-      } else if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const el = scrollRef.current;
+      if (el) {
+        const top = Math.max(0, el.scrollHeight - el.clientHeight);
+        if (smooth) {
+          el.scrollTo({ top, behavior: "smooth" });
+        } else {
+          el.scrollTop = top;
+        }
       }
+      bottomRef.current?.scrollIntoView({
+        behavior: smooth ? "smooth" : "auto",
+        block: "end",
+      });
     };
 
     requestAnimationFrame(performScroll);
     setTimeout(performScroll, 40);
-    setTimeout(performScroll, 150);
-    setTimeout(performScroll, 300);
+    setTimeout(performScroll, 120);
+    setTimeout(performScroll, 280);
+    setTimeout(performScroll, 520);
   }, []);
 
   const handleNewChat = useCallback(() => {
@@ -137,13 +145,39 @@ export function ChatView() {
     }
   }, []);
 
-  // Detect scroll position to show/hide "Scroll to bottom" button
   const handleScroll = () => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    setShowScrollBottomButton(distanceFromBottom > 160);
+    const farFromBottom = distanceFromBottom > 160;
+    setShowScrollBottomButton(farFromBottom);
+    if (farFromBottom && !pending) {
+      pinToBottomRef.current = false;
+    }
   };
+
+  // Keep the loader and new replies in view for the active turn.
+  useEffect(() => {
+    if (!pinToBottomRef.current && !pending) {
+      return;
+    }
+    scrollToBottom(false);
+  }, [entries.length, pending, scrollToBottom]);
+
+  useEffect(() => {
+    if (!pending) {
+      return;
+    }
+    scrollToBottom(false);
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    const pin = () => scrollToBottom(false);
+    const ro = new ResizeObserver(pin);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [pending, scrollToBottom]);
 
   // Hydrate chat entries for community & session
   useEffect(() => {
@@ -193,34 +227,53 @@ export function ChatView() {
   );
 
   const sendMessage = useCallback(
-    async (text: string, quote?: QuotedMessage) => {
+    async (text: string, quote?: QuotedMessage, images?: ChatImagePayload[]) => {
       if (!community) return;
 
+      const imageCount = images?.length ?? 0;
+      const displayText =
+        text.trim() ||
+        (imageCount === 1 ? images![0].filename : imageCount > 1 ? `${imageCount} photos` : "");
       const userEntry: StoredChatEntry = {
         id: crypto.randomUUID(),
         role: "user",
-        text,
+        text: displayText,
         sentAt: formatTime(new Date()),
         quote,
+        imagePreview: images?.[0]?.previewUrl,
+        imagePreviews: images?.map((img) => img.previewUrl),
       };
 
+      pinToBottomRef.current = true;
+      setShowScrollBottomButton(false);
       setEntries((prev) => [...prev, userEntry]);
-      setPendingStatusLabel(chatSendingLabel(isAdmin, text));
+      setPendingStatusLabel(chatSendingLabel(isAdmin, text, imageCount > 0));
       setPending(true);
 
-      // Auto-scroll immediately when user sends message
-      scrollToBottom(true);
+      scrollToBottom(false);
 
       try {
         const queryText = quote?.text
           ? `[Replying to: "${quote.text}"]\n${text}`
           : text;
 
-        const payload = {
+        const payload: Record<string, unknown> = {
           query: queryText,
           phone: memberPhone ?? undefined,
           session_id: sessionId ?? undefined,
         };
+        if (images && images.length > 0) {
+          payload.images = images.map((img) => ({
+            image_base64: img.base64,
+            mime: img.mime,
+            filename: img.filename,
+          }));
+          if (images.length === 1) {
+            payload.image_base64 = images[0].base64;
+            payload.image_mime = images[0].mime;
+            payload.image_filename = images[0].filename;
+          }
+        }
 
         const headers: Record<string, string> = {};
         if (adminToken) {
@@ -261,8 +314,9 @@ export function ChatView() {
         ]);
       } finally {
         setPending(false);
-        // Scroll once response arrives
-        scrollToBottom(true);
+        pinToBottomRef.current = true;
+        scrollToBottom(false);
+        requestAnimationFrame(() => scrollToBottom(false));
       }
     },
     [community, memberPhone, sessionId, adminToken, scrollToBottom, isAdmin]
@@ -299,7 +353,7 @@ export function ChatView() {
               What would you like to know?
             </h2>
             <p className="mt-1.5 text-xs text-zinc-500 max-w-md dark:text-zinc-400 leading-relaxed">
-              Ask anything about the {community?.name ?? APP_DISPLAY_NAME}, schedules, hackathons, sessions, or resources.
+              Ask anything about the {community?.name ?? APP_DISPLAY_NAME}, or send a photo of a flyer, schedule, or form.
             </p>
 
             {/* Starter Prompt Cards */}
@@ -341,6 +395,8 @@ export function ChatView() {
                 text={entry.text}
                 sentAt={entry.sentAt}
                 quote={entry.quote}
+                imagePreview={entry.imagePreview}
+                imagePreviews={entry.imagePreviews}
                 onQuote={(q) => setReplyingTo(q)}
               />
             );
@@ -378,7 +434,7 @@ export function ChatView() {
         )}
 
         {/* Bottom Sentinel */}
-        <div ref={bottomRef} className="h-6 w-full shrink-0" aria-hidden="true" />
+        <div ref={bottomRef} className="h-28 w-full shrink-0" aria-hidden="true" />
       </div>
 
       {/* Floating "Scroll to Bottom" Button (ChatGPT Style) */}
@@ -407,7 +463,7 @@ export function ChatView() {
           sending={pending}
           sendingLabel={pendingStatusLabel}
           isAdmin={isAdmin}
-          onSend={(text, quote) => void sendMessage(text, quote)}
+          onSend={(text, quote, image) => void sendMessage(text, quote, image)}
           quotedMessage={replyingTo}
           onClearQuote={() => setReplyingTo(null)}
           onFocus={() => scrollToBottom(true)}
