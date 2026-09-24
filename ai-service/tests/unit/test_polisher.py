@@ -72,6 +72,17 @@ def test_strips_evidence_tags():
     assert "Joy helps with onboarding" in out
 
 
+def test_restores_hackathon_when_writer_garbled_akhatin():
+    draft = (
+        "The Akhatin event is ending today, September 24, 2026. "
+        "The final submission deadline is also today."
+    )
+    question = "When is the hackathon ending?"
+    out = AnswerPolisher._align_terms_from_question(draft, question)
+    assert "Akhatin" not in out
+    assert "hackathon" in out.lower()
+
+
 def test_writer_system_prioritizes_member_question_language():
     from ai_service.generation.polisher import _WRITER_SYSTEM
 

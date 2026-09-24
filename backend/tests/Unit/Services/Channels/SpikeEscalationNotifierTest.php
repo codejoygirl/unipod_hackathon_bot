@@ -644,6 +644,82 @@ class SpikeEscalationNotifierTest extends TestCase
         });
     }
 
+    public function test_zavu_escalation_notifies_admins_and_delivers_member_reply(): void
+    {
+        Cache::flush();
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Demo Community',
+        ]);
+        \App\Models\User::factory()->create(['email' => 'demo@zak.test']);
+
+        config([
+            'whatsapp_zavu.enabled' => true,
+            'whatsapp_zavu.api_key' => 'zv_test',
+            'whatsapp_zavu.api_base' => 'https://api.zavu.dev/v1',
+            'whatsapp_zavu.admin_phones' => '2348011111111',
+            'whatsapp_zavu.phone_number' => '2348117084647',
+            'telegram_spike.bot_token' => '',
+            'telegram_spike.admin_chat_id' => '',
+            'whatsapp_web_spike.outbound_url' => '',
+            'telegram_spike.default_user_email' => 'demo@zak.test',
+            'ai_service.base_url' => 'http://ai.test',
+            'ai_service.hmac_secret' => 'test-secret',
+        ]);
+        $this->app->forgetInstance(\App\Services\AI\AiServiceClient::class);
+
+        Http::fake([
+            'https://api.zavu.dev/v1/messages' => Http::sequence()
+                ->push(['id' => 'zavu_admin_card'], 200)
+                ->push(['id' => 'zavu_member_reply'], 200),
+            'http://ai.test/*' => Http::response([
+                'source_id' => 'ai-src-zavu',
+                'version_id' => 'ai-ver-zavu',
+            ], 200),
+        ]);
+
+        $notifier = app(SpikeEscalationNotifier::class);
+        $created = $notifier->escalate([
+            'question' => 'When is clinic?',
+            'from' => '2349012345678',
+            'from_phone' => '2349012345678',
+            'community_id' => $community->id,
+            'community_name' => $community->name,
+            'reason' => 'member_ask',
+            'channel' => 'whatsapp_zavu',
+        ]);
+
+        $this->assertTrue($created['notified']);
+
+        $ref = $created['ref'];
+        $result = $notifier->tryAdminCommand("/reply {$ref} Clinic is Friday at 3pm CAT.");
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('sent that to', $result['reply']);
+
+        Http::assertSent(function ($request) {
+            if ($request->url() !== 'https://api.zavu.dev/v1/messages') {
+                return false;
+            }
+            $to = (string) ($request['to'] ?? '');
+            $text = (string) ($request['text'] ?? '');
+
+            return $to === '2348011111111'
+                && str_contains($text, 'When is clinic?');
+        });
+
+        Http::assertSent(function ($request) {
+            if ($request->url() !== 'https://api.zavu.dev/v1/messages') {
+                return false;
+            }
+            $to = (string) ($request['to'] ?? '');
+            $text = (string) ($request['text'] ?? '');
+
+            return $to === '2349012345678'
+                && str_contains($text, 'Clinic is Friday at 3pm CAT.');
+        });
+    }
+
     public function test_ask_reply_by_request_id(): void
     {
         Cache::flush();
