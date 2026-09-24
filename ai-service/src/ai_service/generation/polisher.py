@@ -34,6 +34,8 @@ _LIST_KEY_VALUE = re.compile(
     r"(?P<label>[^:\n]{1,80}?)\s*:\s+"
     r"(?P<value>\S.*)$"
 )
+# Writer pass sometimes garbles "hackathon" (e.g. "Akhatin") even when the member spelled it correctly.
+_HACKATHON_GARBLE = re.compile(r"\bAkhatin\b", re.IGNORECASE)
 
 _WRITER_SYSTEM = """You are Zak's response writer — the last step before a community member sees the reply.
 
@@ -73,6 +75,7 @@ HARD RULES:
 
 WRITING QUALITY (this is why you exist):
 - Correct grammar, spelling, and punctuation. No typos.
+- If member_question contains a programme term spelled correctly (e.g. hackathon), keep that exact spelling in the reply; never substitute garbled variants.
 - Clear, complete sentences a careful human would send.
 - Easy to skim on a phone: short lead line, blank line, then numbered items when listing.
 - For link lists: "1. Clean meaningful caption" then the URL on the next line (never "caption: https://..." on one line).
@@ -112,10 +115,24 @@ class AnswerPolisher:
             try:
                 written = await self._model_write(text, question=question)
                 if written and len(written) >= 20:
-                    return self.deterministic_cleanup(written)
+                    return self._align_terms_from_question(
+                        self.deterministic_cleanup(written),
+                        question,
+                    )
             except Exception:
                 logger.exception("response_writer_failed; using deterministic cleanup")
-        return text
+        return self._align_terms_from_question(text, question)
+
+    @classmethod
+    def _align_terms_from_question(cls, answer: str, question: str | None) -> str:
+        if not answer or not question:
+            return answer
+        if "hackathon" not in question.lower():
+            return answer
+        fixed = _HACKATHON_GARBLE.sub("hackathon", answer)
+        if "hackathon" not in fixed.lower():
+            fixed = re.sub(r"\bhackath[a-z]{2,10}\b", "hackathon", fixed, flags=re.IGNORECASE)
+        return fixed
 
     @classmethod
     def _strip_emphasis(cls, text: str) -> str:

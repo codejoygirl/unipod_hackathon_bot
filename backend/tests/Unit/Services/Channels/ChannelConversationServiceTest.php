@@ -988,10 +988,10 @@ class ChannelConversationServiceTest extends TestCase
         $svc = new ChannelConversationService;
         $wa = $svc->shortIntro('whatsapp', 'whatsapp', 'group');
 
-        $this->assertStringContainsString('*Also reach me on*', $wa);
-        $this->assertStringContainsString("*Telegram*\nhttps://t.me/zak_meti_26_bot", $wa);
-        $this->assertStringContainsString("*Web Chat*\nhttp://localhost:3000", $wa);
-        $this->assertStringContainsString('*Private chat*', $wa);
+        $this->assertStringContainsString('*Also reach me on:*', $wa);
+        $this->assertStringContainsString("*Telegram:*\nhttps://t.me/zak_meti_26_bot", $wa);
+        $this->assertStringContainsString("*Web Chat:*\nhttp://localhost:3000", $wa);
+        $this->assertStringContainsString('*Private chat:*', $wa);
         $this->assertStringNotContainsString('Also on:', $wa);
         $this->assertStringNotContainsString(' · ', $wa);
     }

@@ -7,6 +7,7 @@ namespace App\Services\Channels;
 use App\Models\Community;
 use App\Models\KnowledgeSource;
 use App\Models\User;
+use App\Services\Channels\Zavu\ZavuClient;
 use App\Services\Knowledge\KnowledgeLifecycleService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -858,6 +859,16 @@ final class SpikeEscalationNotifier
             );
         }
 
+        if ($channel === 'whatsapp_zavu') {
+            $to = $this->zavuMemberE164($record);
+            if ($to === '') {
+                return false;
+            }
+            $text = app(ChannelConversationService::class)->formatCommandsInText($text, 'whatsapp');
+
+            return $this->notifyZavuMember($to, $text);
+        }
+
         Log::warning('spike.member_notify.unsupported_channel', [
             'channel' => $channel,
         ]);
@@ -1229,8 +1240,9 @@ final class SpikeEscalationNotifier
     {
         $telegramOk = $this->notifyTelegramAdmin($record);
         $whatsappOk = $this->notifyWhatsAppAdmins($record);
+        $zavuOk = $this->notifyZavuAdmins($record);
 
-        if (! $telegramOk && ! $whatsappOk) {
+        if (! $telegramOk && ! $whatsappOk && ! $zavuOk) {
             Log::warning('spike.escalation.notify_skipped', [
                 'reason' => 'no Telegram admin chat and no WhatsApp admin DM delivered',
                 'escalation_id' => $record['id'] ?? null,
@@ -1238,7 +1250,7 @@ final class SpikeEscalationNotifier
             ]);
         }
 
-        return $telegramOk || $whatsappOk;
+        return $telegramOk || $whatsappOk || $zavuOk;
     }
 
     /**
@@ -1388,6 +1400,133 @@ final class SpikeEscalationNotifier
         }
 
         return $any;
+    }
+
+    /**
+     * DM configured admin phones via official WhatsApp (Zavu Cloud API).
+     *
+     * @param  array<string, mixed>  $record
+     */
+    private function notifyZavuAdmins(array $record): bool
+    {
+        if (! config('whatsapp_zavu.enabled')) {
+            return false;
+        }
+
+        $phones = $this->zavuAdminPhoneDigits();
+        if ($phones === []) {
+            return false;
+        }
+
+        $text = $this->formatAdminMessage($record, 'whatsapp');
+        $text = app(ChannelConversationService::class)->formatCommandsInText($text, 'whatsapp');
+        $client = app(ZavuClient::class);
+        $any = false;
+
+        foreach ($phones as $phone) {
+            try {
+                $response = $client->sendWhatsAppText($phone, $text);
+            } catch (\Throwable $e) {
+                Log::error('spike.escalation.zavu_admin_notify_exception', [
+                    'to' => $phone,
+                    'error' => $e->getMessage(),
+                    'escalation_id' => $record['id'] ?? null,
+                ]);
+
+                continue;
+            }
+
+            $any = true;
+            Cache::put('whatsapp_admin_phone_seen:'.$phone, true, now()->addDays(30));
+
+            $waMessageId = $this->zavuOutboundMessageId($response);
+            if ($waMessageId !== '' && is_string($record['id'] ?? null) && $record['id'] !== '') {
+                $this->rememberWhatsAppEscalationMessage($waMessageId, (string) $record['id']);
+            }
+        }
+
+        return $any;
+    }
+
+    /**
+     * @return list<string> E.164 digits only
+     */
+    private function zavuAdminPhoneDigits(): array
+    {
+        $access = app(ChannelCommandAccess::class);
+        $botDigits = preg_replace('/\D+/', '', (string) config('whatsapp_zavu.phone_number', '')) ?? '';
+        $phones = [];
+        foreach ($access->whatsappAdminPhones() as $phone) {
+            $digits = preg_replace('/\D+/', '', (string) $phone) ?? '';
+            if ($digits === '' || ($botDigits !== '' && $digits === $botDigits)) {
+                continue;
+            }
+            $phones[] = $digits;
+        }
+
+        return array_values(array_unique($phones));
+    }
+
+    /**
+     * @param  array<string, mixed>  $response
+     */
+    private function zavuOutboundMessageId(array $response): string
+    {
+        foreach (['id', 'messageId', 'message_id'] as $key) {
+            $id = trim((string) ($response[$key] ?? ''));
+            if ($id !== '') {
+                return $id;
+            }
+        }
+
+        $data = $response['data'] ?? null;
+        if (is_array($data)) {
+            foreach (['id', 'messageId', 'message_id'] as $key) {
+                $id = trim((string) ($data[$key] ?? ''));
+                if ($id !== '') {
+                    return $id;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function zavuMemberE164(array $record): string
+    {
+        $phone = preg_replace('/\D+/', '', trim((string) ($record['from_phone'] ?? ''))) ?? '';
+        if ($phone !== '' && strlen($phone) >= 8) {
+            return $phone;
+        }
+
+        $from = preg_replace('/\D+/', '', trim((string) ($record['from'] ?? ''))) ?? '';
+
+        return strlen($from) >= 8 ? $from : '';
+    }
+
+    private function notifyZavuMember(string $toE164, string $text): bool
+    {
+        if (! config('whatsapp_zavu.enabled') || trim($text) === '') {
+            return false;
+        }
+
+        $to = preg_replace('/\D+/', '', $toE164) ?? '';
+        if ($to === '') {
+            return false;
+        }
+
+        try {
+            app(ZavuClient::class)->sendWhatsAppText($to, $text);
+        } catch (\Throwable $e) {
+            Log::warning('spike.zavu_member_notify_failed', [
+                'to' => $to,
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -2058,6 +2197,18 @@ final class SpikeEscalationNotifier
             }
 
             return $this->notifyWhatsAppMember($to, $text);
+        }
+
+        if ($channel === 'whatsapp_zavu') {
+            $to = preg_replace('/\D+/', '', $chatId) ?? '';
+            if ($to === '') {
+                return false;
+            }
+            if ($style === 'whatsapp') {
+                $text = app(ChannelConversationService::class)->formatCommandsInText($text, 'whatsapp');
+            }
+
+            return $this->notifyZavuMember($to, $text);
         }
 
         // Unknown channel adapter: treat as undelivered so the admin can follow up.

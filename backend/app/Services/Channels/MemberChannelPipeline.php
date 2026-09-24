@@ -7,6 +7,7 @@ namespace App\Services\Channels;
 use App\Contracts\Channels\MemberChannelHost;
 use App\DTOs\Channels\InboundMessage;
 use App\Services\Knowledge\KnowledgeLifecycleService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -32,6 +33,11 @@ final class MemberChannelPipeline
     public function tryAdminInbound(MemberChannelHost $host, InboundMessage $message, bool $isAdmin): ?string
     {
         if ($isAdmin) {
+            $cardReply = $this->tryAdminEscalationCardSwipe($host, $message);
+            if ($cardReply !== null) {
+                return $cardReply;
+            }
+
             $draftPublish = $this->tryAdminDraftPublishSwipe($host, $message);
             if ($draftPublish !== null) {
                 return $draftPublish;
@@ -349,6 +355,125 @@ final class MemberChannelPipeline
         );
 
         return (string) ($result['reply'] ?? 'Done.');
+    }
+
+    /**
+     * Swipe-reply on an escalation / share / feature card (same flow as WhatsApp web spike).
+     */
+    private function tryAdminEscalationCardSwipe(MemberChannelHost $host, InboundMessage $message): ?string
+    {
+        $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
+        $quotedMsgId = trim((string) ($message->raw['quoted_message_id'] ?? ''));
+        $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if ($quoted === '' && $quotedMsgId === '') {
+            return null;
+        }
+
+        // Zavu/Cloud API often omits replyToFromBot; still allow swipe when the quote is a known card.
+        $rawForCard = is_array($message->raw) ? $message->raw : [];
+        if (! $replyToBot) {
+            $linkedEsc = $quotedMsgId !== ''
+                && $this->escalationNotifier->findEscalationIdByWhatsAppMessageId($quotedMsgId) !== null;
+            $looksLikeCard = $this->commandAccess->looksLikeEscalationCardReply(
+                array_merge($rawForCard, ['reply_to_bot' => true]),
+            );
+            if (! $linkedEsc && ! $looksLikeCard) {
+                return null;
+            }
+        }
+
+        $ref = null;
+        if ($quotedMsgId !== '') {
+            $escId = $this->escalationNotifier->findEscalationIdByWhatsAppMessageId($quotedMsgId);
+            if (is_string($escId) && $escId !== '') {
+                $record = Cache::get('spike_escalation:'.$escId);
+                if (is_array($record)) {
+                    $ref = strtoupper(trim((string) ($record['ref'] ?? '')));
+                }
+            }
+        }
+        if ($ref === null || $ref === '') {
+            $ref = $this->escalationNotifier->extractRefFromCardText($quoted) ?? '';
+        }
+
+        $looksLikeCard = $this->commandAccess->looksLikeEscalationCardReply(
+            is_array($message->raw) ? $message->raw : [],
+        );
+
+        if ($ref === '') {
+            if ($looksLikeCard) {
+                return "I couldn't read the Request ID from that swipe-reply (WhatsApp often truncates the quote).\n\n"
+                    ."Copy it from the card and send:\n"
+                    ."```\n"
+                    ."/reply W7X1YT Your answer here\n"
+                    .'```';
+            }
+
+            return null;
+        }
+
+        $body = trim($message->text);
+        if ($body === '') {
+            return null;
+        }
+
+        [$actorId, $actorPhone] = $host->adminActor($message);
+        $channel = $host->channelName();
+
+        if (preg_match('/^\/?(approve|decline|reject)(?:\s+(\S+))?$/iu', $body, $m) === 1) {
+            $action = strtolower($m[1]);
+            $cmd = $this->escalationNotifier->tryAdminCommand(
+                "/{$action} {$ref}",
+                $channel,
+                $actorId,
+                $actorPhone,
+            );
+
+            return is_array($cmd) ? (string) ($cmd['reply'] ?? 'Done.') : null;
+        }
+
+        if (preg_match('/^\/?(blacklist|unblacklist)(?:\s+(\S+))?$/iu', $body, $m) === 1) {
+            $action = strtolower($m[1]);
+            $cmd = $this->escalationNotifier->tryAdminCommand(
+                "/{$action} {$ref}",
+                $channel,
+                $actorId,
+                $actorPhone,
+            );
+
+            return is_array($cmd) ? (string) ($cmd['reply'] ?? 'Done.') : null;
+        }
+
+        if (preg_match('/^\/?reply\b/iu', $body) === 1) {
+            $rest = trim((string) preg_replace('/^\/?reply\s+/iu', '', $body));
+            if ($rest === '') {
+                return "Type the answer in this swipe-reply, or:\n```\n/reply {$ref} Your answer here\n```";
+            }
+            if (str_starts_with(strtoupper($rest), $ref.' ')) {
+                return null;
+            }
+            $cmd = $this->escalationNotifier->tryAdminCommand(
+                "/reply {$ref} {$rest}",
+                $channel,
+                $actorId,
+                $actorPhone,
+            );
+
+            return is_array($cmd) ? (string) ($cmd['reply'] ?? 'Done.') : null;
+        }
+
+        if (preg_match('/^\/[a-z]+/iu', $body) === 1) {
+            return null;
+        }
+
+        $cmd = $this->escalationNotifier->tryAdminCommand(
+            "/reply {$ref} {$body}",
+            $channel,
+            $actorId,
+            $actorPhone,
+        );
+
+        return is_array($cmd) ? (string) ($cmd['reply'] ?? 'Done.') : null;
     }
 
     private function tryAdminDraftPublishSwipe(MemberChannelHost $host, InboundMessage $message): ?string

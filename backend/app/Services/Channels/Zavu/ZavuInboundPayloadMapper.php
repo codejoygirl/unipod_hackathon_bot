@@ -57,6 +57,18 @@ final class ZavuInboundPayloadMapper
                 && filter_var($content['replyToFromBot'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
                 $raw['reply_to_bot'] = true;
             }
+
+            // Quoting our outbound escalation card: treat as reply-to-bot even if Zavu omits the flag.
+            if (! filter_var($raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                $snippet = mb_strtolower(trim((string) ($raw['quoted_text'] ?? '')));
+                if ($snippet !== ''
+                    && (str_contains($snippet, 'needs a quick hand')
+                        || str_contains($snippet, 'request id:')
+                        || str_contains($snippet, 'member shared a note')
+                        || str_contains($snippet, 'member requested a feature'))) {
+                    $raw['reply_to_bot'] = true;
+                }
+            }
         }
 
         $media = $this->extractMedia($data);

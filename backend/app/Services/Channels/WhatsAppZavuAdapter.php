@@ -207,6 +207,7 @@ final class WhatsAppZavuAdapter implements ChannelAdapter, MemberChannelHost
         $communityId = $community?->id
             ?? (string) config('whatsapp_zavu.default_community_id', '');
 
+        $ctx = $this->memberEscalationContext($message);
         $result = $this->escalationNotifier->handleMemberAsk(
             channel: $this->channelName(),
             from: $message->externalUserId,
@@ -214,6 +215,10 @@ final class WhatsAppZavuAdapter implements ChannelAdapter, MemberChannelHost
             communityId: (string) $communityId,
             communityName: $community?->name,
             fromName: null,
+            fromPhone: $ctx['from_phone'],
+            chatType: $ctx['chat_type'],
+            chatId: $ctx['chat_id'],
+            messageId: $ctx['message_id'],
         );
 
         $reply = (string) ($result['reply'] ?? 'Done.');
@@ -247,7 +252,7 @@ final class WhatsAppZavuAdapter implements ChannelAdapter, MemberChannelHost
             return null;
         }
 
-        $body = $this->swipeQuote->foldIntoKnowledgeQuery($message, $body);
+        $body = $this->swipeQuote->foldIntoKnowledgeQuery($message, $question);
 
         $priorTurns = $this->conversation->turns($this->channelName(), $message->externalUserId);
         $query = $this->conversation->buildKnowledgeQuery($body, $priorTurns);
@@ -417,10 +422,15 @@ final class WhatsAppZavuAdapter implements ChannelAdapter, MemberChannelHost
 
         if ($result->answer === '') {
             $fromName = null;
+            $ctx = $this->memberEscalationContext($message);
             $this->escalationNotifier->escalate([
                 'question' => $question,
                 'from' => $message->externalUserId,
                 'from_name' => $fromName,
+                'from_phone' => $ctx['from_phone'],
+                'chat_type' => $ctx['chat_type'],
+                'chat_id' => $ctx['chat_id'],
+                'message_id' => $ctx['message_id'],
                 'community_id' => $communityId,
                 'community_name' => $community->name,
                 'reason' => (string) ($result->escalationReason ?? 'insufficient_evidence'),
@@ -567,6 +577,22 @@ final class WhatsAppZavuAdapter implements ChannelAdapter, MemberChannelHost
         $type = strtolower(trim((string) ($message->raw['chat_type'] ?? 'private')));
 
         return $type !== '' ? $type : 'private';
+    }
+
+    /**
+     * @return array{from_phone: string, chat_type: string, chat_id: string, message_id: string}
+     */
+    private function memberEscalationContext(InboundMessage $message): array
+    {
+        $phone = trim((string) ($message->raw['from_phone'] ?? $message->externalUserId));
+        $messageId = trim((string) ($message->raw['zavu_message_id'] ?? $message->messageId ?? ''));
+
+        return [
+            'from_phone' => $phone,
+            'chat_type' => $this->chatType($message),
+            'chat_id' => $message->externalUserId,
+            'message_id' => $messageId,
+        ];
     }
 
     /**

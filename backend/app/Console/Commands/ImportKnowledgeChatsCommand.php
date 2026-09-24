@@ -29,6 +29,7 @@ class ImportKnowledgeChatsCommand extends Command
 
     /** @var list<array{file: string, name: string, source_type: string}> */
     private const CHAT_IMPORTS = [
+        /*
         [
             'file' => 'meti-cohort-4_chat.txt',
             'name' => 'UniPods METI AI Program 2026 Cohort 4 chat',
@@ -39,9 +40,17 @@ class ImportKnowledgeChatsCommand extends Command
             'name' => 'Wadhwani UniPod AI Program Africa chat',
             'source_type' => 'whatsapp',
         ],
+        */
+        /*
         [
             'file' => 'meti-cohort-7_chat.txt',
             'name' => 'UniPods METI AI Program 2026 Cohort 7 chat',
+            'source_type' => 'whatsapp',
+        ],
+        */
+        [
+            'file' => 'meti-cohort-8_chat.txt',
+            'name' => 'UniPods METI AI Program 2026 Cohort 8 chat',
             'source_type' => 'whatsapp',
         ],
     ];
@@ -85,7 +94,7 @@ class ImportKnowledgeChatsCommand extends Command
 
                     return self::FAILURE;
                 }
-                $destName = 'meti-cohort-7_chat.txt';
+                $destName = 'meti-cohort-8_chat.txt';
                 File::copy($oneOff, $stagePath.DIRECTORY_SEPARATOR.$destName);
                 $this->components->info("Staged {$oneOff} → {$destName}");
             }
