@@ -74,6 +74,45 @@ class SpikeEscalationNotifierTest extends TestCase
         $this->assertSame($result['id'], Cache::get('spike_escalation_ref:'.$result['ref']));
     }
 
+    public function test_web_chat_channel_is_labeled_for_admins(): void
+    {
+        Cache::flush();
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'UniPods Cohort',
+        ]);
+
+        config([
+            'telegram_spike.bot_token' => 'test-token',
+            'telegram_spike.admin_chat_id' => '123456',
+            'zak_presence.web_chat_label' => 'Web Chat',
+        ]);
+
+        Http::fake([
+            'api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 4243],
+            ], 200),
+        ]);
+
+        (new SpikeEscalationNotifier)->escalate([
+            'question' => 'When is clinic?',
+            'from' => '2347041131371',
+            'community_id' => $community->id,
+            'community_name' => $community->name,
+            'reason' => 'insufficient_evidence',
+            'channel' => 'web_chat',
+        ]);
+
+        Http::assertSent(function ($request) {
+            $text = (string) $request['text'];
+
+            return str_contains($text, 'Channel: Web Chat')
+                && ! str_contains($text, 'web_chat');
+        });
+    }
+
     public function test_whatsapp_admin_card_for_telegram_member_does_not_fake_phone_mention(): void
     {
         Cache::flush();

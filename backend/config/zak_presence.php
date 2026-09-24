@@ -24,7 +24,7 @@ return [
     */
     'web_chat_url' => env('ZAK_WEB_CHAT_URL', env('FRONTEND_URL', 'http://localhost:3000')),
 
-    'web_chat_label' => env('ZAK_WEB_CHAT_LABEL', 'Web chat'),
+    'web_chat_label' => env('ZAK_WEB_CHAT_LABEL', 'Web Chat'),
 
     /** Include web chat in intros even when the UI is not live yet. */
     'show_web_chat' => filter_var(env('ZAK_SHOW_WEB_CHAT', true), FILTER_VALIDATE_BOOLEAN),

@@ -10,6 +10,7 @@ use App\Models\Community;
 use App\Models\KnowledgeSource;
 use App\Models\User;
 use App\Services\Knowledge\KnowledgeLifecycleService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -225,7 +226,7 @@ final class ProgramAssetRegistrar
         ];
 
         try {
-            $existing = $this->findExistingAsset($community, $identity, $canonical);
+            $existing = $this->findExistingAsset($community, $identity, $canonical, $title);
             if ($existing !== null) {
                 $existing->name = $title;
                 $existing->uri = $uri;
@@ -413,8 +414,12 @@ final class ProgramAssetRegistrar
         return preg_match('/^[a-zA-Z0-9_-]{5,}$/', $id) === 1;
     }
 
-    private function findExistingAsset(Community $community, string $identity, string $canonicalUrl): ?KnowledgeSource
-    {
+    private function findExistingAsset(
+        Community $community,
+        string $identity,
+        string $canonicalUrl,
+        ?string $title = null,
+    ): ?KnowledgeSource {
         $uri = 'community://'.$community->id.'/asset/'.$identity;
 
         $byUri = KnowledgeSource::query()
@@ -437,10 +442,119 @@ final class ProgramAssetRegistrar
             return $byLegacyUri;
         }
 
-        return KnowledgeSource::query()
+        $byId = KnowledgeSource::query()
             ->where('community_id', $community->id)
             ->where('metadata->asset_identity', $identity)
             ->first();
+        if ($byId !== null) {
+            return $byId;
+        }
+
+        if ($title !== null && trim($title) !== '') {
+            $normalized = mb_strtolower(trim($title));
+            $byTitle = KnowledgeSource::query()
+                ->where('community_id', $community->id)
+                ->whereNotNull('metadata->asset_identity')
+                ->whereRaw('LOWER(TRIM(name)) = ?', [$normalized])
+                ->first();
+            if ($byTitle !== null) {
+                return $byTitle;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Member /assets — published program files only (title + link, no admin IDs).
+     */
+    public function memberCatalogReply(Community $community, string $filterArg = '', string $style = 'whatsapp'): string
+    {
+        $filter = strtolower(trim($filterArg));
+        $cmd = $this->conversation->highlightCommand('/assets', $style);
+
+        if (in_array($filter, ['help', '?'], true)) {
+            return $this->memberCatalogUsage($cmd, $style);
+        }
+
+        if ($filter !== '' && ! in_array($filter, ['all', 'list'], true)
+            && ! in_array($filter, ['handbook', 'form', 'slides', 'other'], true)) {
+            return $style === 'whatsapp'
+                ? "*Unknown filter.*\n\nTry:\n```\n/assets\n/assets form\n/assets slides\n```"
+                : "Unknown filter. Try /assets, /assets form, /assets slides, /assets handbook, /assets other.";
+        }
+
+        $query = KnowledgeSource::query()
+            ->where('community_id', $community->id)
+            ->where('lifecycle_status', KnowledgeLifecycleStatus::Published)
+            ->whereNotNull('metadata->asset_identity')
+            ->where('metadata->asset_identity', '!=', '');
+
+        if (in_array($filter, ['handbook', 'form', 'slides', 'other'], true)) {
+            $query->where('metadata->asset_kind', $filter);
+        }
+
+        /** @var Collection<int, KnowledgeSource> $sources */
+        $sources = $query->orderBy('name')->limit(40)->get();
+
+        if ($sources->isEmpty()) {
+            $hint = in_array($filter, ['handbook', 'form', 'slides', 'other'], true)
+                ? "No published {$filter} files yet."
+                : 'No published program files yet.';
+
+            return $style === 'whatsapp'
+                ? "*Program files*\n\n{$hint}\n\nAsk in plain language if you need something specific."
+                : "Program files\n\n{$hint}\n\nAsk in plain language if you need something specific.";
+        }
+
+        $heading = in_array($filter, ['handbook', 'form', 'slides', 'other'], true)
+            ? 'Published '.ucfirst($filter).' files'
+            : 'Published program files';
+
+        $lines = [];
+        $i = 1;
+        foreach ($sources as $source) {
+            $title = trim((string) $source->name);
+            if ($title === '') {
+                continue;
+            }
+            $url = trim((string) (($source->metadata['delivery_url'] ?? '') ?: ''));
+            $kind = trim((string) ($source->metadata['asset_kind'] ?? ''));
+            $kindLabel = $kind !== '' ? ucfirst($kind) : 'File';
+            if ($url === '' || preg_match('/[…]|\.{2,}(?:\/|$|\?|#)|YOUR_[A-Z0-9_]+/u', $url) === 1) {
+                $lines[] = $style === 'whatsapp'
+                    ? "{$i}. *{$title}* ({$kindLabel})"
+                    : "{$i}. {$title} ({$kindLabel})";
+            } else {
+                $lines[] = $style === 'whatsapp'
+                    ? "{$i}. *{$title}* ({$kindLabel})\n   {$url}"
+                    : "{$i}. {$title} ({$kindLabel})\n   {$url}";
+            }
+            $i++;
+        }
+
+        if ($style === 'whatsapp') {
+            return "*{$heading}*\n\n".implode("\n\n", $lines);
+        }
+
+        return "{$heading}\n\n".implode("\n\n", $lines);
+    }
+
+    private function memberCatalogUsage(string $cmd, string $style): string
+    {
+        if ($style === 'whatsapp') {
+            return "*Program files for members*\n\n"
+                ."```\n"
+                ."/assets\n"
+                ."/assets form\n"
+                ."/assets slides\n"
+                ."/assets handbook\n"
+                ."/assets other\n"
+                ."```\n\n"
+                .'Only published files appear here.';
+        }
+
+        return "Program files:\n  {$cmd}\n  {$cmd} form | slides | handbook | other\n\nOnly published files appear here.";
     }
 
     private function usageReply(string $cmd, string $style): string

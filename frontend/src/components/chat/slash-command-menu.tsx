@@ -1,13 +1,18 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { ALL_COMMANDS } from "@/lib/chat/commands-data";
+import { ALL_COMMANDS, type BotCommandItem } from "@/lib/chat/commands-data";
+
+type MenuRow =
+  | { kind: "photo" }
+  | { kind: "command"; item: BotCommandItem };
 
 interface SlashCommandMenuProps {
   isOpen: boolean;
   filterText: string;
   isAdmin?: boolean;
   onSelect: (commandText: string) => void;
+  onAttachPhoto?: () => void;
   onClose: () => void;
 }
 
@@ -16,6 +21,7 @@ export function SlashCommandMenu({
   filterText,
   isAdmin = false,
   onSelect,
+  onAttachPhoto,
   onClose,
 }: SlashCommandMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -27,7 +33,9 @@ export function SlashCommandMenu({
     setSelectedIndex(0);
   }
 
-  const cleanFilter = filterText.startsWith("/") ? filterText.slice(1).toLowerCase() : filterText.toLowerCase();
+  const cleanFilter = filterText.startsWith("/")
+    ? filterText.slice(1).toLowerCase()
+    : filterText.toLowerCase();
 
   const filteredCommands = ALL_COMMANDS.filter((cmd) => {
     if (!isAdmin && cmd.category === "admin") {
@@ -40,6 +48,16 @@ export function SlashCommandMenu({
     );
   });
 
+  const showPhoto =
+    Boolean(onAttachPhoto) &&
+    (!cleanFilter ||
+      ["photo", "image", "attach", "picture"].some((word) => word.startsWith(cleanFilter)));
+
+  const rows: MenuRow[] = [
+    ...(showPhoto ? [{ kind: "photo" as const }] : []),
+    ...filteredCommands.map((item) => ({ kind: "command" as const, item })),
+  ];
+
   // Handle keyboard navigation (ArrowUp, ArrowDown, Enter, Escape)
   useEffect(() => {
     if (!isOpen) return;
@@ -47,15 +65,19 @@ export function SlashCommandMenu({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedIndex((prev) => (prev + 1) % Math.max(1, filteredCommands.length));
+        setSelectedIndex((prev) => (prev + 1) % Math.max(1, rows.length));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setSelectedIndex((prev) => (prev - 1 + filteredCommands.length) % Math.max(1, filteredCommands.length));
-      } else if (e.key === "Enter" && filteredCommands.length > 0) {
+        setSelectedIndex(
+          (prev) => (prev - 1 + rows.length) % Math.max(1, rows.length),
+        );
+      } else if (e.key === "Enter" && rows.length > 0) {
         e.preventDefault();
-        const selected = filteredCommands[selectedIndex];
-        if (selected) {
-          onSelect(selected.example || selected.command + " ");
+        const selected = rows[selectedIndex];
+        if (selected?.kind === "photo") {
+          onAttachPhoto?.();
+        } else if (selected?.kind === "command") {
+          onSelect(selected.item.example || selected.item.command + " ");
         }
       } else if (e.key === "Escape") {
         e.preventDefault();
@@ -65,7 +87,7 @@ export function SlashCommandMenu({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, filteredCommands, selectedIndex, onSelect, onClose]);
+  }, [isOpen, rows, selectedIndex, onSelect, onAttachPhoto, onClose]);
 
   // Close on outside click
   useEffect(() => {
@@ -81,7 +103,7 @@ export function SlashCommandMenu({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen, onClose]);
 
-  if (!isOpen || filteredCommands.length === 0) {
+  if (!isOpen || rows.length === 0) {
     return null;
   }
 
@@ -91,13 +113,38 @@ export function SlashCommandMenu({
       className="absolute bottom-full left-0 right-0 mb-2 z-40 max-h-72 overflow-y-auto no-scrollbar rounded-2xl border border-zinc-200/90 bg-white/98 p-1.5 shadow-xl backdrop-blur-md transition-all animate-popover-in dark:border-zinc-700/80 dark:bg-[#1f1f1f]/98"
     >
       <div className="flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider border-b border-zinc-100 dark:border-zinc-800">
-        <span>Quick Commands</span>
+        <span>Tools & commands</span>
         <span>Use ↑↓ to navigate · Enter to select</span>
       </div>
 
       <div className="mt-1 space-y-0.5">
-        {filteredCommands.map((item, index) => {
+        {rows.map((row, index) => {
           const isSelected = index === selectedIndex;
+          if (row.kind === "photo") {
+            return (
+              <button
+                key="attach-photo"
+                type="button"
+                onClick={() => onAttachPhoto?.()}
+                onMouseEnter={() => setSelectedIndex(index)}
+                className={`w-full flex items-center justify-between rounded-xl px-3 py-2 text-left transition cursor-pointer ${
+                  isSelected
+                    ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+                    : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-xs font-semibold">Attach photo</span>
+                  <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                    JPEG, PNG, WebP, or GIF
+                  </span>
+                </div>
+                <span className="text-[10px] text-zinc-400">↵</span>
+              </button>
+            );
+          }
+
+          const item = row.item;
           return (
             <button
               key={item.command}

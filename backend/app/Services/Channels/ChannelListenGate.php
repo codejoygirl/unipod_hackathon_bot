@@ -14,7 +14,7 @@ namespace App\Services\Channels;
 final class ChannelListenGate
 {
     /** @var list<string> */
-    public const MEMBER_COMMANDS = ['join', 'help', 'start', 'ask', 'share', 'feature'];
+    public const MEMBER_COMMANDS = ['join', 'help', 'start', 'ask', 'share', 'feature', 'assets'];
 
     /** @var list<string> */
     public const ADMIN_COMMANDS = [
@@ -22,6 +22,8 @@ final class ChannelListenGate
         'export', // alias of /import (legacy)
         'asset', // register a Drive/program file into knowledge
         'publish', // publish a knowledge draft from chat
+        'unpublish', // unpublish a knowledge source
+        'archive', // alias of unpublish
         'knowledge', // list drafts / published / assets
         'kb', // alias of /knowledge
         'features', // list open / decided feature requests
@@ -216,13 +218,61 @@ final class ChannelListenGate
             return true;
         }
 
-        if (preg_match('/^\/?([a-z]+)\b/iu', $trimmed, $m) !== 1) {
+        if (preg_match('/^\/([a-z]+)\b/iu', $trimmed, $m) !== 1) {
             return false;
         }
 
         $cmd = strtolower($m[1]);
 
         return in_array($cmd, [...self::MEMBER_COMMANDS, ...self::ADMIN_COMMANDS], true);
+    }
+
+    /**
+     * Slash-led bot command only (/share). Plain "Share me…" does not match.
+     */
+    public function startsWithSlashCommand(string $text, string $command): bool
+    {
+        $trimmed = ltrim($text);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        $command = strtolower(trim($command));
+        if ($command === '') {
+            return false;
+        }
+
+        return preg_match(
+            '/^\/'.preg_quote($command, '/').'\b/iu',
+            $trimmed,
+        ) === 1;
+    }
+
+    /**
+     * Text after a leading /command (empty when the message is only /command).
+     */
+    public function slashCommandBody(string $text, string $command): string
+    {
+        $trimmed = ltrim($text);
+        if (! $this->startsWithSlashCommand($trimmed, $command)) {
+            return $trimmed;
+        }
+
+        $rest = preg_replace(
+            '/^\/'.preg_quote(strtolower(trim($command)), '/').'\b\s*/iu',
+            '',
+            $trimmed,
+        );
+
+        return trim((string) $rest);
+    }
+
+    public function startsWithHelpOrStart(string $text): bool
+    {
+        $upper = strtoupper(ltrim($text));
+
+        return str_starts_with($upper, '/HELP') || $upper === 'HELP'
+            || str_starts_with($upper, '/START') || $upper === 'START';
     }
 
     /**
@@ -237,16 +287,17 @@ final class ChannelListenGate
             return true;
         }
 
+        $media = is_array($payload['media'] ?? null) ? $payload['media'] : [];
+        if (trim((string) ($media['data_base64'] ?? '')) !== '') {
+            return true;
+        }
+
         $trimmed = ltrim(trim($text));
         if ($trimmed === '') {
             return false;
         }
 
-        if ($this->startsWithRecognizedCommand($trimmed)) {
-            return true;
-        }
-
-        return preg_match('/^(ASK|SHARE|FEATURE|IMPORT|EXPORT|JOIN)\b/iu', $trimmed) === 1;
+        return $this->startsWithRecognizedCommand($trimmed);
     }
 
     /**

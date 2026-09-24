@@ -452,9 +452,7 @@ export function ChatSidebar({
             <Tooltip content="Community assistant" position="right">
               <Link
                 href={withPhoneQuery("/", memberPhone)}
-                className={`flex h-9 w-9 items-center justify-center rounded-xl overflow-hidden shadow-2xs select-none hover:opacity-90 active:scale-95 transition cursor-pointer ${
-                  isAssistantHome ? "ring-2 ring-emerald-500/40 ring-offset-1 ring-offset-[#171717] dark:ring-offset-[#171717]" : ""
-                }`}
+                className="flex h-9 w-9 items-center justify-center rounded-xl overflow-hidden shadow-2xs select-none hover:opacity-90 active:scale-95 transition cursor-pointer"
               >
                 <Image
                   src={APP_LOGO_SRC}
@@ -600,7 +598,7 @@ export function ChatSidebar({
             </Tooltip>
 
             {/* Updates & Info */}
-            <Tooltip content="Updates & info" position="right">
+            <Tooltip content="Notifications & what's new" position="right">
               <button
                 type="button"
                 onClick={() => window.dispatchEvent(new CustomEvent("open-updates-modal"))}

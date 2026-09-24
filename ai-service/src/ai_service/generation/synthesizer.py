@@ -918,6 +918,17 @@ class AnswerSynthesizer:
             wants_meeting_links = mode_hint == "meetings"
             wants_recordings = mode_hint == "recordings"
             wants_generic_links = mode_hint == "assets"
+            # Classifier sometimes tags schedule asks as meetings; do not dump every URL
+            # unless the model already listed a link or English offline link-shape matches.
+            offline_link_shape = (
+                (wants_meeting_links and _MEETING_LINK_ASK_RE.search(question))
+                or (wants_recordings and _RECORDING_ASK_RE.search(question))
+                or (wants_generic_links and _LINK_ASK_RE.search(question))
+            )
+            if not offline_link_shape and not _URL_RE.search(answer or ""):
+                wants_meeting_links = False
+                wants_recordings = False
+                wants_generic_links = False
         else:
             wants_meeting_links = bool(_MEETING_LINK_ASK_RE.search(question))
             wants_recordings = bool(_RECORDING_ASK_RE.search(question)) and not wants_meeting_links
@@ -1222,14 +1233,7 @@ class AnswerSynthesizer:
 
         # Keep prose for multi-part asks ("… also any meeting today?").
         # Use original question only — never the whole follow-up envelope.
-        has_extra = bool(
-            re.search(r"\balso\b", q)
-            or question.count("?") >= 2
-            or (
-                wants_any
-                and re.search(r"\b(today|tomorrow|this week|schedule|when|any meeting)\b", q)
-            )
-        )
+        has_extra = bool(re.search(r"\balso\b", q) or question.count("?") >= 2)
         if has_extra:
             prose_lines: list[str] = []
             for line in (answer or "").splitlines():

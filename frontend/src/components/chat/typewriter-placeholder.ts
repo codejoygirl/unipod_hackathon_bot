@@ -11,6 +11,7 @@ export const PROGRAMME_PROMPT_EXAMPLES = [
   "How do I submit my project draft?",
   "Where are the Wadhwani resource links?",
   "How do I request a mentor meeting?",
+  "Send a photo of the flyer or schedule…",
   "Type / for quick commands...",
 ];
 

@@ -209,4 +209,93 @@ class AdminKnowledgeDeskTest extends TestCase
         $desk = app(AdminKnowledgeDesk::class);
         $this->assertNull($desk->tryHandle('/feature Add voice notes', $user, $community, 'whatsapp'));
     }
+
+    public function test_unpublish_archives_published_source_and_calls_ai_deactivate(): void
+    {
+        Http::fake([
+            '*/ingestion/deactivate/*' => Http::response([
+                'source_id' => '33333333-3333-3333-3333-333333333333',
+                'status' => 'archived',
+            ], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+
+        $source = KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'Old Program Guide',
+            'uri' => 'community://'.$community->id.'/asset/gfolder:oldguide',
+            'source_type' => 'markdown',
+            'lifecycle_status' => KnowledgeLifecycleStatus::Published,
+            'language' => 'en',
+            'content' => 'Old guide content',
+            'content_sha256' => hash('sha256', 'Old guide content'),
+            'ai_source_id' => '33333333-3333-3333-3333-333333333333',
+            'metadata' => [
+                'delivery_url' => 'https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs',
+            ],
+        ]);
+
+        $desk = app(AdminKnowledgeDesk::class);
+        $shortId = $desk->shortId($source);
+
+        $result = $desk->tryHandle('/unpublish '.$shortId, $user, $community, 'plain');
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('Unpublished', $result['reply']);
+        $this->assertStringContainsString('Old Program Guide', $result['reply']);
+        $this->assertStringContainsString('archived', mb_strtolower($result['reply']));
+
+        $this->assertDatabaseHas('knowledge_documents', [
+            'id' => $source->id,
+            'lifecycle_status' => KnowledgeLifecycleStatus::Archived->value,
+        ]);
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/ingestion/deactivate/33333333-3333-3333-3333-333333333333'));
+    }
+
+    public function test_unpublish_resolves_by_drive_url(): void
+    {
+        Http::fake([
+            '*/ingestion/deactivate/*' => Http::response([], 200),
+        ]);
+
+        $tenant = Tenant::factory()->create();
+        $community = Community::factory()->create(['tenant_id' => $tenant->id]);
+        $user = User::factory()->create();
+
+        $source = KnowledgeSource::query()->create([
+            'tenant_id' => $tenant->id,
+            'community_id' => $community->id,
+            'created_by' => $user->id,
+            'name' => 'Broken Drive Folder',
+            'uri' => 'community://'.$community->id.'/asset/gfolder:1bximvs0xra5nfmdkvbdbzjgmuuqptlbs',
+            'source_type' => 'markdown',
+            'lifecycle_status' => KnowledgeLifecycleStatus::Published,
+            'language' => 'en',
+            'content' => 'Broken folder',
+            'content_sha256' => hash('sha256', 'Broken folder'),
+            'metadata' => [
+                'delivery_url' => 'https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs',
+            ],
+        ]);
+
+        $desk = app(AdminKnowledgeDesk::class);
+
+        // Can pass the drive link directly
+        $result = $desk->tryHandle('/unpublish https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs', $user, $community, 'whatsapp');
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('Unpublished', $result['reply']);
+        $this->assertStringContainsString('Broken Drive Folder', $result['reply']);
+
+        $this->assertDatabaseHas('knowledge_documents', [
+            'id' => $source->id,
+            'lifecycle_status' => KnowledgeLifecycleStatus::Archived->value,
+        ]);
+    }
 }

@@ -50,22 +50,38 @@ def test_social_prompt_keeps_reply_in_question_language():
     assert "English message → English reply" in prompt
     assert "do not switch into French" in prompt.lower() or "must be English" in prompt
     assert "continue in that language" not in prompt.lower()
+    assert "CURRENT TIME" in prompt
 
 
 def test_reply_user_prompt_locks_to_latest_message_language():
     from ai_service.api.routes.conversation import _reply_user_prompt
 
-    auto = _reply_user_prompt("I need help", None)
+    auto = _reply_user_prompt("I need help", None, timezone_name="UTC")
+    assert "CURRENT TIME" in auto
     assert "member_message" in auto
     assert "I need help" in auto
     assert "untrusted" in auto.lower()
     assert "English message → English reply" in auto
     assert "do not reply in french" in auto.lower()
 
-    forced = _reply_user_prompt("I need help", "fr")
+    forced = _reply_user_prompt("I need help", "fr", timezone_name="Africa/Lagos")
+    assert "CURRENT TIME" in forced
     assert "French" in forced
     assert "ISO fr" in forced
     assert "I need help" in forced
+
+
+def test_classify_prompt_meeting_today_is_knowledge_not_link_dump():
+    prompt = _classify_system_prompt("Demo Community", "METI programme")
+    assert "Are we having a meeting today?" in prompt
+    assert "knowledge|none|no|na" in prompt
+
+
+def test_classify_prompt_treats_today_date_as_conversational():
+    prompt = _classify_system_prompt("Demo Community", "METI programme")
+    assert "What is today's date?" in prompt
+    assert "conversational|none|no|na" in prompt
+    assert "NOT today's date" in prompt or "NOT today" in prompt
 
 def test_system_prompt_keeps_scope_topics_in_bounds():
     prompt = _system_prompt(
@@ -205,3 +221,44 @@ def test_transcribe_request_model_bounds():
     )
     assert req.audio_base64 == "AAAABBBB"
     assert req.mime_type == "audio/ogg"
+
+
+def test_understand_image_request_model_bounds():
+    from ai_service.api.routes.conversation import (
+        ConversationUnderstandImagePart,
+        ConversationUnderstandImageRequest,
+        _image_understand_prompt,
+    )
+
+    req = ConversationUnderstandImageRequest(
+        image_base64="AAAABBBB",
+        mime_type="image/jpeg",
+        filename="photo.jpg",
+        caption="When is this?",
+    )
+    assert req.image_base64 == "AAAABBBB"
+    assert req.mime_type == "image/jpeg"
+    prompt = _image_understand_prompt("When is this?")
+    assert "UNTRUSTED" in prompt
+    assert "<untrusted_caption>" in prompt
+    assert "When is this?" in prompt
+
+    multi = ConversationUnderstandImageRequest(
+        images=[
+            ConversationUnderstandImagePart(
+                image_base64="AAAABBBB",
+                mime_type="image/jpeg",
+                filename="a.jpg",
+            ),
+            ConversationUnderstandImagePart(
+                image_base64="CCCCDDDD",
+                mime_type="image/png",
+                filename="b.png",
+            ),
+        ],
+        caption="Compare these",
+    )
+    assert multi.images is not None
+    assert len(multi.images) == 2
+    multi_prompt = _image_understand_prompt("Compare these", image_count=2)
+    assert "2 member photos" in multi_prompt

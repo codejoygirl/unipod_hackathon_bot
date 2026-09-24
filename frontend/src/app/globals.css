@@ -264,6 +264,36 @@ body,
   animation: popoverOut 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes mobileSheetIn {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mobileSheetOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+.animate-mobile-sheet-in {
+  animation: mobileSheetIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-mobile-sheet-out {
+  animation: mobileSheetOut 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 @keyframes indeterminate {
   0% {
     transform: translateX(-100%);

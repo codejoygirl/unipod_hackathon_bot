@@ -117,6 +117,32 @@ final class KnowledgeLifecycleService
         });
     }
 
+    public function unpublish(User $user, KnowledgeSource $source): KnowledgeSource
+    {
+        return DB::transaction(function () use ($user, $source): KnowledgeSource {
+            if ($source->ai_source_id !== null) {
+                try {
+                    $this->aiClient->deactivateSource($source->ai_source_id);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('knowledge.deactivate_ai_failed', [
+                        'source_id' => $source->id,
+                        'ai_source_id' => $source->ai_source_id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            $source->lifecycle_status = KnowledgeLifecycleStatus::Archived;
+            $source->save();
+
+            $this->audit->record('knowledge.unpublished', $source->tenant_id, $source, [
+                'ai_source_id' => $source->ai_source_id,
+            ]);
+
+            return $source->refresh();
+        });
+    }
+
     /**
      * Unified import: text body and/or uploaded file → draft for review.
      *

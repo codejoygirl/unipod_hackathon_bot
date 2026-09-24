@@ -106,6 +106,29 @@ async def activate_source(
 
 
 @router.post(
+    "/deactivate/{source_id}",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_hmac)],
+    summary="Mark an indexed source unsearchable (active → archived)",
+)
+async def deactivate_source(
+    source_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Flip index status to archived after Laravel unpublish."""
+    result = await session.execute(
+        select(KnowledgeSource).where(KnowledgeSource.id == source_id)
+    )
+    source = result.scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found.")
+
+    source.status = "archived"
+    await session.commit()
+    return {"source_id": str(source.id), "status": source.status}
+
+
+@router.post(
     "/multimodal",
     response_model=IngestionResponse,
     status_code=status.HTTP_200_OK,
