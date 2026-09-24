@@ -39,7 +39,10 @@ return [
     /*
     | Admin senders (E.164 digits). Defaults to WHATSAPP_WEB_SPIKE_ADMIN_PHONES when unset.
     */
-    'admin_phones' => env('WHATSAPP_ZAVU_ADMIN_PHONES', ''),
+    'admin_phones' => env(
+        'WHATSAPP_ZAVU_ADMIN_PHONES',
+        (string) env('WHATSAPP_WEB_SPIKE_ADMIN_PHONES', ''),
+    ),
 
     /*
     | When true, handle inbound in-request (local/dev). Prefer queue + afterResponse

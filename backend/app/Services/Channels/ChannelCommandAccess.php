@@ -239,6 +239,11 @@ final class ChannelCommandAccess
      */
     public function whatsappAdminPhones(): array
     {
+        $zavuCsv = trim((string) config('whatsapp_zavu.admin_phones', ''));
+        if ($zavuCsv !== '') {
+            return self::parsePhoneList($zavuCsv);
+        }
+
         $raw = config('whatsapp_web_spike.admin_phones', []);
         if (is_string($raw)) {
             return self::parsePhoneList($raw);

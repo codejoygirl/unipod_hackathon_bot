@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 
+from ai_service.generation.response_quality_judge import ResponseQualityJudge
 from ai_service.providers.base import ChatMessage, ChatModel, ChatRequest
 from ai_service.security.sanitizer import fence_untrusted
 
@@ -34,7 +35,6 @@ _LIST_KEY_VALUE = re.compile(
     r"(?P<label>[^:\n]{1,80}?)\s*:\s+"
     r"(?P<value>\S.*)$"
 )
-
 _WRITER_SYSTEM = """You are Zak's response writer — the last step before a community member sees the reply.
 
 You receive a DRAFT that was already grounded in retrieved community notes. Your job is to rewrite it so it reads like a sharp, professional human community assistant on WhatsApp/Telegram.
@@ -72,7 +72,7 @@ HARD RULES:
 - No English footer / source line (e.g. "From the community chat") on non-English replies.
 
 WRITING QUALITY (this is why you exist):
-- Correct grammar, spelling, and punctuation. No typos.
+- Correct grammar, spelling, and punctuation. No typos or nonsense garbles.
 - Clear, complete sentences a careful human would send.
 - Easy to skim on a phone: short lead line, blank line, then numbered items when listing.
 - For link lists: "1. Clean meaningful caption" then the URL on the next line (never "caption: https://..." on one line).
@@ -96,6 +96,7 @@ class AnswerPolisher:
 
     def __init__(self, chat_model: ChatModel | None = None) -> None:
         self._chat = chat_model
+        self._judge = ResponseQualityJudge(chat_model)
 
     async def polish(
         self,
@@ -112,10 +113,42 @@ class AnswerPolisher:
             try:
                 written = await self._model_write(text, question=question)
                 if written and len(written) >= 20:
-                    return self.deterministic_cleanup(written)
+                    written = self.deterministic_cleanup(written)
+                    written = await self._maybe_repair_after_judge(
+                        written,
+                        question=question,
+                    )
+                    return written
             except Exception:
                 logger.exception("response_writer_failed; using deterministic cleanup")
         return text
+
+    async def _maybe_repair_after_judge(
+        self,
+        answer: str,
+        *,
+        question: str | None,
+    ) -> str:
+        q = (question or "").strip()
+        if not q or self._chat is None:
+            return answer
+        verdict = await self._judge.evaluate(question=q, answer=answer)
+        if verdict is None or verdict.passed:
+            return answer
+        issues = verdict.issues or [
+            "Reply must fully address the member question with clean spelling and grammar.",
+        ]
+        try:
+            repaired = await self._model_write(
+                answer,
+                question=question,
+                revision_notes=issues,
+            )
+            if repaired and len(repaired) >= 20:
+                return self.deterministic_cleanup(repaired)
+        except Exception:
+            logger.exception("response_writer_repair_failed")
+        return answer
 
     @classmethod
     def _strip_emphasis(cls, text: str) -> str:
@@ -235,13 +268,26 @@ class AnswerPolisher:
         text = AnswerSynthesizer.restore_urls_in_answer(text)
         return text.strip()
 
-    async def _model_write(self, draft: str, *, question: str | None) -> str:
+    async def _model_write(
+        self,
+        draft: str,
+        *,
+        question: str | None,
+        revision_notes: list[str] | None = None,
+    ) -> str:
         assert self._chat is not None
         parts = [
             "Rewrite this grounded draft into the final member-facing reply.",
             "Use WhatsApp *single-asterisk* bold on list values (Label: *value*). "
             "Never use **double asterisks**.",
         ]
+        if revision_notes:
+            notes = "\n".join(f"- {n}" for n in revision_notes[:5])
+            parts.append(
+                "QUALITY REVISION (mandatory): An independent evaluator flagged issues:\n"
+                f"{notes}\n"
+                "Fix them while keeping every fact and https URL from draft_reply."
+            )
         if question:
             parts.append(fence_untrusted("member_question", question, max_chars=1500))
             parts.append(

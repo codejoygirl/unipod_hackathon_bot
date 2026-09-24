@@ -72,6 +72,15 @@ def test_strips_evidence_tags():
     assert "Joy helps with onboarding" in out
 
 
+def test_writer_system_has_no_keyword_term_hardcoding():
+    from ai_service.generation.polisher import _WRITER_SYSTEM
+
+    lower = _WRITER_SYSTEM.lower()
+    assert "key terms" not in lower
+    assert "hackathon" not in lower
+    assert "akhatin" not in lower
+
+
 def test_writer_system_prioritizes_member_question_language():
     from ai_service.generation.polisher import _WRITER_SYSTEM
 
