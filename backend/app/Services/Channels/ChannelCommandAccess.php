@@ -86,7 +86,7 @@ final class ChannelCommandAccess
             return false;
         }
 
-        if (preg_match('/^\/?([a-z]+)\b/iu', $trimmed, $m) !== 1) {
+        if (preg_match('/^\/([a-z]+)\b/iu', $trimmed, $m) !== 1) {
             return false;
         }
 

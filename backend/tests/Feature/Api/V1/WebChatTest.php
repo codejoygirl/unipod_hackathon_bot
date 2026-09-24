@@ -270,6 +270,61 @@ final class WebChatTest extends TestCase
         $this->assertSame('https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs', $resources[0]['url']);
     }
 
+    public function test_ask_with_image_extracts_then_answers(): void
+    {
+        Http::fake([
+            '*/conversation/understand-image' => Http::response([
+                'text' => 'When is the next session?',
+            ], 200),
+            '*/retrieval/grounded-answer' => Http::response([
+                'query' => 'When is the next session?',
+                'detected_language' => 'en',
+                'execution_time_ms' => 5.0,
+                'total_chunks_retrieved' => 0,
+                'validated_payload' => [
+                    'state' => 'INSUFFICIENT_EVIDENCE',
+                    'answer' => 'No sources found.',
+                    'confidence_score' => 0.1,
+                    'needs_escalation' => true,
+                    'escalation_reason' => null,
+                    'citations' => [],
+                    'conflicts' => [],
+                ],
+            ], 200),
+        ]);
+
+        [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
+
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $phone,
+            'query' => '',
+            'image_base64' => base64_encode(str_repeat('x', 64)),
+            'image_mime' => 'image/jpeg',
+            'image_filename' => 'flyer.jpg',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'INSUFFICIENT_EVIDENCE');
+    }
+
+    public function test_ask_requires_query_or_image(): void
+    {
+        [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
+
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $phone,
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['query']);
+    }
+
     public function test_feature_request_stores_in_database_and_returns_ref(): void
     {
         [, $community] = $this->seedMember();

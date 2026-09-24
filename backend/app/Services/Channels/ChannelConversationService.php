@@ -1113,6 +1113,15 @@ final class ChannelConversationService
             return $applyFocus($resolved);
         }
 
+        // Model mis-fired out_of_scope for a normal assistant turn — only honor OOS when
+        // offline hard-refuse agrees (math, jokes, weather, etc.).
+        if ($modelIntent === self::INTENT_OUT_OF_SCOPE && ! $this->isClearlyOutOfScope($query)) {
+            $resolved['intent'] = self::INTENT_CONVERSATIONAL;
+            $resolved['link_mode'] = 'none';
+
+            return $applyFocus($resolved);
+        }
+
         $resolved['intent'] = $modelIntent !== '' ? $modelIntent : $offlineIntent;
         // Prefer model link_mode (works in any language); English offline is fallback only.
         $resolved['link_mode'] = $linkMode !== 'none' ? $linkMode : $offlineLink;
@@ -1845,6 +1854,18 @@ final class ChannelConversationService
             .'Try a shorter clip (about a minute), or type the question.';
     }
 
+    public function imageNoteFailedReply(): string
+    {
+        return "I can read photos 📷. I just couldn't make that one out clearly.\n\n"
+            .'Try sending it again, send a voice note, or type what you need.';
+    }
+
+    public function imageNoteTooLargeReply(): string
+    {
+        return "That photo is a bit large for me right now 📷\n\n"
+            .'Try a smaller picture, or type the question.';
+    }
+
     /**
      * Soft deferral when a turn fails transiently (sync snag or after queue retries).
      * Industry pattern: acknowledge receipt + set expectation — do not ask them to resend.
@@ -2223,7 +2244,7 @@ final class ChannelConversationService
         }
 
         if (filter_var(config('zak_presence.show_web_chat', true), FILTER_VALIDATE_BOOLEAN)) {
-            $webLabel = (string) config('zak_presence.web_chat_label', 'Web chat');
+            $webLabel = (string) config('zak_presence.web_chat_label', 'Web Chat');
             if ($currentChannel === 'web') {
                 $webLabel = $webLabel.' (this page)';
             }
@@ -2526,7 +2547,8 @@ final class ChannelConversationService
                 ."• Catch you up on what you missed, with sources when I have them 🔎\n"
                 ."• Take a tip via /share (an admin reviews it before I use it) ✍️\n"
                 ."• Take a /feature request or improvement idea for admin review 💡\n"
-                ."• Hear voice notes and reply in your language 🎧\n\n"
+                ."• List published program files with /assets (forms, slides, handbooks) 📂\n"
+                ."• Hear voice notes and read photos, then reply in your language 🎧📷\n\n"
                 ."*If I don't have an answer yet*\n"
                 ."I'll pass it along and notify you once one is available - "
                 ."no need to keep asking 🙂\n\n"
@@ -2549,7 +2571,8 @@ final class ChannelConversationService
             ."• Catch you up on what you missed, with sources when I have them 🔎\n"
             ."• Take a tip via /share (an admin reviews it before I use it) ✍️\n"
             ."• Take a /feature request or improvement idea for admin review 💡\n"
-            ."• Hear voice notes and reply in your language 🎧\n\n"
+            ."• List published program files with /assets (forms, slides, handbooks) 📂\n"
+            ."• Hear voice notes and read photos, then reply in your language 🎧📷\n\n"
             ."If I don't have an answer yet:\n"
             ."I'll pass it along and notify you once one is available - "
             ."no need to keep asking 🙂\n\n"
@@ -2623,31 +2646,35 @@ final class ChannelConversationService
     /**
      * Rotating sample invocations for member /commands (English structural UX only).
      *
-     * @return array{ask: string, share: string, feature: string}
+     * @return array{ask: string, share: string, feature: string, assets: string}
      */
     public function rotatingMemberCommandExamples(): array
     {
-        /** @var list<array{ask: string, share: string, feature: string}> $sets */
+        /** @var list<array{ask: string, share: string, feature: string, assets: string}> $sets */
         $sets = [
             [
                 'ask' => '/ask When is the next session?',
                 'share' => '/share Clinic moved to 3pm tomorrow',
                 'feature' => '/feature Remind me a day before deadlines',
+                'assets' => '/assets form',
             ],
             [
                 'ask' => '/ask Where are the session recordings?',
                 'share' => '/share Join link for Friday is in the Drive folder',
                 'feature' => '/feature Add a weekly summary every Monday',
+                'assets' => '/assets slides',
             ],
             [
                 'ask' => '/ask Who is the mentor for my cohort?',
                 'share' => '/share Onboarding starts Monday at 10am',
                 'feature' => '/feature Let me save favourite links',
+                'assets' => '/assets',
             ],
             [
                 'ask' => '/ask Is there a form I still need to fill?',
                 'share' => '/share Demo day is next Thursday',
                 'feature' => '/feature Support voice replies in groups',
+                'assets' => '/assets handbook',
             ],
         ];
 
@@ -2711,6 +2738,7 @@ final class ChannelConversationService
         return $this->formatCommandWithExample('/ask', 'ask about schedules, links, or updates', $ex['ask'], $style)."\n"
             .$this->formatCommandWithExample('/share', 'share a tip with the community (admin reviews first)', $ex['share'], $style)."\n"
             .$this->formatCommandWithExample('/feature', 'request a feature or suggest an improvement', $ex['feature'], $style)."\n"
+            .$this->formatCommandWithExample('/assets', 'list published program files (forms, slides, handbooks)', $ex['assets'], $style)."\n"
             .$this->formatCommandWithExample('/help', 'show this guide again', null, $style);
     }
 
@@ -2762,6 +2790,7 @@ final class ChannelConversationService
         return $heading
             .$this->formatCommandWithExample('/import', 'paste a chat export to create a draft', $ex['import'], $style)."\n"
             .$this->formatCommandWithExample('/publish', 'make a draft live for members', $ex['publish'], $style)."\n"
+            .$this->formatCommandWithExample('/unpublish', 'archive a published doc or Drive file', $ex['unpublish'] ?? '/unpublish ABC123', $style)."\n"
             .$this->formatCommandWithExample('/knowledge', 'see drafts and published knowledge', $ex['knowledge'], $style)."\n"
             .$this->formatCommandWithExample('/asset', 'add a Drive file link for members', $ex['asset'], $style)."\n"
             .$this->formatCommandWithExample('/features', 'list open or decided feature requests', $ex['features'], $style)."\n"
@@ -2865,7 +2894,7 @@ final class ChannelConversationService
         $channels = $this->channelsAccessBlock($style, $currentChannel, $chatType, $memberPhoneForWeb);
         $line = "I help with community schedules, updates, and what's been shared. "
             .$this->anyLanguageHint()
-            ."\nYou can send voice notes on Telegram or WhatsApp. I listen and reply in your language.";
+            ."\nYou can send a voice note or photo. I listen, read, and reply in your language.";
 
         if ($channels !== '') {
             $line .= "\n\n".$channels;
@@ -2875,7 +2904,7 @@ final class ChannelConversationService
     }
 
     /**
-     * Meta questions about what Zak is or can do (including voice notes).
+     * Meta questions about what Zak is or can do (including voice notes / photos).
      */
     public function isZakCapabilityAsk(string $text): bool
     {
@@ -2888,7 +2917,7 @@ final class ChannelConversationService
             return true;
         }
 
-        if (preg_match('/\b(voice note|voice message|voice notes|audio message|send voice)\b/u', $t) === 1
+        if (preg_match('/\b(voice note|voice message|voice notes|audio message|send voice|photo|photos|image|images|picture|pictures)\b/u', $t) === 1
             && preg_match('/\b(can you|do you|are you able|support|listen|hear|accept|handle|read)\b/u', $t) === 1) {
             return true;
         }
@@ -2917,7 +2946,7 @@ final class ChannelConversationService
             $body = "*I'm {$bot}* 🙂\n\n"
                 ."Here's what I can do:\n"
                 ."• Answer from community knowledge — {$scope} 💬\n"
-                ."• Listen to voice notes on Telegram and WhatsApp, then reply in your language 🎧\n"
+                ."• Listen to voice notes and read photos on Telegram, WhatsApp, and web, then reply in your language 🎧📷\n"
                 ."• Catch you up on what you missed when I have sources 🔎\n"
                 ."• Take tips via ".$this->highlightCommand('/share', 'whatsapp')
                 .' and ideas via '.$this->highlightCommand('/feature', 'whatsapp')." ✍️\n"
@@ -2934,7 +2963,7 @@ final class ChannelConversationService
         $body = "I'm {$bot} 🙂\n\n"
             ."Here's what I can do:\n"
             ."• Answer from community knowledge — {$scope}\n"
-            ."• Listen to voice notes on Telegram and WhatsApp, then reply in your language\n"
+            ."• Listen to voice notes and read photos on Telegram, WhatsApp, and web, then reply in your language\n"
             ."• Catch you up on what you missed when I have sources\n"
             ."• Take tips via /share and ideas via /feature (admin review)\n"
             ."• If I don't know yet, I'll say so and follow up when I can\n\n"

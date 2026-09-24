@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Tooltip } from "@/components/ui/tooltip";
 
 export interface CommunityNotification {
@@ -46,7 +47,7 @@ const INITIAL_NOTIFICATIONS: CommunityNotification[] = [
   {
     id: "notif-2",
     title: "Live Mentorship Q&A on Microsoft Teams",
-    message: "Technical mentors will host a live office hour tomorrow at 4:00 PM to review project architectures.",
+    message: "Mentors host a live office hour tomorrow at 4:00 PM to review project ideas and next steps.",
     timestamp: "Yesterday",
     category: "Live Session",
     read: false,
@@ -174,6 +175,8 @@ const CHANGELOG_ENTRIES: ChangelogEntry[] = [
 
 const STORAGE_KEY_NOTIFS = "unipod_notifications_state_v1";
 
+const LATEST_CHANGELOG = CHANGELOG_ENTRIES.find((entry) => entry.isLatest) ?? CHANGELOG_ENTRIES[0];
+
 interface NotificationsChangelogModalProps {
   onInsertQuery?: (query: string) => void;
 }
@@ -190,6 +193,57 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
   const [activeTab, setActiveTab] = useState<"notifications" | "changelog">("notifications");
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const [portalReady, setPortalReady] = useState(false);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  const [showMobileOverlay, setShowMobileOverlay] = useState(false);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen || !buttonRef.current) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const trigger = buttonRef.current?.getBoundingClientRect();
+      if (!trigger) {
+        return;
+      }
+
+      const isMobile = window.matchMedia("(max-width: 639px)").matches;
+      setShowMobileOverlay(isMobile);
+
+      if (isMobile) {
+        setPanelStyle({});
+        return;
+      }
+
+      const width = Math.min(410, window.innerWidth - 24);
+      let right = window.innerWidth - trigger.right;
+      if (window.innerWidth - right - width < 12) {
+        right = Math.max(12, window.innerWidth - width - 12);
+      }
+
+      setPanelStyle({
+        position: "fixed",
+        top: trigger.bottom + 8,
+        right,
+        width,
+        maxHeight: "min(480px, 72vh)",
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isOpen, activeTab]);
 
   const handleClose = () => {
     setIsClosing(true);
@@ -327,6 +381,9 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
               handleClose();
             } else {
               setIsClosing(false);
+              setShowMobileOverlay(
+                typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches,
+              );
               setIsOpen(true);
             }
           }}
@@ -335,7 +392,7 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
               ? "bg-zinc-200/80 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
               : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
           }`}
-          aria-label="View notifications and product changelog"
+          aria-label="View notifications and what's new"
           aria-expanded={isOpen}
         >
           <svg
@@ -362,26 +419,36 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
         </button>
       </Tooltip>
 
-      {/* Downward Anchored Dropdown Popover (Standard UI/UX, No Scrollbar Clutter) */}
-      {isOpen && (
-        <>
-          {/* Subtle Mobile Overlay only */}
-          <div
-            className={`fixed inset-0 z-40 bg-black/30 backdrop-blur-2xs transition-opacity duration-200 ease-out sm:hidden ${
-              isClosing ? "opacity-0" : "opacity-100"
-            }`}
-            onClick={handleClose}
-            aria-hidden="true"
-          />
+      {isOpen &&
+        portalReady &&
+        createPortal(
+          <>
+            {showMobileOverlay && (
+              <div
+                className={`fixed inset-0 z-[55] bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ease-out ${
+                  isClosing ? "opacity-0" : "opacity-100"
+                }`}
+                onClick={handleClose}
+                aria-hidden="true"
+              />
+            )}
 
-          <div
-            ref={popoverRef}
-            className={`absolute right-0 top-full mt-2 z-50 w-[360px] sm:w-[410px] max-w-[calc(100vw-1.5rem)] rounded-2xl border border-zinc-200/90 bg-white shadow-2xl dark:border-zinc-800 dark:bg-[#181818] overflow-hidden select-none ${
-              isClosing ? "animate-popover-out" : "animate-popover-in"
-            }`}
-          >
+            <div
+              ref={popoverRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="updates-panel-title"
+              style={showMobileOverlay ? undefined : panelStyle}
+              className={`z-[60] box-border flex max-w-[100vw] flex-col overflow-hidden border border-zinc-200/90 bg-white shadow-2xl select-none dark:border-zinc-800 dark:bg-[#181818] ${
+                showMobileOverlay
+                  ? `fixed inset-x-0 bottom-0 w-full max-h-[min(88dvh,100dvh)] rounded-t-2xl rounded-b-none border-x-0 border-b-0 pb-[env(safe-area-inset-bottom,0px)] pl-[max(0px,env(safe-area-inset-left))] pr-[max(0px,env(safe-area-inset-right))] ${
+                      isClosing ? "animate-mobile-sheet-out" : "animate-mobile-sheet-in"
+                    }`
+                  : `fixed rounded-2xl ${isClosing ? "animate-popover-out" : "animate-popover-in"}`
+              }`}
+            >
             {/* Popover Header */}
-            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 dark:border-zinc-800/80">
+            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 max-sm:px-4 dark:border-zinc-800/80">
               <div className="flex items-center gap-2">
                 <div className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -389,8 +456,11 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                     <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
                   </svg>
                 </div>
-                <h3 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                  Updates & Community
+                <h3
+                  id="updates-panel-title"
+                  className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+                >
+                  Updates &amp; community
                 </h3>
               </div>
 
@@ -409,12 +479,12 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
             </div>
 
             {/* Navigation Tabs */}
-            <div className="flex items-center justify-between border-b border-zinc-100 px-3.5 pt-2 pb-1.5 dark:border-zinc-800/80">
-              <div className="flex items-center gap-1.5">
+            <div className="flex flex-col gap-2 border-b border-zinc-100 px-4 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800/80">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setActiveTab("notifications")}
-                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
+                  className={`flex max-w-full items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
                     activeTab === "notifications"
                       ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
                       : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
@@ -437,16 +507,18 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                 <button
                   type="button"
                   onClick={() => setActiveTab("changelog")}
-                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
+                  className={`flex max-w-full items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
                     activeTab === "changelog"
                       ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
                       : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
                   }`}
                 >
-                  <span>Changelog</span>
-                  <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                    v1.3.0
-                  </span>
+                  <span>What&apos;s new</span>
+                  {LATEST_CHANGELOG.isLatest && (
+                    <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      Latest
+                    </span>
+                  )}
                 </button>
               </div>
 
@@ -454,15 +526,15 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                 <button
                   type="button"
                   onClick={markAllAsRead}
-                  className="text-[11px] font-medium text-emerald-600 hover:underline dark:text-emerald-400 cursor-pointer"
+                  className="self-start text-[11px] font-medium text-emerald-600 hover:underline sm:self-auto dark:text-emerald-400 cursor-pointer"
                 >
-                  Mark all read
+                  Mark all as read
                 </button>
               )}
             </div>
 
-            {/* Popover Body - Clean and NO clunky scrollbar */}
-            <div className="max-h-[380px] overflow-y-auto no-scrollbar p-3.5">
+            {/* Popover Body */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain no-scrollbar px-4 py-3.5 sm:max-h-[380px]">
               {activeTab === "notifications" ? (
                 <div className="space-y-2.5">
                   {notifications.map((item) => (
@@ -517,7 +589,7 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                             </svg>
-                            <span>Ask Assistant about this</span>
+                            <span>Ask Zak about this</span>
                           </button>
                         </div>
                       )}
@@ -529,10 +601,10 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                 <div className="space-y-4">
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-2.5 text-[11px] text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
                     <p className="font-semibold text-zinc-900 dark:text-zinc-200">
-                      Platform Releases & Updates
+                      Recent improvements
                     </p>
                     <p className="mt-0.5 leading-relaxed">
-                      Continuous updates, quick commands, and knowledge improvements deployed directly to web chat.
+                      New features and fixes in UniPod Assistant—easier chat, meetings, and programme answers.
                     </p>
                   </div>
 
@@ -588,8 +660,8 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
             </div>
 
             {/* Popover Footer */}
-            <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50/60 px-4 py-2.5 dark:border-zinc-800/80 dark:bg-zinc-900/40 text-[11px] text-zinc-500 dark:text-zinc-400">
-              <span>UniPods METI AI Assistant</span>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-t border-zinc-100 bg-zinc-50/60 px-4 py-2.5 dark:border-zinc-800/80 dark:bg-zinc-900/40 text-[11px] text-zinc-500 dark:text-zinc-400">
+              <span className="min-w-0 truncate">UniPod community assistant</span>
               <button
                 type="button"
                 onClick={handleClose}
@@ -598,9 +670,10 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                 Close
               </button>
             </div>
-          </div>
-        </>
-      )}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }

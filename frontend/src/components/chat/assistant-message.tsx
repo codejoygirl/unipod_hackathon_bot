@@ -258,23 +258,7 @@ export function AssistantMessage({
           </Tooltip>
         )}
 
-        {/* Share response (ChatGPT Image 2) */}
-        <Tooltip content="Share" position="bottom">
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 transition cursor-pointer dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-            aria-label="Share response"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-              <polyline points="16 6 12 2 8 6" />
-              <line x1="12" y1="2" x2="12" y2="15" />
-            </svg>
-          </button>
-        </Tooltip>
-
-        {/* Retry / Regenerate (ChatGPT Image 2) */}
+        {/* Retry / Regenerate */}
         <Tooltip content="Regenerate response" position="bottom">
           <button
             type="button"
@@ -287,22 +271,6 @@ export function AssistantMessage({
               <path d="M21 3v5h-5" />
               <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
               <path d="M3 21v-5h5" />
-            </svg>
-          </button>
-        </Tooltip>
-
-        {/* More Options (ChatGPT Image 2) */}
-        <Tooltip content="More options" position="bottom">
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 transition cursor-pointer dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-            aria-label="More options"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="1" />
-              <circle cx="19" cy="12" r="1" />
-              <circle cx="5" cy="12" r="1" />
             </svg>
           </button>
         </Tooltip>

@@ -170,7 +170,20 @@ class OpenAIProvider(ChatModel, EmbeddingModel, TranscriptionModel):
 
         response = await self._execute_with_backoff("chat.completions", _call)
         choice = response.choices[0]
-        content = choice.message.content or ""
+        raw_content = choice.message.content
+        if isinstance(raw_content, list):
+            parts: list[str] = []
+            for block in raw_content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        parts.append(str(block.get("text") or ""))
+                else:
+                    text = getattr(block, "text", None)
+                    if text:
+                        parts.append(str(text))
+            content = "".join(parts).strip()
+        else:
+            content = str(raw_content or "").strip()
 
         usage = response.usage
         prompt_tokens = usage.prompt_tokens if usage else 0

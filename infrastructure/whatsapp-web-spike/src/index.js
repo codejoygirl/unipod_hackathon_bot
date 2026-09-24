@@ -778,6 +778,7 @@ async function resolveQuoteContext(msg) {
     quoted_message_id: null,
     quoted_msg: null,
     quoted_voice_kind: null,
+    quoted_image_kind: null,
   }
 
   const raw = msg._data || {}
@@ -803,18 +804,25 @@ async function resolveQuoteContext(msg) {
     if (quoted) {
       result.quoted_msg = quoted
       result.quoted_voice_kind = voiceMediaKind(quoted)
+      result.quoted_image_kind = imageMediaKind(quoted)
       // Some WA builds omit type on the wrapper — check raw payload too.
       if (!result.quoted_voice_kind) {
         const rawType = String(quoted._data?.type || quoted.type || '').toLowerCase()
         if (rawType === 'ptt' || rawType === 'voice') result.quoted_voice_kind = 'voice'
         else if (rawType === 'audio') result.quoted_voice_kind = 'audio'
       }
+      if (!result.quoted_image_kind) {
+        const rawType = String(quoted._data?.type || quoted.type || '').toLowerCase()
+        if (rawType === 'image') result.quoted_image_kind = 'image'
+      }
       const body = String(quoted.body || quoted.caption || '').trim()
-      // Voice notes often have empty body; keep a hint for Laravel context.
+      // Voice notes / photos often have empty body; keep a hint for Laravel context.
       if (body) {
         result.quoted_text = body.slice(0, 1500)
       } else if (result.quoted_voice_kind) {
         result.quoted_text = '[voice note]'
+      } else if (result.quoted_image_kind) {
+        result.quoted_text = '[photo]'
       }
       result.quoted_from = idUserPart(quoted.author || quoted.from) || null
       result.quoted_message_id = quoted.id?._serialized || quoted.id?.id || null
@@ -841,11 +849,15 @@ async function resolveQuoteContext(msg) {
         result.quoted_voice_kind = 'voice'
       } else if (rawType === 'audio') {
         result.quoted_voice_kind = 'audio'
+      } else if (rawType === 'image') {
+        result.quoted_image_kind = 'image'
       }
       if (body) {
         result.quoted_text = body.slice(0, 1500)
       } else if (result.quoted_voice_kind) {
         result.quoted_text = '[voice note]'
+      } else if (result.quoted_image_kind) {
+        result.quoted_text = '[photo]'
       }
       result.quoted_from = idUserPart(
         raw.quotedParticipant || rawQuoted.participant || rawQuoted.author || rawQuoted.from,
@@ -979,6 +991,28 @@ function voiceMediaKind(msg) {
   const type = String(msg?.type || msg?._data?.type || '').toLowerCase()
   if (type === 'ptt' || type === 'voice') return 'voice'
   if (type === 'audio') return 'audio'
+  return null
+}
+
+const ALLOWED_IMAGE_MIMES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+])
+
+/**
+ * WhatsApp photo / image document (not stickers — those are noisy).
+ * @returns {'image'|null}
+ */
+function imageMediaKind(msg) {
+  const type = String(msg?.type || msg?._data?.type || '').toLowerCase()
+  if (type === 'image') return 'image'
+  if (type === 'document') {
+    const mime = String(msg?.mimetype || msg?._data?.mimetype || '').toLowerCase().split(';')[0]
+    if (ALLOWED_IMAGE_MIMES.has(mime)) return 'image'
+  }
   return null
 }
 
@@ -1176,6 +1210,58 @@ async function downloadVoiceMedia(msg, kind) {
 
   if (lastErr) {
     console.error('[spike] voice download gave up:', formatErr(lastErr))
+  }
+  return null
+}
+
+const MAX_IMAGE_B64_CHARS = 3_500_000
+
+/**
+ * Download a WhatsApp image as base64 for Laravel vision.
+ * @returns {Promise<{kind: string, mime_type: string, filename: string, data_base64: string}|null>}
+ */
+async function downloadImageMedia(msg) {
+  if (!msg) return null
+  normalizeMsgSerialized(msg)
+  let lastErr = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (typeof msg.downloadMedia !== 'function') return null
+      const media = await msg.downloadMedia()
+      if (!media?.data) {
+        lastErr = new Error('empty_image_data')
+        await sleep(300 * attempt)
+        continue
+      }
+      const mime = String(media.mimetype || media.mimeType || 'image/jpeg')
+        .toLowerCase()
+        .split(';')[0]
+      const normalizedMime = mime === 'image/jpg' ? 'image/jpeg' : mime
+      if (!ALLOWED_IMAGE_MIMES.has(normalizedMime)) {
+        console.log(`[spike] skip image mime=${normalizedMime}`)
+        return null
+      }
+      const data = String(media.data)
+      if (data.length > MAX_IMAGE_B64_CHARS) {
+        console.log(`[spike] image too large b64=${data.length}; skip`)
+        return null
+      }
+      const filename = String(media.filename || (normalizedMime.includes('png') ? 'photo.png' : 'photo.jpg'))
+      if (attempt > 1) console.log(`[spike] image download ok try=${attempt}`)
+      return {
+        kind: 'image',
+        mime_type: normalizedMime,
+        filename,
+        data_base64: data,
+      }
+    } catch (err) {
+      lastErr = err
+      console.error(`[spike] image download failed try=${attempt}:`, formatErr(err))
+      await sleep(350 * attempt)
+    }
+  }
+  if (lastErr) {
+    console.error('[spike] image download gave up:', formatErr(lastErr))
   }
   return null
 }
@@ -2120,7 +2206,8 @@ async function handleInboundMessage(msg, source) {
     }
 
     const voiceKind = voiceMediaKind(msg)
-    if (!text && !voiceKind) {
+    const imageKind = imageMediaKind(msg)
+    if (!text && !voiceKind && !imageKind) {
       console.log(`[spike] skip empty body (${source}) from=${fromRaw}`)
       return
     }
@@ -2196,6 +2283,23 @@ async function handleInboundMessage(msg, source) {
         }
         return
       }
+    } else if (imageKind) {
+      mediaPayload = await downloadImageMedia(msg)
+      if (!mediaPayload && !text) {
+        console.log('[spike] image download empty; telling member to resend / type')
+        const stopTyping = startTypingHeartbeat(msg)
+        try {
+          await replyInContext(
+            msg,
+            "I couldn't download that photo clearly.\n\n"
+              + 'Could you send it once more, or type the question?',
+            { isGroup, senderRaw, fromName, contact },
+          )
+        } finally {
+          stopTyping()
+        }
+        return
+      }
     } else if (
       quote.quoted_voice_kind
       && (barePing || mentioned || replyToBot)
@@ -2236,6 +2340,41 @@ async function handleInboundMessage(msg, source) {
           inboundText = ''
         }
       }
+    } else if (
+      quote.quoted_image_kind
+      && (barePing || mentioned || replyToBot || Boolean(String(text || '').trim()))
+    ) {
+      let quotedTarget = quote.quoted_msg
+      if (!quotedTarget && quote.quoted_message_id && typeof client?.getMessageById === 'function') {
+        try {
+          quotedTarget = await client.getMessageById(String(quote.quoted_message_id))
+          console.log(
+            `[spike] quoted image reloaded via id=${quote.quoted_message_id} `
+              + `ok=${Boolean(quotedTarget)}`,
+          )
+        } catch (err) {
+          console.error('[spike] quoted image reload failed:', formatErr(err))
+        }
+      }
+      if (quotedTarget) {
+        console.log('[spike] downloading quoted image for directed ask')
+        mediaPayload = await downloadImageMedia(quotedTarget)
+      } else {
+        console.log(
+          `[spike] quoted image detected (kind=${quote.quoted_image_kind}) `
+            + 'but message object missing — cannot download',
+        )
+      }
+      if (mediaPayload && barePing) {
+        inboundText = ''
+      }
+      if (!mediaPayload) {
+        console.log('[spike] quoted image download empty; clearing photo placeholder')
+        quote.quoted_text = null
+        if (barePing && !inboundText) {
+          inboundText = ''
+        }
+      }
     }
 
     // Quoted voice directed at Zak but audio never arrived → honest failure, not fake ask.
@@ -2253,6 +2392,28 @@ async function handleInboundMessage(msg, source) {
           msg,
           "I couldn't download that voice note clearly.\n\n"
             + 'Could you send it once more as a voice reply to me, or type the question?',
+          { isGroup, senderRaw, fromName, contact },
+        )
+      } finally {
+        stopTyping()
+      }
+      return
+    }
+
+    if (
+      !mediaPayload
+      && !imageKind
+      && quote.quoted_image_kind
+      && (barePing || mentioned || replyToBot)
+      && !String(inboundText || '').trim()
+    ) {
+      console.log('[spike] quoted image unavailable; telling member to resend')
+      const stopTyping = startTypingHeartbeat(msg)
+      try {
+        await replyInContext(
+          msg,
+          "I couldn't download that photo clearly.\n\n"
+            + 'Could you send it once more as a photo reply to me, or type the question?',
           { isGroup, senderRaw, fromName, contact },
         )
       } finally {
@@ -2289,6 +2450,9 @@ async function handleInboundMessage(msg, source) {
         inbound.media = mediaPayload
         if (quote.quoted_voice_kind && !voiceKind) {
           inbound.quoted_voice = true
+        }
+        if (quote.quoted_image_kind && !imageKind) {
+          inbound.quoted_image = true
         }
       }
       inboundResult = await callLaravelInbound(inbound)

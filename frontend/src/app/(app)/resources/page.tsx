@@ -12,7 +12,7 @@ const FALLBACK_RESOURCES: CommunityResource[] = [
     id: "unipod-community-resources-folder",
     name: "UniPod Community Resources",
     kind: "folder",
-    url: "https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs",
+    url: "https://drive.google.com/drive/folders/1eFl90laiuUy9HkuAVai-s3uVcZiGjN34",
     description:
       "Official UniPod Google Drive repository containing core programme toolkits, templates, guidelines, and cohort learning materials.",
     authority_tier: "verified_resource",
@@ -21,11 +21,11 @@ const FALLBACK_RESOURCES: CommunityResource[] = [
   },
   {
     id: "unipod-handbook",
-    name: "UniPods Programme Handbook",
+    name: "UniPods METI AI Cohort 1 Info Pack",
     kind: "handbook",
-    url: "https://drive.google.com/file/d/1YZvsMxcbq_EvWZk-Zx3IBHYxwdhXRs5O/view",
+    url: "https://drive.google.com/file/d/1q1wsNCblgit9s7nw-YeGKsOpkTIyPm6N/view",
     description:
-      "Comprehensive UniPods programme handbook with cohort guidelines, expectations, innovation milestones, and mentor directory.",
+      "Comprehensive UniPods programme info pack with cohort guidelines, expectations, innovation milestones, and curriculum directory.",
     authority_tier: "verified_resource",
     source_type: "google_drive",
     is_asset: true,
@@ -77,6 +77,9 @@ function normalizeResource(res: CommunityResource): CommunityResource {
 
 function isRealResource(res: CommunityResource): boolean {
   if (!res.url || !res.url.startsWith("http")) {
+    return false;
+  }
+  if (res.url.includes("1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs")) {
     return false;
   }
   const nameLower = res.name.toLowerCase();
@@ -257,7 +260,18 @@ export default function ResourcesPage() {
     );
     if (anyFolder) return anyFolder;
 
-    // 3. Fallback safely to the official UniPod community root Drive folder (never an arbitrary doc or chat post)
+    // 3. Look for the primary handbook / info pack resource
+    const primaryDoc = resources.find(
+      (r) =>
+        r.url &&
+        (r.kind === "handbook" ||
+          r.name.toLowerCase().includes("info pack") ||
+          r.name.toLowerCase().includes("handbook")) &&
+        !r.name.toLowerCase().startsWith("admin update"),
+    );
+    if (primaryDoc) return primaryDoc;
+
+    // 4. Fallback safely to the official UniPod community root Drive folder (never an arbitrary doc or chat post)
     return FALLBACK_RESOURCES[0];
   }, [resources]);
 

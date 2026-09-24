@@ -225,7 +225,7 @@ export function InstallAppPromo() {
             <p className="mt-0.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
               {isIos
                 ? "Add to your home screen for quick access, full-screen chat, and faster launches."
-                : "Install on this device for a standalone app experience with offline-ready caching."}
+                : "Install on this phone or computer for quick, full-screen access—like opening an app from your home screen."}
             </p>
           </div>
           <button

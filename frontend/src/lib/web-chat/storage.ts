@@ -7,7 +7,15 @@ export type QuotedMessage = {
 };
 
 export type StoredChatEntry =
-  | { id: string; role: "user"; text: string; sentAt: string; quote?: QuotedMessage }
+  | {
+      id: string;
+      role: "user";
+      text: string;
+      sentAt: string;
+      quote?: QuotedMessage;
+      imagePreview?: string;
+      imagePreviews?: string[];
+    }
   | {
       id: string;
       role: "assistant";

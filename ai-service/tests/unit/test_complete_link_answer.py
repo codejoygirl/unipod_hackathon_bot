@@ -533,6 +533,33 @@ def test_complete_link_answer_skips_person_questions():
     assert "Here they are" not in completed
 
 
+def test_meeting_today_schedule_ask_skips_misclassified_meetings_dump():
+    """Schedule yes/no must not append every historical Teams URL when link_mode=meetings."""
+    meet = "https://teams.microsoft.com/meet/419860837373470?p=abc"
+    recap = "https://teams.microsoft.com/l/meetingrecap?driveId=abc"
+    chunks = [
+        _chunk(
+            "E1",
+            "[9/22/2026, 8:15 PM] Diane: Open Hour session this Friday at 3:00 PM CAT\n" + meet,
+        ),
+        _chunk("E2", f"Recap from onboarding {recap}"),
+    ]
+    prose = (
+        "There is no programme meeting on Thursday 24 September 2026. "
+        "Open Hour is Friday 26 September at 3:00 PM CAT."
+    )
+    completed, ids = AnswerSynthesizer._complete_link_answer_from_evidence(
+        query="Are we having a meeting today?",
+        answer=prose,
+        evidence_chunks=chunks,
+        link_mode="meetings",
+    )
+    assert completed.strip() == prose.strip()
+    assert meet not in completed
+    assert recap not in completed
+    assert ids == []
+
+
 def test_complete_link_answer_meeting_links_only_keeps_joins():
     meet = "https://teams.microsoft.com/meet/419860837373470?p=abc"
     light = (

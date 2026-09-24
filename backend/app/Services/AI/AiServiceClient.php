@@ -127,6 +127,7 @@ class AiServiceClient
         ?string $communityName = null,
         ?string $communityScope = null,
         ?string $targetLanguage = null,
+        ?string $timezone = null,
     ): string {
         $allowedModes = ['social', 'out_of_scope', 'take_private', 'personal_help'];
         if (! in_array($mode, $allowedModes, true)) {
@@ -139,6 +140,11 @@ class AiServiceClient
             'community_name' => $communityName,
             'community_scope' => $communityScope,
         ];
+        $tz = is_string($timezone) ? trim($timezone) : '';
+        if ($tz === '') {
+            $tz = (string) config('app.timezone', 'UTC');
+        }
+        $payloadArray['timezone'] = $tz;
         $lang = is_string($targetLanguage) ? trim($targetLanguage) : '';
         if ($lang !== '' && strtolower($lang) !== 'auto') {
             $payloadArray['target_language'] = $lang;
@@ -457,6 +463,108 @@ class AiServiceClient
     }
 
     /**
+     * @param  list<array{image_base64: string, mime_type?: string|null, filename?: string|null}>  $images
+     * @return array{text: string, http_status: int|null, unreachable: bool}
+     */
+    public function understandImages(array $images, ?string $caption = null): array
+    {
+        if ($images === []) {
+            return ['text' => '', 'http_status' => null, 'unreachable' => false];
+        }
+
+        if (count($images) === 1) {
+            $one = $images[0];
+
+            return $this->understandImage(
+                imageBase64: (string) ($one['image_base64'] ?? ''),
+                mimeType: $one['mime_type'] ?? null,
+                filename: $one['filename'] ?? null,
+                caption: $caption,
+            );
+        }
+
+        $payloadArray = [
+            'images' => array_values(array_map(static function (array $row): array {
+                return [
+                    'image_base64' => (string) ($row['image_base64'] ?? ''),
+                    'mime_type' => $row['mime_type'] ?? null,
+                    'filename' => $row['filename'] ?? null,
+                ];
+            }, $images)),
+            'caption' => $caption,
+        ];
+
+        return $this->postUnderstandImagePayload($payloadArray);
+    }
+
+    public function understandImage(
+        string $imageBase64,
+        ?string $mimeType = null,
+        ?string $filename = null,
+        ?string $caption = null,
+    ): array {
+        $payloadArray = [
+            'image_base64' => $imageBase64,
+            'mime_type' => $mimeType,
+            'filename' => $filename,
+            'caption' => $caption,
+        ];
+
+        return $this->postUnderstandImagePayload($payloadArray);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payloadArray
+     * @return array{text: string, http_status: int|null, unreachable: bool}
+     */
+    private function postUnderstandImagePayload(array $payloadArray): array
+    {
+
+        $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        try {
+            $response = $this->http
+                ->timeout(max($this->timeout, 45.0))
+                ->connectTimeout($this->connectTimeout)
+                ->withHeaders($headers)
+                ->withBody($rawBody, 'application/json')
+                ->post("{$this->baseUrl}/conversation/understand-image");
+
+            if ($response->failed()) {
+                $bodySnippet = mb_substr($response->body(), 0, 500);
+                Log::warning('AI Service /conversation/understand-image failed', [
+                    'status' => $response->status(),
+                    'body_snippet' => $bodySnippet,
+                    'base_url' => $this->baseUrl,
+                ]);
+
+                return [
+                    'text' => '',
+                    'http_status' => $response->status(),
+                    'unreachable' => false,
+                ];
+            }
+
+            return [
+                'text' => trim((string) ($response->json('text') ?? '')),
+                'http_status' => $response->status(),
+                'unreachable' => false,
+            ];
+        } catch (Throwable $e) {
+            Log::warning('AI Service /conversation/understand-image unreachable', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return [
+                'text' => '',
+                'http_status' => null,
+                'unreachable' => true,
+            ];
+        }
+    }
+
+    /**
      * Soft byte budget per /ingestion/sync call. Large WhatsApp exports / API
      * bodies time out when sent as one payload; callers always go through here.
      */
@@ -700,6 +808,31 @@ class AiServiceClient
 
         if ($response->failed()) {
             throw new AiServiceException('Activate source failed: '.$response->body());
+        }
+
+        return $response->json();
+    }
+
+    /**
+     * Mark an indexed source unsearchable in the AI service (active -> archived).
+     *
+     * @return array<string, mixed>
+     */
+    public function deactivateSource(string $sourceId): array
+    {
+        $payloadArray = new \stdClass;
+        $rawBody = json_encode($payloadArray, JSON_THROW_ON_ERROR);
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        $response = $this->http
+            ->timeout(30.0)
+            ->connectTimeout($this->connectTimeout)
+            ->withHeaders($headers)
+            ->withBody($rawBody, 'application/json')
+            ->post("{$this->baseUrl}/ingestion/deactivate/{$sourceId}");
+
+        if ($response->failed()) {
+            throw new AiServiceException('Deactivate source failed: '.$response->body());
         }
 
         return $response->json();

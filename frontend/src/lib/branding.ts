@@ -29,7 +29,7 @@ export type ReachChannel = {
 /** Public reach links (optional NEXT_PUBLIC_*; empty url hides the chip). */
 export function reachChannelsForSignIn(): ReachChannel[] {
   const webLabel =
-    process.env.NEXT_PUBLIC_ZAK_WEB_CHAT_LABEL?.trim() || "Web chat";
+    process.env.NEXT_PUBLIC_ZAK_WEB_CHAT_LABEL?.trim() || "Web Chat";
   const whatsappLabel =
     process.env.NEXT_PUBLIC_ZAK_WHATSAPP_LABEL?.trim() || "WhatsApp";
   const telegramLabel =

@@ -41,6 +41,10 @@ final class AdminKnowledgeDesk
             return $this->handlePublish(trim((string) ($m[1] ?? '')), $user, $community, $style);
         }
 
+        if (preg_match('/^\/?(?:unpublish|archive)(?:\s+(.*))?$/iu', $trimmed, $m) === 1) {
+            return $this->handleUnpublish(trim((string) ($m[1] ?? '')), $user, $community, $style);
+        }
+
         if (preg_match('/^\/?(?:knowledge|kb)(?:\s+(.*))?$/iu', $trimmed, $m) === 1) {
             return $this->handleKnowledgeList(trim((string) ($m[1] ?? '')), $community, $style);
         }
@@ -289,6 +293,80 @@ final class AdminKnowledgeDesk
     /**
      * @return array{ok: bool, reply: string}
      */
+    private function handleUnpublish(string $arg, User $user, Community $community, string $style): array
+    {
+        $unpub = $this->conversation->highlightCommand('/unpublish', $style);
+        if ($arg === '') {
+            return [
+                'ok' => false,
+                'reply' => $style === 'whatsapp'
+                    ? "Usage: {$unpub} <id or drive link>\n\n"
+                        .'Check IDs with '
+                        .$this->conversation->highlightCommand('/knowledge assets', 'whatsapp').' or '
+                        .$this->conversation->highlightCommand('/knowledge published', 'whatsapp').'.'
+                    : "Usage: {$unpub} <id or drive link> (IDs from /knowledge assets or /knowledge published)",
+            ];
+        }
+
+        $source = $this->resolveSource($arg, $community);
+        if ($source === null) {
+            return [
+                'ok' => false,
+                'reply' => $style === 'whatsapp'
+                    ? "*I couldn't find that knowledge source.*\n\n"
+                        .'Check active IDs with '
+                        .$this->conversation->highlightCommand('/knowledge assets', 'whatsapp').' or '
+                        .$this->conversation->highlightCommand('/knowledge published', 'whatsapp').'.'
+                    : "I couldn't find that knowledge source. Check IDs with /knowledge assets or /knowledge published.",
+            ];
+        }
+
+        if ($source->lifecycle_status !== KnowledgeLifecycleStatus::Published) {
+            return [
+                'ok' => true,
+                'reply' => $style === 'whatsapp'
+                    ? "*Not currently published.*\n\n*{$source->name}*\nStatus: `{$source->lifecycle_status->value}`"
+                    : "Not currently published: {$source->name} (Status: {$source->lifecycle_status->value})",
+            ];
+        }
+
+        try {
+            $this->lifecycle->unpublish($user, $source);
+        } catch (Throwable $e) {
+            Log::error('admin_knowledge.unpublish_failed', [
+                'source_id' => $source->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'ok' => false,
+                'reply' => $style === 'whatsapp'
+                    ? "*Unpublish failed.*\n\n".$e->getMessage()
+                    : 'Unpublish failed: '.$e->getMessage(),
+            ];
+        }
+
+        $name = trim((string) $source->name) ?: 'Knowledge item';
+        $shortId = $this->shortId($source);
+
+        if ($style === 'whatsapp') {
+            return [
+                'ok' => true,
+                'reply' => "*Unpublished.*\n\n"
+                    ."*{$name}* (`{$shortId}`) has been unpublished and archived.\n"
+                    .'It has been removed from active member answers and the resources hub.',
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'reply' => "Unpublished: {$name} ({$shortId}) has been archived and removed from member answers.",
+        ];
+    }
+
+    /**
+     * @return array{ok: bool, reply: string}
+     */
     private function handleKnowledgeList(string $arg, Community $community, string $style): array
     {
         $filter = strtolower(trim($arg));
@@ -446,6 +524,7 @@ final class AdminKnowledgeDesk
                 ."/knowledge published\n"
                 ."/knowledge assets\n"
                 ."/publish <ID>\n"
+                ."/unpublish <ID>\n"
                 ."```";
         } else {
             $out = "Knowledge desk - {$community->name}\n\n"
@@ -453,7 +532,8 @@ final class AdminKnowledgeDesk
                 ."Published docs: {$published}\n"
                 ."Files / assets: {$assets}\n\n"
                 ."Filters: /knowledge drafts | published | assets\n"
-                .'Publish: /publish <ID>';
+                ."Publish: /publish <ID>\n"
+                ."Unpublish: /unpublish <ID>";
         }
 
         if (! $detailed) {
@@ -654,7 +734,23 @@ final class AdminKnowledgeDesk
             return $exact;
         }
 
-        $suffix = strtoupper($token);
+        $cleanToken = trim($token, '<>"`\'');
+
+        // Allow matching by Drive/Docs URL, asset identity, or URI
+        $byLink = KnowledgeSource::query()
+            ->where('community_id', $community->id)
+            ->where(function ($q) use ($cleanToken): void {
+                $q->where('metadata->delivery_url', 'LIKE', '%'.$cleanToken.'%')
+                    ->orWhere('metadata->asset_identity', 'LIKE', '%'.strtolower($cleanToken).'%')
+                    ->orWhere('uri', 'LIKE', '%'.$cleanToken.'%');
+            })
+            ->orderByDesc('created_at')
+            ->first();
+        if ($byLink !== null) {
+            return $byLink;
+        }
+
+        $suffix = strtoupper($cleanToken);
         if (strlen($suffix) < 4) {
             return null;
         }

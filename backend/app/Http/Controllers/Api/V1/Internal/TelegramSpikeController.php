@@ -43,9 +43,9 @@ final class TelegramSpikeController extends Controller
         ]);
 
         $validated['text'] = trim((string) ($validated['text'] ?? ''));
-        $hasVoice = is_array($validated['media'] ?? null)
+        $hasMedia = is_array($validated['media'] ?? null)
             && trim((string) (($validated['media']['data_base64'] ?? ''))) !== '';
-        if ($validated['text'] === '' && ! $hasVoice) {
+        if ($validated['text'] === '' && ! $hasMedia) {
             return response()->json([
                 'data' => [
                     'reply' => '',

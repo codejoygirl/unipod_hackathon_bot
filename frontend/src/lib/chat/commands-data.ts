@@ -48,6 +48,12 @@ export const ADMIN_COMMANDS: BotCommandItem[] = [
     example: "/publish ABC123",
   },
   {
+    command: "/unpublish",
+    category: "admin",
+    description: "Archive a published doc or Drive asset",
+    example: "/unpublish ABC123",
+  },
+  {
     command: "/knowledge",
     category: "admin",
     description: "See drafts and published knowledge",

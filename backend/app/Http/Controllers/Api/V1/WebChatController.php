@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\DTOs\Channels\InboundMessage;
 use App\Enums\KnowledgeLifecycleStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Community;
@@ -15,6 +16,8 @@ use App\Services\Channels\AdminCredentialsService;
 use App\Services\Channels\AdminKnowledgeDesk;
 use App\Services\Channels\ChannelCommandAccess;
 use App\Services\Channels\ChannelConversationService;
+use App\Services\Channels\ChannelListenGate;
+use App\Services\Channels\ImageNoteNormalizer;
 use App\Services\Channels\ProgramAssetRegistrar;
 use App\Services\Channels\SpikeEscalationNotifier;
 use App\Services\Knowledge\KnowledgeLifecycleService;
@@ -40,6 +43,8 @@ final class WebChatController extends Controller
         private readonly ChannelCommandAccess $commandAccess,
         private readonly AdminKnowledgeDesk $knowledgeDesk,
         private readonly ProgramAssetRegistrar $assetRegistrar,
+        private readonly ImageNoteNormalizer $imageNormalizer,
+        private readonly ChannelListenGate $listenGate,
     ) {}
 
     public function bootstrap(Request $request): JsonResponse
@@ -238,7 +243,14 @@ final class WebChatController extends Controller
     public function ask(Request $request): JsonResponse
     {
         $queryValidated = $request->validate([
-            'query' => ['required', 'string', 'max:2000'],
+            'query' => ['nullable', 'string', 'max:2000'],
+            'image_base64' => ['nullable', 'string', 'max:3500000'],
+            'image_mime' => ['nullable', 'string', 'max:120'],
+            'image_filename' => ['nullable', 'string', 'max:200'],
+            'images' => ['nullable', 'array', 'max:5'],
+            'images.*.image_base64' => ['required_with:images', 'string', 'max:3500000'],
+            'images.*.mime' => ['nullable', 'string', 'max:120'],
+            'images.*.filename' => ['nullable', 'string', 'max:200'],
             'target_language' => ['nullable', 'string', 'max:10'],
             'timezone' => ['nullable', 'string', 'max:64'],
         ]);
@@ -254,7 +266,14 @@ final class WebChatController extends Controller
         $adminRecord = $isAdmin ? $this->adminCredentials->findAdminByPhone($memberPhone) : null;
         $adminName = $adminRecord['name'] ?? null;
 
-        $query = trim($queryValidated['query']);
+        $query = trim((string) ($queryValidated['query'] ?? ''));
+        $webChatImages = $this->normalizedWebChatImages($queryValidated);
+        if ($query === '' && $webChatImages === []) {
+            throw ValidationException::withMessages([
+                'query' => ['Type a question or attach a photo.'],
+            ]);
+        }
+
         $upper = strtoupper($query);
 
         // 1. Bot commands:
@@ -299,8 +318,8 @@ final class WebChatController extends Controller
                 return $this->directAnswerResponse((string) ($adminCmd['reply'] ?? 'Done.'), $community, $communityId);
             }
 
-            if (str_starts_with($upper, 'IMPORT') || str_starts_with($upper, '/IMPORT')
-                || str_starts_with($upper, 'EXPORT') || str_starts_with($upper, '/EXPORT')) {
+            if ($this->listenGate->startsWithSlashCommand($query, 'import')
+                || $this->listenGate->startsWithSlashCommand($query, 'export')) {
                 $body = $this->stripCommandPrefix($query, ['import', 'export']);
                 if ($body === '') {
                     return $this->directAnswerResponse(
@@ -331,7 +350,7 @@ final class WebChatController extends Controller
                 );
             }
 
-            if (str_starts_with($upper, 'ASSET') || str_starts_with($upper, '/ASSET')) {
+            if ($this->listenGate->startsWithSlashCommand($query, 'asset')) {
                 $assetResult = $this->assetRegistrar->registerFromCommand(
                     'web_chat',
                     $query,
@@ -347,10 +366,12 @@ final class WebChatController extends Controller
                 );
             }
 
-            if (str_starts_with($upper, 'PUBLISH') || str_starts_with($upper, '/PUBLISH')
-                || str_starts_with($upper, 'KNOWLEDGE') || str_starts_with($upper, '/KNOWLEDGE')
-                || str_starts_with($upper, 'KB') || str_starts_with($upper, '/KB')
-                || str_starts_with($upper, 'FEATURES') || str_starts_with($upper, '/FEATURES')) {
+            if ($this->listenGate->startsWithSlashCommand($query, 'publish')
+                || $this->listenGate->startsWithSlashCommand($query, 'unpublish')
+                || $this->listenGate->startsWithSlashCommand($query, 'archive')
+                || $this->listenGate->startsWithSlashCommand($query, 'knowledge')
+                || $this->listenGate->startsWithSlashCommand($query, 'kb')
+                || $this->listenGate->startsWithSlashCommand($query, 'features')) {
                 $desk = $this->knowledgeDesk->tryHandle($query, $user, $community, 'whatsapp');
                 if ($desk !== null) {
                     return $this->directAnswerResponse(
@@ -368,9 +389,15 @@ final class WebChatController extends Controller
             }
         }
 
-        // /SHARE or SHARE
-        if (str_starts_with($upper, '/SHARE') || str_starts_with($upper, 'SHARE')) {
-            $body = trim((string) preg_replace('/^\/?share\s*/i', '', $query));
+        if ($this->listenGate->startsWithSlashCommand($query, 'assets')) {
+            $arg = $this->listenGate->slashCommandBody($query, 'assets');
+            $reply = $this->assetRegistrar->memberCatalogReply($community, $arg, 'whatsapp');
+
+            return $this->directAnswerResponse($reply, $community, $communityId);
+        }
+
+        if ($this->listenGate->startsWithSlashCommand($query, 'share')) {
+            $body = $this->listenGate->slashCommandBody($query, 'share');
             if ($body === '') {
                 $reply = "Share something the community should know, like:\n"
                     ."/share Water off tomorrow morning\n\n"
@@ -409,9 +436,8 @@ final class WebChatController extends Controller
             return $this->directAnswerResponse($reply, $community, $communityId);
         }
 
-        // /FEATURE or FEATURE
-        if (str_starts_with($upper, '/FEATURE') || str_starts_with($upper, 'FEATURE')) {
-            $body = trim((string) preg_replace('/^\/?features?\s*/i', '', $query));
+        if ($this->listenGate->startsWithSlashCommand($query, 'feature')) {
+            $body = $this->listenGate->slashCommandBody($query, 'feature');
             if ($body === '') {
                 $reply = $this->conversation->featureUsageReply('whatsapp');
 
@@ -441,9 +467,32 @@ final class WebChatController extends Controller
             $query = 'Summarize what I missed, recent community announcements, discussions, and important updates';
         }
 
-        // /ASK or ASK
-        if (str_starts_with($upper, '/ASK') || str_starts_with($upper, 'ASK ')) {
-            $query = trim((string) preg_replace('/^\/?ask\s*/i', '', $query));
+        if ($this->listenGate->startsWithSlashCommand($query, 'ask')) {
+            $query = $this->listenGate->slashCommandBody($query, 'ask');
+        }
+
+        if ($webChatImages !== []) {
+            $raw = count($webChatImages) === 1
+                ? ['media' => array_merge(['kind' => 'image'], $webChatImages[0])]
+                : ['images' => $webChatImages];
+            $understood = $this->imageNormalizer->normalize(new InboundMessage(
+                channel: 'web_chat',
+                externalUserId: $memberPhone,
+                text: $query,
+                messageId: (string) Str::ulid(),
+                raw: $raw,
+            ));
+            if (($understood['error'] ?? null) !== null) {
+                return $this->directAnswerResponse((string) $understood['error'], $community, $communityId);
+            }
+            $query = trim($understood['message']->text);
+            if ($query === '') {
+                return $this->directAnswerResponse(
+                    $this->conversation->imageNoteFailedReply(),
+                    $community,
+                    $communityId,
+                );
+            }
         }
 
         // 2. Purely social greetings
@@ -662,5 +711,51 @@ final class WebChatController extends Controller
         }
 
         return $body;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return list<array{data_base64: string, mime_type: string, filename: string}>
+     */
+    private function normalizedWebChatImages(array $validated): array
+    {
+        $out = [];
+        $rows = $validated['images'] ?? null;
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $b64 = trim((string) ($row['image_base64'] ?? ''));
+                if ($b64 === '') {
+                    continue;
+                }
+                $mime = trim((string) ($row['mime'] ?? 'image/jpeg'));
+                $filename = trim((string) ($row['filename'] ?? ''));
+                $out[] = [
+                    'data_base64' => $b64,
+                    'mime_type' => $mime !== '' ? $mime : 'image/jpeg',
+                    'filename' => $filename !== '' ? $filename : 'photo.jpg',
+                ];
+            }
+        }
+
+        if ($out !== []) {
+            return $out;
+        }
+
+        $legacy = trim((string) ($validated['image_base64'] ?? ''));
+        if ($legacy === '') {
+            return [];
+        }
+
+        $mime = trim((string) ($validated['image_mime'] ?? 'image/jpeg'));
+        $filename = trim((string) ($validated['image_filename'] ?? ''));
+
+        return [[
+            'data_base64' => $legacy,
+            'mime_type' => $mime !== '' ? $mime : 'image/jpeg',
+            'filename' => $filename !== '' ? $filename : 'photo.jpg',
+        ]];
     }
 }
