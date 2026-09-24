@@ -22,6 +22,11 @@ final class ZavuClient
             throw new RuntimeException('WHATSAPP_ZAVU_API_KEY is not configured.');
         }
 
+        $to = self::normalizeWhatsAppTo($to);
+        if ($to === '') {
+            throw new RuntimeException('Zavu WhatsApp recipient is empty or invalid.');
+        }
+
         $base = (string) config('whatsapp_zavu.api_base');
         $response = Http::withToken($apiKey)
             ->acceptJson()
@@ -143,5 +148,26 @@ final class ZavuClient
         }
 
         throw new RuntimeException('Zavu message has no mediaUrl yet (messageId='.$messageId.')');
+    }
+
+    /**
+     * Zavu WhatsApp requires E.164 with leading + (bare digits are rejected as chat IDs).
+     */
+    public static function normalizeWhatsAppTo(string $to): string
+    {
+        $to = trim($to);
+        if ($to === '') {
+            return '';
+        }
+
+        if (str_starts_with($to, '+')) {
+            $digits = preg_replace('/\D+/', '', substr($to, 1)) ?? '';
+
+            return $digits !== '' ? '+'.$digits : '';
+        }
+
+        $digits = preg_replace('/\D+/', '', $to) ?? '';
+
+        return $digits !== '' ? '+'.$digits : '';
     }
 }

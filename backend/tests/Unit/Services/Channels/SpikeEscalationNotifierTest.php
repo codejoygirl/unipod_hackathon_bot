@@ -704,7 +704,7 @@ class SpikeEscalationNotifierTest extends TestCase
             $to = (string) ($request['to'] ?? '');
             $text = (string) ($request['text'] ?? '');
 
-            return $to === '2348011111111'
+            return $to === '+2348011111111'
                 && str_contains($text, 'When is clinic?');
         });
 
@@ -715,7 +715,7 @@ class SpikeEscalationNotifierTest extends TestCase
             $to = (string) ($request['to'] ?? '');
             $text = (string) ($request['text'] ?? '');
 
-            return $to === '2349012345678'
+            return $to === '+2349012345678'
                 && str_contains($text, 'Clinic is Friday at 3pm CAT.');
         });
     }

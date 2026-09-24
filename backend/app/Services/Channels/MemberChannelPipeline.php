@@ -365,11 +365,21 @@ final class MemberChannelPipeline
         $quoted = trim((string) ($message->raw['quoted_text'] ?? ''));
         $quotedMsgId = trim((string) ($message->raw['quoted_message_id'] ?? ''));
         $replyToBot = filter_var($message->raw['reply_to_bot'] ?? false, FILTER_VALIDATE_BOOLEAN);
-        if (! $replyToBot) {
-            return null;
-        }
         if ($quoted === '' && $quotedMsgId === '') {
             return null;
+        }
+
+        // Zavu/Cloud API often omits replyToFromBot; still allow swipe when the quote is a known card.
+        $rawForCard = is_array($message->raw) ? $message->raw : [];
+        if (! $replyToBot) {
+            $linkedEsc = $quotedMsgId !== ''
+                && $this->escalationNotifier->findEscalationIdByWhatsAppMessageId($quotedMsgId) !== null;
+            $looksLikeCard = $this->commandAccess->looksLikeEscalationCardReply(
+                array_merge($rawForCard, ['reply_to_bot' => true]),
+            );
+            if (! $linkedEsc && ! $looksLikeCard) {
+                return null;
+            }
         }
 
         $ref = null;

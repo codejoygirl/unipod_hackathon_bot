@@ -2460,7 +2460,7 @@ final class ChannelConversationService
                 $url = $this->whatsappClickableUrl($url, $this->whatsappOpenChatPrefill());
             }
 
-            return "*{$label}*\n{$url}";
+            return "*{$label}:*\n{$url}";
         }
 
         return "{$label}:\n{$url}";
@@ -2601,7 +2601,7 @@ final class ChannelConversationService
         }
 
         if ($style === 'whatsapp') {
-            return "*Also reach me on*\n\n".implode("\n\n", $parts);
+            return "*Also reach me on:*\n".implode("\n\n", $parts);
         }
 
         $lines = array_map(static fn (string $p): string => '• '.$p, $parts);
@@ -2633,20 +2633,20 @@ final class ChannelConversationService
             return "*Hi - I'm {$bot}* 👋\n\n"
                 ."I help with {$scope}.\n"
                 .$this->anyLanguageHint()."\n\n"
-                ."*What I can do*\n"
+                ."*What I can do:*\n"
                 ."• Answer questions from community knowledge - schedules, links, people, updates 💬\n"
                 ."• Catch you up on what you missed, with sources when I have them 🔎\n"
                 ."• Take a tip via /share (an admin reviews it before I use it) ✍️\n"
                 ."• Take a /feature request or improvement idea for admin review 💡\n"
                 ."• List published program files with /assets (forms, slides, handbooks) 📂\n"
                 ."• Hear voice notes and read photos, then reply in your language 🎧📷\n\n"
-                ."*If I don't have an answer yet*\n"
+                ."*If I don't have an answer yet:*\n"
                 ."I'll pass it along and notify you once one is available - "
                 ."no need to keep asking 🙂\n\n"
-                ."*Try asking*\n"
+                ."*Try asking:*\n"
                 .$examples."\n\n"
                 .($channels !== '' ? $channels."\n\n" : '')
-                ."*Quick commands*\n\n"
+                ."*Quick commands:*\n"
                 .$this->formatMemberCommandHelp('whatsapp')."\n\n"
                 ."Or just type in plain language - no command needed.\n"
                 .'In group chats, '.$this->emphasisLabel('@mention', 'whatsapp')
@@ -2670,7 +2670,7 @@ final class ChannelConversationService
             ."Try asking:\n"
             .$examples."\n\n"
             .($channels !== '' ? $channels."\n\n" : '')
-            ."Quick commands:\n\n"
+            ."Quick commands:\n"
             .$this->formatMemberCommandHelp('plain')."\n\n"
             ."Or just type in plain language - no command needed.\n"
             .'In group chats, @mention me or reply to my message so I know you mean me.';
@@ -2846,9 +2846,10 @@ final class ChannelConversationService
         ?string $example,
         string $style,
     ): string {
+        $label = ucfirst(ltrim($command, '/'));
         $cmd = $this->highlightCommand($command, $style === 'whatsapp' ? 'whatsapp' : 'plain');
         if ($style === 'whatsapp') {
-            $line = "{$cmd}\n{$blurb}";
+            $line = "*{$label}:*\n{$cmd}\n{$blurb}";
             if ($example !== null && $example !== '') {
                 $exCmd = $this->highlightCommand(
                     (string) (preg_split('/\s+/', $example, 2)[0] ?? $command),
@@ -2863,7 +2864,7 @@ final class ChannelConversationService
             return $line;
         }
 
-        $line = "{$cmd} - {$blurb}";
+        $line = "{$label}:\n{$cmd} - {$blurb}";
         if ($example !== null && $example !== '') {
             $line .= "\n  e.g. {$example}";
         }
@@ -2880,7 +2881,7 @@ final class ChannelConversationService
     {
         $ex = $this->rotatingAdminCommandExamples();
         $wa = $style === 'whatsapp';
-        $heading = $wa ? "\n\n*Admin*\n\n" : "\n\nAdmin:\n\n";
+        $heading = $wa ? "\n\n*Admin:*\n" : "\n\nAdmin:\n";
         $sep = $wa ? "\n\n" : "\n";
         $lines = [
             $this->formatCommandWithExample('/import', 'paste a chat export to create a draft', $ex['import'], $style),
