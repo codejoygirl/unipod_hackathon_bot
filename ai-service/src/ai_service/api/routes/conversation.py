@@ -880,10 +880,14 @@ def _fallback_reply(mode: str, community_name: str | None) -> str:
     )
 
 
+_FILE_EXT = r"pdf|docx?|xlsx?|pptx?|txt|md|csv|png|jpe?g|gif|webp|zip"
 _KEEP_PATTERNS = (
     re.compile(r"\[[^\]]+\]\(https?://[^)\s]+\)", re.I),
     re.compile(r"https?://[^\s<>\"')\]]+", re.I),
     re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I),
+    re.compile(rf'["“][^"”]+\.(?:{_FILE_EXT})["”]', re.I),
+    re.compile(rf"\b[\w.-]+(?:\s*\(\d+\))?\.(?:{_FILE_EXT})\b", re.I),
+    re.compile(r"\b(?!KEEP_)[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b"),
     re.compile(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", re.I),
 )
 
@@ -893,7 +897,7 @@ def _protect_keepables(text: str) -> tuple[str, list[str]]:
 
     def stash(match: re.Match[str]) -> str:
         held.append(match.group(0))
-        return f"@@KEEP{len(held) - 1}@@"
+        return f"«{len(held) - 1}»"
 
     for pattern in _KEEP_PATTERNS:
         text = pattern.sub(stash, text)
@@ -902,7 +906,10 @@ def _protect_keepables(text: str) -> tuple[str, list[str]]:
 
 def _restore_keepables(text: str, held: list[str]) -> str:
     for index, value in enumerate(held):
+        text = text.replace(f"«{index}»", value)
+        text = text.replace(f"@@KEEP_{index}@@", value)
         text = text.replace(f"@@KEEP{index}@@", value)
+        text = text.replace(f"@@KEEP {index}@@", value)
     return text
 
 
@@ -958,57 +965,62 @@ _SPACING_WORDS = frozenset(
     provide patients clearer explanations designed delivery more
     connected efficient accessible particularly environments where
     systems connectivity can fragmented
+    monday tuesday wednesday thursday friday saturday sunday
+    january february march april june july august september october november december
+    today tomorrow yesterday official important updates announcements
+    calendar feel free details further specific
     """.split()
 )
+_DATE_WORDS = (
+    "monday tuesday wednesday thursday friday saturday sunday "
+    "january february march april june july august september "
+    "october november december"
+).split()
 _MAX_SPACING_WORD = max(len(word) for word in _SPACING_WORDS)
 
 
 def _segment_run(run: str) -> str:
     lower = run.lower()
+    if lower in _DATE_WORDS or lower in _SPACING_WORDS:
+        return run
     length = len(lower)
+    best = [-1] * (length + 1)
+    prev = [-1] * (length + 1)
+    best[0] = 0
+    prev[0] = 0
+    for end in range(1, length + 1):
+        max_len = min(_MAX_SPACING_WORD, end)
+        for word_len in range(2, max_len + 1):
+            start = end - word_len
+            if best[start] < 0 or lower[start:end] not in _SPACING_WORDS:
+                continue
+            score = best[start] + word_len * word_len
+            if score > best[end]:
+                best[end] = score
+                prev[end] = start
+    if best[length] < 0:
+        return run
     parts: list[str] = []
-    index = 0
-    dict_hits = 0
-    while index < length:
-        match = 0
-        max_try = min(_MAX_SPACING_WORD, length - index)
-        for word_len in range(max_try, 0, -1):
-            if lower[index : index + word_len] in _SPACING_WORDS:
-                match = word_len
-                break
-        if match:
-            parts.append(run[index : index + match])
-            index += match
-            dict_hits += 1
-            continue
-        nxt = length
-        for cursor in range(index + 1, length):
-            try_len = min(_MAX_SPACING_WORD, length - cursor)
-            hit = False
-            for word_len in range(try_len, 2, -1):
-                if lower[cursor : cursor + word_len] in _SPACING_WORDS:
-                    hit = True
-                    break
-            if hit:
-                nxt = cursor
-                break
-        if nxt == index:
-            return run
-        parts.append(run[index:nxt])
-        index = nxt
-    if dict_hits < 2:
-        if not (
-            dict_hits == 1
-            and len(parts) == 2
-            and parts[0][:1].isupper()
-            and len(parts[0]) >= 4
-            and parts[0].lower() not in _SPACING_WORDS
-        ):
-            return run
+    end = length
+    while end > 0:
+        start = prev[end]
+        parts.append(run[start:end])
+        end = start
+    parts.reverse()
+    if any(len(part) == 1 and part.lower() not in {"a", "i"} for part in parts):
+        return run
     short = sum(1 for part in parts if len(part) <= 2)
     if short > max(2, len(parts) // 2):
         return run
     return " ".join(parts)
+
+
+def _rejoin_split_dates(text: str) -> str:
+    for word in _DATE_WORDS:
+        for split in range(3, len(word) - 2):
+            left, right = word[:split], word[split:]
+            text = re.sub(rf"\b({re.escape(left)})\s+({re.escape(right)})\b", r"\1\2", text, flags=re.I)
+    return text
 
 
 def _unstick_jammed_words(text: str) -> str:
@@ -1038,6 +1050,19 @@ def _join_split_domains(text: str) -> str:
     )
 
 
+def _join_split_extensions(text: str) -> str:
+    return re.sub(rf"\.\s+({_FILE_EXT})\b", r".\1", text, flags=re.I)
+
+
+def _space_sentence_start(match: re.Match[str]) -> str:
+    punct, quote, letter = match.group(1), match.group(2) or "", match.group(3)
+    if punct == "." and not quote:
+        rest = letter + match.string[match.end() :]
+        if re.match(rf"(?:{_FILE_EXT})\b", rest, flags=re.I):
+            return f"{punct}{quote}{letter}"
+    return f"{punct}{quote} {letter}"
+
+
 def _normalize_research_reply(text: str) -> str:
     """Keep research answers structured: lists, citations, intact URLs."""
     text = _join_split_domains(text)
@@ -1064,14 +1089,19 @@ def _normalize_research_reply(text: str) -> str:
 
 
 def _repair_spacing(text: str) -> str:
-    """Shape only: punctuation, quotes, camelCase, apostrophe clitics. No word lists."""
+    """Shape only: punctuation, camelCase, letter-digit, and a thin English spacing net."""
+    text = _join_split_extensions(text)
     text, held = _protect_keepables(text)
-    text = re.sub(r"([.!?])([\"“]?)([A-Za-z])", r"\1\2 \3", text)
+    text = re.sub(r"([.!?])([\"“]?)([A-Za-z])", _space_sentence_start, text)
     text = re.sub(r"([,;:])([A-Za-z])", r"\1 \2", text)
     text = re.sub(r"([a-zA-Z][\"”])([A-Za-z])", r"\1 \2", text)
     text = re.sub(r"([a-z])([A-Z][a-z])", r"\1 \2", text)
+    text = re.sub(r"([A-Za-z])(\d)", r"\1 \2", text)
+    text = re.sub(r"(\d)([A-Za-z])", r"\1 \2", text)
+    text = re.sub(r",(\d{4})\b", r", \1", text)
     text = re.sub(r"([.!?])[ \t]{2,}", r"\1 ", text)
     text = _unstick_jammed_words(text)
+    text = _rejoin_split_dates(text)
     return _restore_keepables(text, held)
 
 
