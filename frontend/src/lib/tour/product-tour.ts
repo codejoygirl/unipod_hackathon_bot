@@ -28,16 +28,9 @@ const STEP_DEFS: TourStepDef[] = [
     align: "start",
   },
   {
-    element: '[data-tour="new-chat"]',
-    title: "Start a new chat",
-    description: "Open a fresh conversation when you want a clean thread. Your previous chats stay in this workspace.",
-    side: "right",
-    align: "start",
-  },
-  {
     element: '[data-tour="nav-chat"]',
     title: "Chat",
-    description: "Ask Zak about sessions, people, deadlines, and what the community has shared.",
+    description: "This community has one shared thread. Ask Zak about sessions, people, deadlines, and what the group has shared.",
     side: "right",
     align: "start",
   },

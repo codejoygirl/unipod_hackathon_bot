@@ -107,35 +107,6 @@ export function ChatView() {
     setTimeout(performScroll, 800);
   }, []);
 
-  const handleNewChat = useCallback(() => {
-    setEntries([]);
-    if (community && sessionId) {
-      saveChatHistory(community.id, sessionId, []);
-    }
-    scrollToBottom(false);
-  }, [community, sessionId, scrollToBottom]);
-
-  // Listen for "new-chat" event dispatched from Sidebar, Header, or hotkeys
-  useEffect(() => {
-    const onNewChatEvent = () => {
-      handleNewChat();
-    };
-    window.addEventListener("new-chat", onNewChatEvent);
-    return () => window.removeEventListener("new-chat", onNewChatEvent);
-  }, [handleNewChat]);
-
-  // Keyboard shortcut Ctrl+K to start new chat
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        handleNewChat();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleNewChat]);
-
   // Check URL query parameters for ?prompt= or ?q=
   useEffect(() => {
     if (typeof window === "undefined") return;

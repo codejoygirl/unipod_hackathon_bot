@@ -51,14 +51,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, [phase, memberPhone, pathname, router, setIsOpen]);
 
-  const handleNewChat = useCallback(() => {
-    if (pathname !== "/") {
-      router.push(withPhoneQuery("/", memberPhone));
-    }
-    // Dispatch new-chat event so ChatView resets its conversation
-    window.dispatchEvent(new CustomEvent("new-chat"));
-  }, [pathname, router, memberPhone]);
-
   const handleSelectPrompt = useCallback(
     (prompt: string) => {
       if (pathname !== "/") {
@@ -76,7 +68,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ChatSidebar
         isOpen={isOpen}
         onToggle={toggleSidebar}
-        onNewChat={handleNewChat}
         onSelectPrompt={handleSelectPrompt}
         onOpenCommands={openCommandsModal}
       />

@@ -4,6 +4,7 @@ const listeners = new Set<() => void>();
 
 let speakingId: string | null = null;
 let voicesReady = false;
+let speakGeneration = 0;
 
 function notify(): void {
   listeners.forEach((fn) => fn());
@@ -22,30 +23,51 @@ function ensureVoices(): void {
     }
   };
   load();
-  window.speechSynthesis.addEventListener("voiceschanged", load, { once: true });
+  window.speechSynthesis.addEventListener("voiceschanged", load);
 }
 
-function scoreBritishFemale(voice: SpeechSynthesisVoice): number {
+function scoreCalmFemale(voice: SpeechSynthesisVoice): number {
   const name = voice.name.toLowerCase();
   const lang = (voice.lang || "").toLowerCase().replace("_", "-");
   let score = 0;
-  if (lang === "en-gb" || lang.startsWith("en-gb")) score += 50;
-  else if (lang.startsWith("en")) score += 12;
-  if (/(libby|sonia|susan|hazel|serena|martha|uk english female|british.*female|female)/.test(name)) {
-    score += 35;
+  if (lang === "en-gb" || lang.startsWith("en-gb")) score += 42;
+  else if (lang.startsWith("en-au") || lang.startsWith("en-ie")) score += 24;
+  else if (lang.startsWith("en-us") || lang.startsWith("en")) score += 16;
+
+  if (/(natural|neural|online|premium|enhanced|multilingual)/.test(name)) score += 44;
+  if (
+    /(libby|sonia|aria|jenny|natasha|susan|hazel|serena|martha|zira|samantha|victoria|moira|fiona|karen|catherine|uk english female)/.test(
+      name,
+    )
+  ) {
+    score += 46;
   }
-  if (/(male|george|ryan|thomas|daniel|david|james|guy)/.test(name)) score -= 45;
-  if (voice.localService) score += 4;
+  if (/\bfemale\b/.test(name)) score += 18;
+  if (/(male|george|ryan|thomas|daniel|david|james|guy|mark|ravi|richard|arthur|david|andrew)/.test(name)) {
+    score -= 55;
+  }
+  if (/(compact|mobile)/.test(name)) score -= 10;
+  if (voice.localService) score += 6;
   return score;
 }
 
 export function pickSoftBritishFemaleVoice(): SpeechSynthesisVoice | null {
   const list = voices();
   if (list.length === 0) return null;
-  return [...list].sort((a, b) => scoreBritishFemale(b) - scoreBritishFemale(a))[0] ?? null;
+  return [...list].sort((a, b) => scoreCalmFemale(b) - scoreCalmFemale(a))[0] ?? null;
 }
 
-/** Spoken text only — drop markup, citations, and raw URLs. */
+function stripEmojis(text: string): string {
+  return text
+    .replace(/\p{Extended_Pictographic}/gu, " ")
+    .replace(/\p{Emoji_Presentation}/gu, " ")
+    .replace(/\p{Regional_Indicator}{2}/gu, " ")
+    .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "")
+    .replace(/[\uFE0E\uFE0F\u200D\u20E3]/gu, "")
+    .replace(/(?:^|\s):[a-z0-9_+-]+:(?=\s|$)/gi, " ");
+}
+
+/** Spoken text only — drop markup, citations, raw URLs, and emojis. */
 export function speakableText(raw: string): string {
   let text = (raw || "").trim();
   if (!text) return "";
@@ -59,6 +81,7 @@ export function speakableText(raw: string): string {
   text = text.replace(/\*(.+?)\*/g, "$1");
   text = text.replace(/^#{1,6}\s+/gm, "");
   text = text.replace(/^[-*•]\s+/gm, "");
+  text = stripEmojis(text);
   text = text.replace(/\s+/g, " ").trim();
   return text.slice(0, 3500);
 }
@@ -76,9 +99,62 @@ export function subscribeSpeaking(listener: () => void): () => void {
 
 export function stopSpeaking(): void {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
+  speakGeneration += 1;
   window.speechSynthesis.cancel();
   speakingId = null;
   notify();
+}
+
+function startUtterance(id: string, spoken: string, generation: number): void {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  if (generation !== speakGeneration) return;
+
+  const utterance = new SpeechSynthesisUtterance(spoken);
+  const voice = pickSoftBritishFemaleVoice();
+  if (voice) {
+    utterance.voice = voice;
+    utterance.lang = voice.lang || "en-GB";
+  } else {
+    utterance.lang = "en-GB";
+  }
+  // Calmer than default: slightly slower, a touch lower, not full blast.
+  utterance.rate = 0.84;
+  utterance.pitch = 0.93;
+  utterance.volume = 0.88;
+  utterance.onend = () => {
+    if (speakingId === id && generation === speakGeneration) {
+      speakingId = null;
+      notify();
+    }
+  };
+  utterance.onerror = () => {
+    if (speakingId === id && generation === speakGeneration) {
+      speakingId = null;
+      notify();
+    }
+  };
+
+  speakingId = id;
+  notify();
+  window.speechSynthesis.speak(utterance);
+}
+
+function whenVoicesReady(run: () => void): void {
+  ensureVoices();
+  if (voices().length > 0) {
+    run();
+    return;
+  }
+  const synth = window.speechSynthesis;
+  let done = false;
+  const start = () => {
+    if (done) return;
+    done = true;
+    synth.removeEventListener("voiceschanged", start);
+    run();
+  };
+  synth.addEventListener("voiceschanged", start);
+  window.setTimeout(start, 450);
 }
 
 export function toggleSpeak(id: string, raw: string): void {
@@ -94,34 +170,11 @@ export function toggleSpeak(id: string, raw: string): void {
   if (!spoken) return;
 
   stopSpeaking();
-
-  const utterance = new SpeechSynthesisUtterance(spoken);
-  const voice = pickSoftBritishFemaleVoice();
-  if (voice) {
-    utterance.voice = voice;
-    utterance.lang = voice.lang || "en-GB";
-  } else {
-    utterance.lang = "en-GB";
-  }
-  utterance.rate = 0.92;
-  utterance.pitch = 1.04;
-  utterance.volume = 1;
-  utterance.onend = () => {
-    if (speakingId === id) {
-      speakingId = null;
-      notify();
-    }
-  };
-  utterance.onerror = () => {
-    if (speakingId === id) {
-      speakingId = null;
-      notify();
-    }
-  };
-
-  speakingId = id;
-  notify();
-  window.speechSynthesis.speak(utterance);
+  const generation = speakGeneration;
+  // Chrome can drop the next speak() if it runs in the same tick as cancel().
+  whenVoicesReady(() => {
+    window.setTimeout(() => startUtterance(id, spoken, generation), 60);
+  });
 }
 
 export function canSpeak(): boolean {

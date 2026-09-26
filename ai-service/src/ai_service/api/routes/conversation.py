@@ -185,8 +185,8 @@ _DOCUMENT_READABILITY = (
     "Do not write ## in front of every step. Use ## only for a real section name. "
     "Never leave ### or ## in the middle of a sentence. "
     "Do not use em dashes. "
-    "WEB RESEARCH FORMAT: Cite sources as markdown links with the publication name, like "
-    "([Bloomberg](https://www.bloomberg.com/example)). "
+    "WEB RESEARCH FORMAT: Cite sources as markdown links with the publication name and "
+    "the real URL you fetched. Never invent a URL. Never use example.com or a placeholder host. "
     "Never put spaces inside a URL or domain. Never dump raw tracking junk. "
     "If you used the web, end with a ## Sources section: one markdown link per line, "
     "never a name without its URL."
@@ -1105,13 +1105,32 @@ def _repair_spacing(text: str) -> str:
     return _restore_keepables(text, held)
 
 
+_PLACEHOLDER_URL_RE = re.compile(
+    r"https?://(?:www\.)?example\.(?:com|org|net)[^\s<>\"')\]]*",
+    re.I,
+)
+_PLACEHOLDER_MD_RE = re.compile(
+    r"\[[^\]]*\]\(https?://(?:www\.)?example\.(?:com|org|net)[^)]*\)",
+    re.I,
+)
+
+
+def _strip_placeholder_urls(text: str) -> str:
+    """Shape only: drop invented example.com-style hosts from member-facing replies."""
+    text = _PLACEHOLDER_MD_RE.sub("", text or "")
+    text = _PLACEHOLDER_URL_RE.sub("", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
+
+
 def _clean_reply(text: str) -> str:
     text = (text or "").strip()
     text = text.replace("\u2014", ". ").replace("\u2013", "-")
     text = re.sub(r"\.\s+\.", ".", text)
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
-    return _repair_spacing(text).strip()
+    return _strip_placeholder_urls(_repair_spacing(text)).strip()
 
 
 def _clean_document_reply(text: str) -> str:
@@ -1120,7 +1139,7 @@ def _clean_document_reply(text: str) -> str:
     text = text.replace("\u2014", ". ").replace("\u2013", "-")
     text = re.sub(r"\.\s+\.", ".", text)
     text = _normalize_research_reply(text)
-    return _repair_spacing(text).strip()
+    return _strip_placeholder_urls(_repair_spacing(text)).strip()
 
 
 def _reply_user_prompt(

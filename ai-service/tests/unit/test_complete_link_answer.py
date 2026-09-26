@@ -937,3 +937,21 @@ def test_complete_link_answer_multi_uses_resource_titles():
     assert rec in completed
     assert "Wadhwani Ignite Module 1 and 2 slides" in completed
     assert "resource pack" not in completed.lower()
+
+
+def test_drop_ungrounded_urls_removes_invented_example_hosts():
+    chunks = [_chunk("E1", "Wadhwani Q&A is 24 September 2023 at 3:00 PM CAT.")]
+    draft = (
+        "No session in the next hour.\n"
+        "https://example.com/wadhwani-session\n"
+        "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc"
+    )
+    cleaned = AnswerSynthesizer.drop_ungrounded_urls(draft, chunks)
+    assert "example.com" not in cleaned
+    assert "teams.microsoft.com" not in cleaned
+    assert "No session in the next hour" in cleaned
+
+    grounded = [_chunk("E1", "Join here https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc")]
+    kept = AnswerSynthesizer.drop_ungrounded_urls(draft, grounded)
+    assert "example.com" not in kept
+    assert "teams.microsoft.com/l/meetup-join/19%3ameeting_abc" in kept

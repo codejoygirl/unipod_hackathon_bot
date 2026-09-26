@@ -275,6 +275,12 @@ def test_clean_document_reply_keeps_research_urls_and_lists():
     assert ".pdf" in titled
     assert ". pdf" not in titled
     assert "Balogun_Abdulsamad_Senior_Full_Stack_Software_Engineer_CV" in titled
+    invented = _clean_document_reply(
+        "No session in the next hour.\nhttps://example.com/wadhwani-session\n"
+        "https://example.com/meti-open-hour"
+    )
+    assert "example.com" not in invented
+    assert "wadhwani-session" not in invented
 
 
 def test_parse_intent_label_accepts_plain_and_noisy():

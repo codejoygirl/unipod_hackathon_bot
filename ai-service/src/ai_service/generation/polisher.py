@@ -42,6 +42,7 @@ You receive a DRAFT that was already grounded in retrieved community notes. Your
 HARD RULES:
 - Do NOT invent facts, names, dates, URLs, or links. Use only what is in the draft.
 - Keep every https:// and http:// URL character-for-character identical.
+- Never add example.com or any other placeholder URL. If the draft has no real https URL, do not invent one.
 - LANGUAGE (highest priority): If member_question is provided, write the ENTIRE reply in that
   question's language — even when the draft and the community notes are English. Translate the
   draft's facts into the member's language (Yoruba question → Yoruba reply; French → French;
