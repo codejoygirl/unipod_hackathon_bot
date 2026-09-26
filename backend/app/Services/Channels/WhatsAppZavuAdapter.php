@@ -437,9 +437,10 @@ final class WhatsAppZavuAdapter implements ChannelAdapter, MemberChannelHost
                 'channel' => $this->channelName(),
             ]);
 
-            $reply = "I don't have a solid answer for that yet.\n\n"
-                ."I've passed it along, and I'll follow up once I have one. "
-                .'No need to keep checking or asking again.';
+            $reply = $this->modelAssistedReply($message, 'escalated', $community);
+            if ($reply === '') {
+                $reply = $this->conversation->knowledgeGapHandoffFallback();
+            }
             $this->conversation->remember($this->channelName(), $message->externalUserId, 'user', $message->text);
             $this->conversation->remember($this->channelName(), $message->externalUserId, 'assistant', $reply);
 

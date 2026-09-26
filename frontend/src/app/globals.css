@@ -11,7 +11,7 @@
   --sidebar-bg: #f9f9fb;
   --border: #e5e5e7;
   --border-subtle: #f0f0f2;
-  --accent: #10a37f;
+  --accent: #2563eb;
   --accent-foreground: #ffffff;
   --composer-bg: #ffffff;
   --user-bubble: #1e3a8a;
@@ -29,7 +29,7 @@
   --sidebar-bg: #171717;
   --border: #282828;
   --border-subtle: #202020;
-  --accent: #10a37f;
+  --accent: #3b82f6;
   --accent-foreground: #ffffff;
   --composer-bg: #2f2f2f;
   --user-bubble: #183660;
@@ -328,5 +328,28 @@ body,
 .no-scrollbar {
   -ms-overflow-style: none !important;
   scrollbar-width: none !important;
+}
+
+/* react-day-picker — match UniPod blue accent */
+.zak-day-picker {
+  --rdp-accent-color: #2563eb;
+  --rdp-accent-background-color: #dbeafe;
+  --rdp-day-height: 2.1rem;
+  --rdp-day-width: 2.1rem;
+  --rdp-day_button-height: 2rem;
+  --rdp-day_button-width: 2rem;
+  --rdp-nav-height: 2rem;
+  font-size: 0.75rem;
+  margin: 0;
+}
+
+.dark .zak-day-picker {
+  --rdp-accent-color: #3b82f6;
+  --rdp-accent-background-color: #1e3a8a;
+  color: #e4e4e7;
+}
+
+.zak-day-picker .rdp-root {
+  --rdp-accent-color: inherit;
 }
 

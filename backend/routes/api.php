@@ -11,6 +11,8 @@ use App\Http\Controllers\Api\V1\Internal\WhatsAppZavuController;
 use App\Http\Controllers\Api\V1\KnowledgeSourceController;
 use App\Http\Controllers\Api\V1\TenantController;
 use App\Http\Controllers\Api\V1\WebChatController;
+use App\Http\Controllers\Api\V1\WebChatProjectController;
+use App\Http\Controllers\Api\V1\WebChatVaultController;
 use App\Http\Controllers\Api\V1\Webhooks\WhatsAppZavuWebhookController;
 use App\Http\Middleware\EnsureTelegramSpikeEnabled;
 use App\Http\Middleware\EnsureWhatsAppWebSpikeEnabled;
@@ -36,7 +38,66 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
 
     Route::get('/web-chat/bootstrap', [WebChatController::class, 'bootstrap'])->name('web_chat.bootstrap');
     Route::get('/web-chat/resources', [WebChatController::class, 'resources'])->name('web_chat.resources');
+    Route::get('/web-chat/meetings', [WebChatController::class, 'meetings'])->name('web_chat.meetings.index');
+    Route::get('/web-chat/notifications', [WebChatController::class, 'notifications'])->name('web_chat.notifications.index');
+    Route::post('/web-chat/notifications/read-all', [WebChatController::class, 'markAllNotificationsRead'])->name('web_chat.notifications.read_all');
+    Route::post('/web-chat/notifications/{notification}/read', [WebChatController::class, 'markNotificationRead'])
+        ->whereUlid('notification')
+        ->name('web_chat.notifications.read');
+    Route::post('/web-chat/notifications', [WebChatController::class, 'publishNotification'])->name('web_chat.notifications.publish');
+    Route::get('/web-chat/push/vapid-public-key', [WebChatController::class, 'pushPublicKey'])->name('web_chat.push.vapid');
+    Route::post('/web-chat/push/subscribe', [WebChatController::class, 'pushSubscribe'])->name('web_chat.push.subscribe');
+    Route::post('/web-chat/push/unsubscribe', [WebChatController::class, 'pushUnsubscribe'])->name('web_chat.push.unsubscribe');
+    Route::post('/web-chat/admin/assets', [WebChatController::class, 'registerAsset'])->name('web_chat.admin.assets');
+    Route::post('/web-chat/admin/import', [WebChatController::class, 'importKnowledge'])->name('web_chat.admin.import');
+    Route::post('/web-chat/admin/meetings', [WebChatController::class, 'publishMeeting'])->name('web_chat.admin.meetings');
     Route::post('/web-chat/ask', [WebChatController::class, 'ask'])->name('web_chat.ask');
+    Route::get('/web-chat/vault', [WebChatVaultController::class, 'show'])->name('web_chat.vault.show');
+    Route::post('/web-chat/vault/documents', [WebChatVaultController::class, 'upload'])->name('web_chat.vault.upload');
+    Route::get('/web-chat/vault/documents/{document}/download', [WebChatVaultController::class, 'download'])
+        ->whereUlid('document')
+        ->name('web_chat.vault.documents.download');
+    Route::delete('/web-chat/vault/documents/{document}', [WebChatVaultController::class, 'destroyDocument'])
+        ->whereUlid('document')
+        ->name('web_chat.vault.documents.destroy');
+    Route::post('/web-chat/vault/ask', [WebChatVaultController::class, 'ask'])->name('web_chat.vault.ask');
+    Route::post('/web-chat/vault/generate', [WebChatVaultController::class, 'generate'])->name('web_chat.vault.generate');
+    Route::get('/web-chat/vault/artefacts/{artefact}/download', [WebChatVaultController::class, 'downloadArtefact'])
+        ->whereUlid('artefact')
+        ->name('web_chat.vault.artefacts.download');
+    Route::get('/web-chat/projects', [WebChatProjectController::class, 'index'])->name('web_chat.projects.index');
+    Route::post('/web-chat/projects', [WebChatProjectController::class, 'store'])->name('web_chat.projects.store');
+    Route::get('/web-chat/projects/{project}', [WebChatProjectController::class, 'show'])
+        ->whereUlid('project')
+        ->name('web_chat.projects.show');
+    Route::patch('/web-chat/projects/{project}', [WebChatProjectController::class, 'update'])
+        ->whereUlid('project')
+        ->name('web_chat.projects.update');
+    Route::delete('/web-chat/projects/{project}', [WebChatProjectController::class, 'destroy'])
+        ->whereUlid('project')
+        ->name('web_chat.projects.destroy');
+    Route::post('/web-chat/projects/{project}/files', [WebChatProjectController::class, 'attachFiles'])
+        ->whereUlid('project')
+        ->name('web_chat.projects.files.attach');
+    Route::delete('/web-chat/projects/{project}/files/{document}', [WebChatProjectController::class, 'detachFile'])
+        ->whereUlid('project')
+        ->whereUlid('document')
+        ->name('web_chat.projects.files.detach');
+    Route::post('/web-chat/projects/{project}/chats', [WebChatProjectController::class, 'storeChat'])
+        ->whereUlid('project')
+        ->name('web_chat.projects.chats.store');
+    Route::get('/web-chat/projects/{project}/chats/{chat}', [WebChatProjectController::class, 'showChat'])
+        ->whereUlid('project')
+        ->whereUlid('chat')
+        ->name('web_chat.projects.chats.show');
+    Route::delete('/web-chat/projects/{project}/chats/{chat}', [WebChatProjectController::class, 'destroyChat'])
+        ->whereUlid('project')
+        ->whereUlid('chat')
+        ->name('web_chat.projects.chats.destroy');
+    Route::post('/web-chat/projects/{project}/chats/{chat}/ask', [WebChatProjectController::class, 'askChat'])
+        ->whereUlid('project')
+        ->whereUlid('chat')
+        ->name('web_chat.projects.chats.ask');
     Route::post('/communities/{community}/assistant/ask', [WebChatController::class, 'askForCommunity'])
         ->whereUlid('community')
         ->name('communities.assistant.ask');

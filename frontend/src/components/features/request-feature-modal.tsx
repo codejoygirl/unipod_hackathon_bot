@@ -157,7 +157,7 @@ export function RequestFeatureModal({ isOpen, onClose }: RequestFeatureModalProp
         <div className="p-5 overflow-y-auto no-scrollbar">
           {submittedRef ? (
             <div className="flex flex-col items-center py-6 text-center animate-fade-in">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-950/80 dark:text-emerald-400 mb-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-950/80 dark:text-blue-400 mb-3">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
@@ -167,7 +167,7 @@ export function RequestFeatureModal({ isOpen, onClose }: RequestFeatureModalProp
                 Feature Request Received!
               </h4>
 
-              <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-emerald-300/80 bg-emerald-50 px-3 py-1 font-mono text-xs font-bold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-blue-300/80 bg-blue-50 px-3 py-1 font-mono text-xs font-bold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300">
                 <span>Ref Code:</span>
                 <span>{submittedRef}</span>
               </div>
@@ -189,7 +189,7 @@ export function RequestFeatureModal({ isOpen, onClose }: RequestFeatureModalProp
               {/* Feature Title */}
               <div>
                 <label htmlFor="feature-title" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Feature Title <span className="text-emerald-600 dark:text-emerald-400">*</span>
+                  Feature Title <span className="text-blue-600 dark:text-blue-400">*</span>
                 </label>
                 <input
                   id="feature-title"
@@ -205,7 +205,7 @@ export function RequestFeatureModal({ isOpen, onClose }: RequestFeatureModalProp
                   className={`w-full rounded-xl border bg-white px-3.5 py-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-1 shadow-2xs transition dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 ${
                     fieldErrors.title
                       ? "border-rose-400 focus:border-rose-500 focus:ring-rose-500/20"
-                      : "border-zinc-300 focus:border-emerald-500 focus:ring-emerald-500 dark:border-zinc-700"
+                      : "border-zinc-300 focus:border-blue-500 focus:ring-blue-500 dark:border-zinc-700"
                   }`}
                 />
                 {fieldErrors.title && (
@@ -218,7 +218,7 @@ export function RequestFeatureModal({ isOpen, onClose }: RequestFeatureModalProp
               {/* Feature Description */}
               <div>
                 <label htmlFor="feature-desc" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Description & Impact <span className="text-emerald-600 dark:text-emerald-400">*</span>
+                  Description & Impact <span className="text-blue-600 dark:text-blue-400">*</span>
                 </label>
                 <textarea
                   id="feature-desc"
@@ -234,7 +234,7 @@ export function RequestFeatureModal({ isOpen, onClose }: RequestFeatureModalProp
                   className={`w-full rounded-xl border bg-white p-3.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-1 shadow-2xs resize-none transition dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 ${
                     fieldErrors.description
                       ? "border-rose-400 focus:border-rose-500 focus:ring-rose-500/20"
-                      : "border-zinc-300 focus:border-emerald-500 focus:ring-emerald-500 dark:border-zinc-700"
+                      : "border-zinc-300 focus:border-blue-500 focus:ring-blue-500 dark:border-zinc-700"
                   }`}
                 />
                 {fieldErrors.description && (
@@ -256,7 +256,7 @@ export function RequestFeatureModal({ isOpen, onClose }: RequestFeatureModalProp
                     placeholder="e.g. Jane Doe"
                     value={contactName}
                     onChange={(e) => setContactName(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                   />
                 </div>
 
@@ -270,7 +270,7 @@ export function RequestFeatureModal({ isOpen, onClose }: RequestFeatureModalProp
                     placeholder="e.g. +254..."
                     value={contactPhone}
                     onChange={(e) => setContactPhone(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                   />
                 </div>
               </div>

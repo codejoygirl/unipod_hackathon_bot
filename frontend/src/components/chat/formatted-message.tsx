@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import { normalizeChatMarkdown, restoreReadableSpacing } from "@/lib/web-chat/readable-text";
+import { normalizeWhatsAppEmphasis } from "@/lib/web-chat/whatsapp-emphasis";
 
 type FormattedMessageProps = {
   content: string;
@@ -108,9 +110,9 @@ function getLinkBadgeClass(type: LinkInfo["type"]): string {
     case "zoom":
       return "bg-sky-50 text-sky-700 hover:bg-sky-100 border-sky-200/80 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800";
     case "meet":
-      return "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200/80 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800";
+      return "bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200/80 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800";
     case "whatsapp":
-      return "bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-300 font-semibold dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800";
+      return "bg-blue-50 text-blue-800 hover:bg-blue-100 border-blue-300 font-semibold dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800";
     case "telegram":
       return "bg-sky-50 text-sky-800 hover:bg-sky-100 border-sky-300 font-semibold dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800";
     default:
@@ -129,7 +131,7 @@ function LinkIcon({ type }: { type: LinkInfo["type"] }) {
   }
   if (type === "whatsapp") {
     return (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-emerald-600 dark:text-emerald-400">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-blue-600 dark:text-blue-400">
         <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
       </svg>
     );
@@ -196,7 +198,7 @@ function EmailBadge({ email, isUser }: { email: string; isUser: boolean }) {
         onClick={handleCopy}
         className={`ml-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium transition cursor-pointer ${
           copied
-            ? "bg-emerald-600 text-white font-semibold"
+            ? "bg-blue-600 text-white font-semibold"
             : isUser
             ? "bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white"
             : "bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900 dark:text-sky-200"
@@ -225,13 +227,13 @@ function PhoneBadge({ phone, isUser }: { phone: string; isUser: boolean }) {
     <span
       className={`inline-flex items-center gap-1.5 my-0.5 mx-0.5 rounded-lg border px-2 py-0.5 text-xs font-medium transition shadow-2xs select-none ${
         isUser
-          ? "border-zinc-700/80 bg-zinc-800/90 text-emerald-300"
-          : "border-emerald-200/90 bg-emerald-50/90 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+          ? "border-zinc-700/80 bg-zinc-800/90 text-blue-300"
+          : "border-blue-200/90 bg-blue-50/90 text-blue-900 dark:border-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
       }`}
     >
       <a
         href={`tel:${cleanPhone}`}
-        className="inline-flex items-center gap-1.5 hover:underline decoration-emerald-400"
+        className="inline-flex items-center gap-1.5 hover:underline decoration-blue-400"
         title={`Call ${phone}`}
       >
         <svg
@@ -243,7 +245,7 @@ function PhoneBadge({ phone, isUser }: { phone: string; isUser: boolean }) {
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="shrink-0 text-emerald-600 dark:text-emerald-400"
+          className="shrink-0 text-blue-600 dark:text-blue-400"
         >
           <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
         </svg>
@@ -255,10 +257,10 @@ function PhoneBadge({ phone, isUser }: { phone: string; isUser: boolean }) {
         onClick={handleCopy}
         className={`ml-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium transition cursor-pointer ${
           copied
-            ? "bg-emerald-600 text-white font-semibold"
+            ? "bg-blue-600 text-white font-semibold"
             : isUser
             ? "bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white"
-            : "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900 dark:text-emerald-200"
+            : "bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200"
         }`}
         title="Copy phone number"
       >
@@ -287,8 +289,8 @@ function CommandBadge({ command, isUser }: { command: string; isUser: boolean })
       onClick={handleClick}
       className={`inline-flex items-center font-mono font-bold text-[12px] px-2 py-0.5 rounded-lg border mx-0.5 my-0.5 transition cursor-pointer shadow-2xs select-none active:scale-95 ${
         isUser
-          ? "bg-zinc-800 text-emerald-300 border-zinc-700 hover:bg-zinc-700 hover:text-white"
-          : "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-900/60"
+          ? "bg-zinc-800 text-blue-300 border-zinc-700 hover:bg-zinc-700 hover:text-white"
+          : "bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100 hover:border-blue-300 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800 dark:hover:bg-blue-900/60"
       }`}
       title={`Click to populate ${display}`}
     >
@@ -303,7 +305,7 @@ function MentionBadge({ mention, isUser }: { mention: string; isUser: boolean })
     <span
       className={`inline-flex items-center font-medium px-1.5 py-0.5 rounded-md text-xs mx-0.5 ${
         isUser
-          ? "bg-zinc-800 text-emerald-300 border border-zinc-700/80"
+          ? "bg-zinc-800 text-blue-300 border border-zinc-700/80"
           : "bg-zinc-100 text-zinc-800 border border-zinc-200/80 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-700"
       }`}
     >
@@ -335,10 +337,10 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
         >
           {copied ? (
             <>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-emerald-400">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-blue-400">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <span className="text-[11px] text-emerald-400 font-medium">Copied!</span>
+              <span className="text-[11px] text-blue-400 font-medium">Copied!</span>
             </>
           ) : (
             <>
@@ -399,23 +401,28 @@ function MarkdownTable({ rows, isUser }: { rows: string[][]; isUser: boolean }) 
  */
 function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  let remaining = text.replace(/(?<=\s|^)(\.\*|\*\.)(?=\s|$)/g, "");
+  let remaining = normalizeWhatsAppEmphasis(
+    text.replace(/(?<=\s|^)(\.\*|\*\.)(?=\s|$)/g, ""),
+  );
   let keyIndex = 0;
 
   const emailRegex = /(?:[*_`'"<(\[]+)?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?:(?:\.\*|\*\.|\.|\*)+|[*_`'">)\]]+)?/;
+  const mdLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/;
   const urlRegex = /(https?:\/\/[^\s<>"'()]+)/;
   const commandRegex = /(?:^|(?<=\s|[([{"']))(\/(?:ask|share|feature|help|start|catchup|summary|join|export|import|publish|kb|knowledge|features|approve|decline|reply|logins|loginas|asset)\b|\*(?:catchup|summary|help|ask|share|feature|start|logins|loginas|asset)\*)(?=[\s,.:;!?)\]}"']|$)/i;
   const phoneRegex = /(?:^|(?<=\s))(\+(?:[0-9][\s-]?){7,14}[0-9])(?=[\s,.]|$)/;
   const mentionRegex = /(?:^|(?<=\s))(@[a-zA-Z0-9_]{2,30})(?=[\s,.]|$)/;
-  const boldRegex = /\*\*([^*\n]+?)\*\*|\*([^*\n\s](?:[^*\n]*?[^*\n\s])?)\*/;
+  // WhatsApp *bold* (no spaces next to asterisks) and markdown **bold**
+  const boldRegex = /\*\*([^*\n]+?)\*\*|\*([^*\n\s][^*\n]*?[^*\n\s]|\S)\*/;
   const italicRegex = /(?<!\w)_([^_\n\s](?:[^_\n]*?[^_\n\s])?)_(?!\w)/;
   const strikeRegex = /~~([^~]+?)~~|(?<!\w)~([^~\n]+?)~(?!\w)/;
   const codeRegex = /`([^`]+?)`/;
 
   const typePrecedence: Record<string, number> = {
-    email: 0,
-    url: 1,
-    command: 2,
+    mdLink: 0,
+    email: 1,
+    url: 2,
+    command: 3,
     phone: 3,
     code: 4,
     mention: 5,
@@ -426,11 +433,23 @@ function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
 
   while (remaining.length > 0) {
     const matches: {
-      type: "email" | "url" | "command" | "phone" | "code" | "mention" | "strike" | "bold" | "italic";
+      type: "mdLink" | "email" | "url" | "command" | "phone" | "code" | "mention" | "strike" | "bold" | "italic";
       index: number;
       raw: string;
       value: string;
+      href?: string;
     }[] = [];
+
+    const mMd = remaining.match(mdLinkRegex);
+    if (mMd && mMd.index !== undefined) {
+      matches.push({
+        type: "mdLink",
+        index: mMd.index,
+        raw: mMd[0],
+        value: mMd[1],
+        href: mMd[2],
+      });
+    }
 
     const mEmail = remaining.match(emailRegex);
     if (mEmail && mEmail.index !== undefined) {
@@ -504,7 +523,16 @@ function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
     }
 
     const k = keyIndex++;
-    if (earliest.type === "email") {
+    if (earliest.type === "mdLink") {
+      nodes.push(
+        <CitationLink
+          key={k}
+          href={earliest.href || earliest.value}
+          label={citationLabel(earliest.value, earliest.href || "")}
+          isUser={isUser}
+        />,
+      );
+    } else if (earliest.type === "email") {
       nodes.push(<EmailBadge key={k} email={earliest.value} isUser={isUser} />);
     } else if (earliest.type === "command") {
       nodes.push(<CommandBadge key={k} command={earliest.value} isUser={isUser} />);
@@ -582,6 +610,79 @@ function renderInlineContent(text: string, isUser = false): React.ReactNode[] {
   return nodes;
 }
 
+function citationLabel(raw: string, url: string): string {
+  const trimmed = raw.trim();
+  const collapsed = trimmed.replace(/\s+/g, "");
+  if (/^(www\.)?[a-z0-9.-]+\.[a-z]{2,}$/i.test(collapsed)) {
+    return collapsed.replace(/^www\./i, "");
+  }
+  if (trimmed) return trimmed;
+  return parseUrl(url).label;
+}
+
+function CitationLink({
+  href,
+  label,
+  isUser,
+}: {
+  href: string;
+  label: string;
+  isUser: boolean;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={
+        isUser
+          ? "underline underline-offset-2 break-words text-sky-200 hover:text-white"
+          : "font-medium text-sky-700 underline decoration-sky-400/70 underline-offset-[3px] hover:text-sky-800 hover:decoration-sky-600 dark:text-sky-300 dark:decoration-sky-700 dark:hover:text-sky-200"
+      }
+    >
+      {label}
+    </a>
+  );
+}
+
+function isSourcesHeading(trimmed: string): boolean {
+  return /^(?:#{1,3}\s+)?sources\b/i.test(trimmed);
+}
+
+function isNumberedStep(trimmed: string): RegExpMatchArray | null {
+  return trimmed.match(/^(?:#{1,3}\s+)?(\d{1,2})\.\s+(.+)$/);
+}
+
+function isStructuredLine(trimmed: string): boolean {
+  if (!trimmed) return true;
+  if (trimmed.startsWith("```")) return true;
+  if (trimmed.startsWith("|") && trimmed.endsWith("|")) return true;
+  if (/^#{1,3}$/.test(trimmed)) return true;
+  if (/^#{1,3}\s/.test(trimmed)) return true;
+  if (isSourcesHeading(trimmed)) return true;
+  if (/^[A-Za-z][A-Za-z0-9 /&+]{0,40}:\s*/.test(trimmed) && trimmed.split(":")[0].trim().split(/\s+/).length <= 5) return true;
+  if (/^[-*_]{3,}$/.test(trimmed)) return true;
+  if (/^\s*[-*•]\s+/.test(trimmed)) return true;
+  if (/^\s*\d+\.\s+/.test(trimmed)) return true;
+  if (/^\[[^\]]+\]\(https?:\/\//i.test(trimmed)) return true;
+  if (trimmed.startsWith("> ")) return true;
+  if (/^\*([^*]+)\*[.:!]?$/.test(trimmed)) return true;
+  if (/^\*([^*]+):\*\s+/.test(trimmed)) return true;
+  if (/^\[[^\]]+\][,.]?$/.test(trimmed)) return true;
+  return false;
+}
+
+const proseClass = "whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-8";
+
+function isFieldLine(trimmed: string): { label: string; value: string } | null {
+  const match = trimmed.match(/^([A-Za-z][A-Za-z0-9 /&+]{0,40}):\s*(.*)$/);
+  if (!match) return null;
+  const label = match[1].trim();
+  if (label.split(/\s+/).length > 5 || /[.!?]$/.test(label)) return null;
+  if (/^https?:/i.test(match[2])) return null;
+  return { label, value: match[2].trim() };
+}
+
 export function FormattedMessage({ content, isUser = false }: FormattedMessageProps) {
   const urlRegex = /(https?:\/\/[^\s<>"'()]+)/g;
   const detectedLinks: LinkInfo[] = [];
@@ -596,7 +697,11 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
     (l, idx, arr) => arr.findIndex((x) => x.url === l.url) === idx
   );
 
-  const sanitizedContent = content.replace(/(?<=\s|^)(\.\*|\*\.)(?=\s|$)/g, "");
+  const sanitizedContent = normalizeWhatsAppEmphasis(
+    restoreReadableSpacing(
+      normalizeChatMarkdown(content.replace(/(?<=\s|^)(\.\*|\*\.)(?=\s|$)/g, "")),
+    ),
+  );
   const rawLines = sanitizedContent.split("\n");
   const blocks: React.ReactNode[] = [];
   let i = 0;
@@ -649,46 +754,242 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
 
     // Empty line separator
     if (!trimmed) {
-      blocks.push(<div key={`empty-${i}`} className="h-2" />);
       i++;
+      continue;
+    }
+
+    if (/^[-*_]{3,}$/.test(trimmed) || /^#{1,3}$/.test(trimmed)) {
+      if (/^[-*_]{3,}$/.test(trimmed)) {
+        blocks.push(
+          <hr
+            key={`hr-${i}`}
+            className={`my-1 border-0 border-t ${isUser ? "border-zinc-600" : "border-zinc-200 dark:border-zinc-700"}`}
+          />,
+        );
+      }
+      i++;
+      continue;
+    }
+
+    if (isSourcesHeading(trimmed)) {
+      const items: string[] = [];
+      i += 1;
+      while (i < rawLines.length) {
+        const next = rawLines[i].trim();
+        if (!next) {
+          const peek = rawLines[i + 1]?.trim() ?? "";
+          if (!peek || isSourcesHeading(peek) || /^#{1,3}\s+/.test(peek) || isNumberedStep(peek)) break;
+          i += 1;
+          continue;
+        }
+        if (isSourcesHeading(next) || (/^#{1,3}\s+/.test(next) && !isNumberedStep(next))) break;
+        if (isNumberedStep(next) && items.length > 0) break;
+        items.push(next.replace(/^[-*•]\s+/, ""));
+        i += 1;
+        if (items.length >= 12) break;
+      }
+      if (items.length > 0) {
+        blocks.push(
+          <div
+            key={`sources-${i}`}
+            className={`mt-4 border-t pt-3 ${isUser ? "border-zinc-600" : "border-zinc-200 dark:border-zinc-800"}`}
+          >
+            <p
+              className={`mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${
+                isUser ? "text-zinc-400" : "text-zinc-500 dark:text-zinc-400"
+              }`}
+            >
+              Sources
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {items.map((item, idx) => (
+                <div key={`src-${idx}`} className="flex items-start gap-2 pl-0.5">
+                  <span
+                    className={`mt-2 h-1 w-1 shrink-0 rounded-full ${
+                      isUser ? "bg-zinc-400" : "bg-zinc-400 dark:bg-zinc-500"
+                    }`}
+                    aria-hidden
+                  />
+                  <div className="min-w-0 text-[13.5px] leading-6">
+                    {renderInlineContent(item, isUser)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>,
+        );
+      }
+      continue;
+    }
+
+    if (/^\[[^\]]+\][,.]?$/.test(trimmed)) {
+      blocks.push(
+        <div
+          key={`field-${i}`}
+          className={`${proseClass} font-medium ${isUser ? "text-zinc-100" : "text-zinc-800 dark:text-zinc-200"}`}
+        >
+          {renderInlineContent(trimmed, isUser)}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    const numberedStep = isNumberedStep(trimmed);
+    if (numberedStep) {
+      const kids: string[] = [];
+      i += 1;
+      while (i < rawLines.length) {
+        const next = rawLines[i].trim();
+        if (!next) {
+          const peek = rawLines[i + 1]?.trim() ?? "";
+          if (peek && /^[-*•]\s+/.test(peek)) {
+            i += 1;
+            continue;
+          }
+          break;
+        }
+        if (isSourcesHeading(next) || isNumberedStep(next)) break;
+        if (/^#{1,3}$/.test(next) || /^#{1,3}\s+/.test(next)) break;
+        if (
+          /^[-*•]\s+/.test(next)
+          || /^\[[^\]]+\]\(https?:\/\//i.test(next)
+          || !isStructuredLine(next)
+        ) {
+          kids.push(rawLines[i]);
+          i += 1;
+          continue;
+        }
+        break;
+      }
+      blocks.push(
+        <div key={`step-${i}`} className="mt-3 first:mt-0">
+          <div className="flex items-start gap-2.5">
+            <span
+              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold ${
+                isUser
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+              }`}
+            >
+              {numberedStep[1]}
+            </span>
+            <div className={`min-w-0 flex-1 font-semibold tracking-tight text-[16px] leading-7 ${
+              isUser ? "text-white" : "text-zinc-950 dark:text-white"
+            }`}>
+              {renderInlineContent(numberedStep[2], isUser)}
+            </div>
+          </div>
+          {kids.length > 0 ? (
+            <div className="mt-1 flex flex-col gap-1 pl-8">
+              {kids.map((kid, idx) => {
+                const body = kid.trim();
+                const bullet = body.match(/^[-*•]\s+(.*)$/);
+                if (bullet) {
+                  return (
+                    <div key={`step-kid-${idx}`} className="flex items-start gap-2.5">
+                      <span
+                        className={`mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+                          isUser ? "bg-zinc-400" : "bg-zinc-400 dark:bg-zinc-500"
+                        }`}
+                        aria-hidden
+                      />
+                      <div className={isUser ? "text-zinc-100" : "text-zinc-800 dark:text-zinc-200"}>
+                        {renderInlineContent(bullet[1], isUser)}
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <p key={`step-kid-${idx}`} className={`${proseClass} text-[15px] leading-7`}>
+                    {renderInlineContent(body, isUser)}
+                  </p>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>,
+      );
       continue;
     }
 
     // 3. Headings
-    if (line.startsWith("### ")) {
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      const HeadingTag = level === 1 ? "h2" : level === 2 ? "h3" : "h4";
+      const headingClass =
+        level === 1
+          ? "font-semibold tracking-tight text-[18px] mt-4 mb-1"
+          : level === 2
+            ? "font-semibold tracking-tight text-[16.5px] mt-3.5 mb-1"
+            : "font-semibold tracking-tight text-[15px] mt-3 mb-1";
+      const headingColor = isUser
+        ? "text-white"
+        : level === 3
+          ? "text-sky-800 dark:text-sky-200"
+          : "text-zinc-950 dark:text-white";
       blocks.push(
-        <h4 key={`h4-${i}`} className={`font-semibold text-sm mt-2 mb-1 ${isUser ? "text-white" : "text-zinc-900 dark:text-zinc-100"}`}>
-          {renderInlineContent(line.slice(4), isUser)}
-        </h4>
-      );
-      i++;
-      continue;
-    }
-    if (line.startsWith("## ")) {
-      blocks.push(
-        <h3 key={`h3-${i}`} className={`font-bold text-sm mt-2.5 mb-1 ${isUser ? "text-white" : "text-zinc-900 dark:text-zinc-100"}`}>
-          {renderInlineContent(line.slice(3), isUser)}
-        </h3>
-      );
-      i++;
-      continue;
-    }
-    if (line.startsWith("# ")) {
-      blocks.push(
-        <h2 key={`h2-${i}`} className={`font-bold text-base mt-3 mb-1.5 ${isUser ? "text-white" : "text-zinc-900 dark:text-zinc-100"}`}>
-          {renderInlineContent(line.slice(2), isUser)}
-        </h2>
+        <HeadingTag key={`h-${i}`} className={`${headingClass} ${headingColor}`}>
+          {renderInlineContent(heading[2], isUser)}
+        </HeadingTag>
       );
       i++;
       continue;
     }
 
-    // Section Header: *Header text*
-    const sectionMatch = trimmed.match(/^\*([^*]+)\*[.:!]?$/);
-    if (sectionMatch) {
+    const field = isFieldLine(trimmed);
+    if (field) {
+      blocks.push(
+        <div
+          key={`field-row-${i}`}
+          className={`grid grid-cols-[minmax(6.5rem,9.5rem)_1fr] items-baseline gap-x-3 border-b py-1.5 ${
+            isUser ? "border-zinc-700/70" : "border-zinc-100 dark:border-zinc-800"
+          }`}
+        >
+          <span
+            className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
+              isUser ? "text-zinc-400" : "text-zinc-500 dark:text-zinc-400"
+            }`}
+          >
+            {field.label}
+          </span>
+          <span className={isUser ? "text-zinc-100" : "text-zinc-950 dark:text-zinc-50"}>
+            {field.value ? renderInlineContent(field.value, isUser) : <span className="text-zinc-400">—</span>}
+          </span>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // Section Header: *Header text*  or  *Header:* body on same line
+    const sectionOnly = trimmed.match(/^\*([^*]+)\*[.:!]?$/);
+    if (sectionOnly) {
       blocks.push(
         <div key={`section-${i}`} className={`font-bold text-[14.5px] mt-2.5 mb-1 ${isUser ? "text-white" : "text-zinc-950 dark:text-zinc-100"}`}>
-          {renderInlineContent(sectionMatch[1], isUser)}
+          {sectionOnly[1].trim()}
+        </div>
+      );
+      i++;
+      continue;
+    }
+    // Section with body: *Title:* rest  (WhatsApp bold title + description)
+    const sectionWithBody = trimmed.match(/^\*([^*]+):\*\s*(.+)$/);
+    if (sectionWithBody && sectionWithBody[1].trim().length <= 80) {
+      const title = sectionWithBody[1].trim();
+      const body = sectionWithBody[2].trim();
+      blocks.push(
+        <div key={`section-body-${i}`} className="my-1">
+          <span className={`font-bold text-[14.5px] ${isUser ? "text-white" : "text-zinc-950 dark:text-zinc-100"}`}>
+            {title}:
+          </span>
+          {body ? (
+            <span className={isUser ? "text-zinc-100" : "text-zinc-800 dark:text-zinc-200"}>
+              {" "}
+              {renderInlineContent(body, isUser)}
+            </span>
+          ) : null}
         </div>
       );
       i++;
@@ -699,14 +1000,16 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
     const bulletMatch = line.match(/^\s*[-*•]\s+(.*)$/);
     if (bulletMatch) {
       blocks.push(
-        <div key={`bullet-${i}`} className="flex items-start gap-2 my-1 pl-1">
+        <div key={`bullet-${i}`} className="flex items-start gap-2.5 my-1 pl-0.5">
           <span
-            className={`mt-2 h-1.5 w-1.5 rounded-full shrink-0 ${
-              isUser ? "bg-zinc-400" : "bg-zinc-500 dark:bg-zinc-400"
+            className={`mt-2.5 h-1.5 w-1.5 rounded-full shrink-0 ${
+              isUser ? "bg-zinc-400" : "bg-zinc-400 dark:bg-zinc-500"
             }`}
             aria-hidden
           />
-          <div className="flex-1">{renderInlineContent(bulletMatch[1], isUser)}</div>
+          <div className={`flex-1 ${isUser ? "text-zinc-100" : "text-zinc-900 dark:text-zinc-100"}`}>
+            {renderInlineContent(bulletMatch[1], isUser)}
+          </div>
         </div>
       );
       i++;
@@ -744,18 +1047,25 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       continue;
     }
 
-    // Standard paragraph line
-    blocks.push(
-      <div key={`line-${i}`}>
-        {renderInlineContent(line, isUser)}
-      </div>
-    );
+    // Group consecutive prose lines into one paragraph (ChatGPT-style).
+    const prose: string[] = [line.trim()];
     i++;
+    while (i < rawLines.length) {
+      const next = rawLines[i].trim();
+      if (!next || isStructuredLine(next)) break;
+      prose.push(next);
+      i++;
+    }
+    blocks.push(
+      <p key={`p-${i}`} className={proseClass}>
+        {renderInlineContent(prose.join(" "), isUser)}
+      </p>
+    );
   }
 
   return (
-    <div className="space-y-1.5">
-      <div className="leading-relaxed text-[14px]">
+    <div className="max-w-none">
+      <div className={`flex flex-col gap-2.5 text-[15.5px] ${isUser ? "text-zinc-100" : "text-zinc-900 dark:text-zinc-100"}`}>
         {blocks}
       </div>
 
@@ -768,7 +1078,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
               key={link.url}
               className="mt-3 rounded-xl border border-indigo-200/90 bg-indigo-50/70 p-3 text-indigo-950 shadow-2xs dark:border-indigo-800/80 dark:bg-indigo-950/40 dark:text-indigo-200"
             >
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

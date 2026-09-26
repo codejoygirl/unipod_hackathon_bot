@@ -65,6 +65,25 @@ final class ProgramAssetRegistrar
     }
 
     /**
+     * Structured web-admin / API registration (same pipeline as /asset).
+     *
+     * @return array{ok: bool, reply: string, identity?: string}
+     */
+    public function registerStructured(
+        string $channel,
+        User $user,
+        Community $community,
+        string $kind,
+        string $title,
+        string $url,
+        string $style = 'whatsapp',
+    ): array {
+        $line = trim($kind).' '.trim($title).' '.trim($url);
+
+        return $this->registerOneFromLine($channel, $line, $user, $community, $style, 'admin_asset_web');
+    }
+
+    /**
      * Parse a pasted / uploaded text body of asset lines (one per line).
      *
      * @return array{ok: bool, reply: string}

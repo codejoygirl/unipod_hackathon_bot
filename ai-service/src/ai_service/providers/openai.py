@@ -129,14 +129,13 @@ class OpenAIProvider(ChatModel, EmbeddingModel, TranscriptionModel):
     # ChatModel Protocol Implementation
     # ========================================================================
 
-    async def generate(self, request: ChatRequest) -> ChatResponse:
-        """Synthesize answer using OpenAI Chat Completions endpoint."""
+    def _format_messages(self, request: ChatRequest) -> list[dict[str, Any]]:
         formatted_messages = []
         for msg in request.messages:
             msg_dict: dict[str, Any] = {"role": msg.role}
             if msg.name:
                 msg_dict["name"] = msg.name
-            
+
             if isinstance(msg.content, str):
                 msg_dict["content"] = msg.content
             elif msg.content:
@@ -152,8 +151,182 @@ class OpenAIProvider(ChatModel, EmbeddingModel, TranscriptionModel):
                         data_uri = f"data:{p.media_mime_type};base64,{b64_data}"
                         parts.append({"type": "image_url", "image_url": {"url": data_uri}})
                 msg_dict["content"] = parts
-            
+
             formatted_messages.append(msg_dict)
+        return formatted_messages
+
+    def _message_text(self, msg: ChatMessage) -> str:
+        if isinstance(msg.content, str):
+            return msg.content
+        if not msg.content:
+            return ""
+        return " ".join(part.text for part in msg.content if part.text)
+
+    def _content_from_choice(self, raw_content: Any) -> str:
+        if isinstance(raw_content, list):
+            parts: list[str] = []
+            for block in raw_content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        parts.append(str(block.get("text") or ""))
+                else:
+                    text = getattr(block, "text", None)
+                    if text:
+                        parts.append(str(text))
+            return "".join(parts).strip()
+        return str(raw_content or "").strip()
+
+    async def generate(self, request: ChatRequest) -> ChatResponse:
+        """Synthesize answer, using live web search when the caller enables it."""
+        if request.extra_params.get("web_search"):
+            try:
+                return await self._generate_hosted_web(request)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("OpenAI hosted web search failed: %s", exc)
+            try:
+                return await self._generate_tool_web(request)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("OpenAI tool web search failed: %s", exc)
+        return await self._generate_chat(request)
+
+    async def _generate_hosted_web(self, request: ChatRequest) -> ChatResponse:
+        instructions: list[str] = []
+        input_items: list[dict[str, str]] = []
+        for msg in request.messages:
+            text = self._message_text(msg)
+            if not text:
+                continue
+            if msg.role == "system":
+                instructions.append(text)
+            else:
+                role = "assistant" if msg.role == "assistant" else "user"
+                input_items.append({"role": role, "content": text})
+
+        async def _call(tool_type: str = "web_search"):
+            params: dict[str, Any] = {
+                "model": self.chat_model,
+                "input": input_items or "Hello",
+                "tools": [{"type": tool_type}],
+                "temperature": request.temperature,
+            }
+            if instructions:
+                params["instructions"] = "\n\n".join(instructions)
+            if request.max_tokens is not None:
+                params["max_output_tokens"] = request.max_tokens
+            return await self.client.responses.create(**params)
+
+        try:
+            response = await self._execute_with_backoff("responses.web_search", _call)
+        except APIStatusError:
+            response = await self._execute_with_backoff(
+                "responses.web_search_preview",
+                lambda: _call("web_search_preview"),
+            )
+
+        content = str(getattr(response, "output_text", None) or "").strip()
+        if not content:
+            raise RuntimeError("hosted web search returned empty text")
+        usage = getattr(response, "usage", None)
+        return ChatResponse(
+            content=content,
+            model=getattr(response, "model", self.chat_model) or self.chat_model,
+            finish_reason="stop",
+            prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "output_tokens", 0) or 0,
+        )
+
+    async def _generate_tool_web(self, request: ChatRequest) -> ChatResponse:
+        import json
+
+        from ai_service.research.web_search import search_web
+
+        formatted_messages = self._format_messages(request)
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": (
+                        "Search the public web when the question needs current or "
+                        "external facts not already in the member files."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query to run on the public web.",
+                            }
+                        },
+                        "required": ["query"],
+                    },
+                },
+            }
+        ]
+
+        async def _first():
+            params: dict[str, Any] = {
+                "model": self.chat_model,
+                "messages": formatted_messages,
+                "temperature": request.temperature,
+                "tools": tools,
+            }
+            if request.max_tokens is not None:
+                params["max_tokens"] = request.max_tokens
+            return await self.client.chat.completions.create(**params)
+
+        first = await self._execute_with_backoff("chat.completions.tools", _first)
+        message = first.choices[0].message
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if not tool_calls:
+            usage = first.usage
+            return ChatResponse(
+                content=self._content_from_choice(message.content),
+                model=first.model,
+                finish_reason=first.choices[0].finish_reason,
+                prompt_tokens=usage.prompt_tokens if usage else 0,
+                completion_tokens=usage.completion_tokens if usage else 0,
+            )
+
+        follow_messages = list(formatted_messages)
+        follow_messages.append(message.model_dump(exclude_none=True))
+        for call in tool_calls[:3]:
+            raw_args = getattr(getattr(call, "function", None), "arguments", "") or "{}"
+            try:
+                query = str(json.loads(raw_args).get("query") or "")
+            except json.JSONDecodeError:
+                query = ""
+            brief = await search_web(query) if query else ""
+            follow_messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": brief or "No web results.",
+            })
+
+        async def _second():
+            params: dict[str, Any] = {
+                "model": self.chat_model,
+                "messages": follow_messages,
+                "temperature": request.temperature,
+            }
+            if request.max_tokens is not None:
+                params["max_tokens"] = request.max_tokens
+            return await self.client.chat.completions.create(**params)
+
+        second = await self._execute_with_backoff("chat.completions.tool_result", _second)
+        choice = second.choices[0]
+        usage = second.usage
+        return ChatResponse(
+            content=self._content_from_choice(choice.message.content),
+            model=second.model,
+            finish_reason=choice.finish_reason,
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
+        )
+
+    async def _generate_chat(self, request: ChatRequest) -> ChatResponse:
+        """Synthesize answer using OpenAI Chat Completions endpoint."""
+        formatted_messages = self._format_messages(request)
 
         async def _call():
             params: dict[str, Any] = {
@@ -170,31 +343,13 @@ class OpenAIProvider(ChatModel, EmbeddingModel, TranscriptionModel):
 
         response = await self._execute_with_backoff("chat.completions", _call)
         choice = response.choices[0]
-        raw_content = choice.message.content
-        if isinstance(raw_content, list):
-            parts: list[str] = []
-            for block in raw_content:
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        parts.append(str(block.get("text") or ""))
-                else:
-                    text = getattr(block, "text", None)
-                    if text:
-                        parts.append(str(text))
-            content = "".join(parts).strip()
-        else:
-            content = str(raw_content or "").strip()
-
         usage = response.usage
-        prompt_tokens = usage.prompt_tokens if usage else 0
-        completion_tokens = usage.completion_tokens if usage else 0
-
         return ChatResponse(
-            content=content,
+            content=self._content_from_choice(choice.message.content),
             model=response.model,
             finish_reason=choice.finish_reason,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
         )
 
     # ========================================================================

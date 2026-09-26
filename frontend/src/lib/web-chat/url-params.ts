@@ -55,3 +55,7 @@ export function withPhoneQuery(href: string, phone: string | null): string {
   const h = hash ? `#${hash}` : "";
   return `${pathname}${qs}${h}`;
 }
+
+export function projectWorkspaceHref(projectId: string, phone: string | null): string {
+  return withPhoneQuery(`/projects/open?id=${encodeURIComponent(projectId)}`, phone);
+}

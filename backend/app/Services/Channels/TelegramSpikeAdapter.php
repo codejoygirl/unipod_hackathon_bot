@@ -595,7 +595,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
         $chatType = (string) ($message->raw['chat_type'] ?? 'private');
         $reply = $this->formatAskReply($result, $chatType, $question, 'none');
-        if ($reply === '' || str_starts_with($reply, "I don't have a solid answer for that yet.")) {
+        if ($reply === '') {
             return null;
         }
 
@@ -804,6 +804,10 @@ final class TelegramSpikeAdapter implements ChannelAdapter
             return $this->conversation->personalHelpFallbackReply();
         }
 
+        if ($mode === 'escalated') {
+            return $this->conversation->knowledgeGapHandoffFallback($chatType === 'group');
+        }
+
         return $this->conversation->conversationalReply($text, 'plain', 'telegram', $chatType);
     }
 
@@ -917,16 +921,14 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         $chatType = (string) ($message->raw['chat_type'] ?? 'private');
         $reply = $this->formatAskReply($result, $chatType, $question, $linkMode, $linkFocus);
 
-        $softHandoff = str_starts_with($reply, "I don't have a solid answer for that yet.");
-        $shouldEscalate = ($result->answer === '' || $softHandoff)
-            && ! $this->isTransientAiFailure($result)
+        $needsHandoff = $reply === '' && ! $this->isTransientAiFailure($result);
+        $shouldEscalate = $needsHandoff
             && $this->conversation->shouldEscalateKnowledgeGap($question, $community->description);
 
-        if ($softHandoff && ! $shouldEscalate) {
-            $mode = ($this->conversation->isPurelySocial($question)
-                || $this->conversation->isBotDirectedChat($question))
-                ? 'social'
-                : 'out_of_scope';
+        if ($needsHandoff && ! $shouldEscalate) {
+            $mode = $this->conversation->isClearlyOutOfScope($question)
+                ? 'out_of_scope'
+                : 'social';
             $reply = $this->modelAssistedReply(
                 $question,
                 $mode,
@@ -953,6 +955,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
                 'reason' => (string) ($result->escalationReason ?? 'insufficient_evidence'),
                 'channel' => $this->channelName(),
             ]);
+            $reply = $this->modelAssistedReply($question, 'escalated', $community, $message);
         }
 
         $this->rememberTurn(
@@ -981,22 +984,12 @@ final class TelegramSpikeAdapter implements ChannelAdapter
         string $linkMode = 'none',
         string $linkFocus = 'na',
     ): string {
-        $isPrivate = in_array($chatType, ['private', ''], true);
-
         if ($result->answer === '') {
             if ($this->isTransientAiFailure($result)) {
                 return $this->conversation->transientDeferralReply();
             }
 
-            if ($isPrivate) {
-                return "I don't have a solid answer for that yet.\n\n"
-                    ."I've passed it along, and I'll follow up once I have one. "
-                    ."No need to keep checking or asking again.";
-            }
-
-            return "I don't have a solid answer for that yet.\n\n"
-                ."I've passed it along, and we'll follow up once we have one. "
-                ."No need to keep checking or asking again.";
+            return '';
         }
 
         $answer = $this->utf8Safe($result->answer);
@@ -1019,15 +1012,7 @@ final class TelegramSpikeAdapter implements ChannelAdapter
 
         // Hollow "Recording Links" style replies with nothing openable → same soft handoff.
         if ($answer === '') {
-            if ($isPrivate) {
-                return "I don't have a solid answer for that yet.\n\n"
-                    ."I've passed it along, and I'll follow up once I have one. "
-                    ."No need to keep checking or asking again.";
-            }
-
-            return "I don't have a solid answer for that yet.\n\n"
-                ."I've passed it along, and we'll follow up once we have one. "
-                ."No need to keep checking or asking again.";
+            return '';
         }
 
         $answer = $this->conversation->stripInternalEvidenceTags($answer);

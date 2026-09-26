@@ -574,6 +574,10 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
             return $this->conversation->personalHelpFallbackReply();
         }
 
+        if ($mode === 'escalated') {
+            return $this->conversation->knowledgeGapHandoffFallback($chatType === 'group');
+        }
+
         return $this->conversation->conversationalReply(
             $message->text,
             'whatsapp',
@@ -981,16 +985,19 @@ final class WhatsAppWebSpikeAdapter implements ChannelAdapter
                 'channel' => $this->channelName(),
             ]);
 
-            $reply = "I don't have a solid answer for that yet.\n\n"
-                ."I've passed it along, and I'll follow up once I have one. "
-                .'No need to keep checking or asking again.';
+            $reply = $this->modelAssistedReply($message, 'escalated', $community);
+            if ($reply === '') {
+                $reply = $this->conversation->knowledgeGapHandoffFallback();
+            }
         } else {
-            // Tone / social must never look like an admin handoff.
-            $mode = ($this->conversation->isPurelySocial($query)
-                || $this->conversation->isBotDirectedChat($query))
-                ? 'social'
-                : 'out_of_scope';
+            // Unintelligible / off-topic must never look like an admin handoff.
+            $mode = $this->conversation->isClearlyOutOfScope($query)
+                ? 'out_of_scope'
+                : 'social';
             $reply = $this->modelAssistedReply($message, $mode, $community);
+            if ($reply === '' && $mode === 'social') {
+                $reply = $this->conversation->clarificationReply();
+            }
         }
 
         $this->rememberTurn(

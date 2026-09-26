@@ -80,6 +80,25 @@ export type CommunityResource = {
   is_asset?: boolean;
 };
 
+export type CommunityNotificationItem = {
+  id: string;
+  title: string;
+  message: string;
+  category: string;
+  action_query: string | null;
+  published_at: string | null;
+  timestamp: string;
+  read: boolean;
+};
+
+export type CommunityNotificationsResponse = {
+  data: {
+    community_id: string;
+    unread_count: number;
+    notifications: CommunityNotificationItem[];
+  };
+};
+
 export type CommunityResourcesResponse = {
   data: {
     community: {
@@ -89,5 +108,85 @@ export type CommunityResourcesResponse = {
     };
     is_admin: boolean;
     resources: CommunityResource[];
+  };
+};
+
+export type MemberVaultDocument = {
+  id: string;
+  filename: string;
+  mime: string | null;
+  byte_size: number;
+  status: string;
+  excerpt: string;
+  created_at: string | null;
+  kind?: "image" | "pdf" | "document" | "text" | string;
+};
+
+export type MemberVaultArtefact = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  created_at: string | null;
+};
+
+export type MemberVaultSnapshotResponse = {
+  data: {
+    id: string;
+    name: string;
+    kind: string;
+    documents: MemberVaultDocument[];
+    artefacts: MemberVaultArtefact[];
+    limits?: {
+      max_files: number;
+      max_bytes: number;
+      file_count: number;
+    };
+  };
+};
+
+export type MemberVaultAskResponse = {
+  data: {
+    answer: string;
+    citations: string[];
+    used_filenames: string[];
+    artefact?: MemberVaultArtefact;
+  };
+};
+
+export type MemberProjectSummary = {
+  id: string;
+  name: string;
+  file_count: number;
+  chat_count: number;
+  updated_at: string | null;
+};
+
+export type MemberProjectChatSummary = {
+  id: string;
+  title: string;
+  updated_at: string | null;
+};
+
+export type MemberProjectMessage = {
+  id: string;
+  role: "user" | "assistant" | string;
+  body: string;
+  used_filenames: string[];
+  artefact?: MemberVaultArtefact | null;
+  created_at: string | null;
+};
+
+export type MemberProjectSnapshotResponse = {
+  data: {
+    project: MemberProjectSummary;
+    documents: MemberVaultDocument[];
+    chats: MemberProjectChatSummary[];
+  };
+};
+
+export type MemberProjectChatResponse = {
+  data: MemberProjectChatSummary & {
+    messages: MemberProjectMessage[];
   };
 };

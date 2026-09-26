@@ -88,7 +88,7 @@ export function QuickCommandsModal({ isAdmin = false, onPopulate, trigger }: Qui
             className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 shadow-2xs transition hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:border-zinc-700/80 dark:bg-zinc-800/90 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-700/80 dark:hover:text-zinc-100"
             aria-label="Open commands and guide"
           >
-            <span className="font-mono text-emerald-600 dark:text-emerald-400">/</span>
+            <span className="font-mono text-blue-600 dark:text-blue-400">/</span>
             <span>Commands</span>
           </button>
         </Tooltip>
@@ -115,7 +115,7 @@ export function QuickCommandsModal({ isAdmin = false, onPopulate, trigger }: Qui
             <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/10 font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-500/10 font-mono text-sm font-bold text-blue-600 dark:text-blue-400">
                     /
                   </div>
                   <div>
@@ -228,7 +228,7 @@ export function QuickCommandsModal({ isAdmin = false, onPopulate, trigger }: Qui
                         <button
                           type="button"
                           onClick={() => handleSelect(item.command + " ", item.command)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-bold text-emerald-800 shadow-2xs transition hover:bg-emerald-100 hover:border-emerald-400 active:scale-95 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 cursor-pointer"
+                          className="inline-flex items-center gap-1 rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1 font-mono text-xs font-bold text-blue-800 shadow-2xs transition hover:bg-blue-100 hover:border-blue-400 active:scale-95 dark:border-blue-800/70 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60 cursor-pointer"
                           title="Click to populate this command"
                         >
                           <span>{item.command}</span>
@@ -246,7 +246,7 @@ export function QuickCommandsModal({ isAdmin = false, onPopulate, trigger }: Qui
                         </span>
 
                         {item.badge && (
-                          <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          <span className="shrink-0 whitespace-nowrap rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
                             {item.badge}
                           </span>
                         )}
@@ -258,7 +258,7 @@ export function QuickCommandsModal({ isAdmin = false, onPopulate, trigger }: Qui
                         onClick={() => handleSelect(item.example, item.command)}
                         className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition cursor-pointer shadow-2xs active:scale-95 ${
                           isCopied
-                            ? "bg-emerald-600 text-white"
+                            ? "bg-blue-600 text-white"
                             : "border border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                         }`}
                       >
