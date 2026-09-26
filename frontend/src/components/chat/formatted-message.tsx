@@ -672,7 +672,7 @@ function isStructuredLine(trimmed: string): boolean {
   return false;
 }
 
-const proseClass = "whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-8";
+const proseClass = "whitespace-pre-wrap break-words text-[14.5px] font-normal leading-relaxed";
 
 function isFieldLine(trimmed: string): { label: string; value: string } | null {
   const match = trimmed.match(/^([A-Za-z][A-Za-z0-9 /&+]{0,40}):\s*(.*)$/);
@@ -874,8 +874,8 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
             >
               {numberedStep[1]}
             </span>
-            <div className={`min-w-0 flex-1 font-semibold tracking-tight text-[16px] leading-7 ${
-              isUser ? "text-white" : "text-zinc-950 dark:text-white"
+            <div className={`min-w-0 flex-1 text-[14.5px] font-normal leading-relaxed ${
+              isUser ? "text-white" : "text-zinc-800 dark:text-zinc-200"
             }`}>
               {renderInlineContent(numberedStep[2], isUser)}
             </div>
@@ -901,7 +901,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
                   );
                 }
                 return (
-                  <p key={`step-kid-${idx}`} className={`${proseClass} text-[15px] leading-7`}>
+                  <p key={`step-kid-${idx}`} className={proseClass}>
                     {renderInlineContent(body, isUser)}
                   </p>
                 );
@@ -920,10 +920,10 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       const HeadingTag = level === 1 ? "h2" : level === 2 ? "h3" : "h4";
       const headingClass =
         level === 1
-          ? "font-semibold tracking-tight text-[18px] mt-4 mb-1"
+          ? "font-normal tracking-tight text-[14.5px] mt-3 mb-1"
           : level === 2
-            ? "font-semibold tracking-tight text-[16.5px] mt-3.5 mb-1"
-            : "font-semibold tracking-tight text-[15px] mt-3 mb-1";
+            ? "font-normal tracking-tight text-[14.5px] mt-3 mb-1"
+            : "font-normal tracking-tight text-[14.5px] mt-2.5 mb-1";
       const headingColor = isUser
         ? "text-white"
         : level === 3
@@ -967,7 +967,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
     const sectionOnly = trimmed.match(/^\*([^*]+)\*[.:!]?$/);
     if (sectionOnly) {
       blocks.push(
-        <div key={`section-${i}`} className={`font-bold text-[14.5px] mt-2.5 mb-1 ${isUser ? "text-white" : "text-zinc-950 dark:text-zinc-100"}`}>
+        <div key={`section-${i}`} className={`font-normal text-[14.5px] mt-2.5 mb-1 ${isUser ? "text-white" : "text-zinc-800 dark:text-zinc-200"}`}>
           {sectionOnly[1].trim()}
         </div>
       );
@@ -981,7 +981,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
       const body = sectionWithBody[2].trim();
       blocks.push(
         <div key={`section-body-${i}`} className="my-1">
-          <span className={`font-bold text-[14.5px] ${isUser ? "text-white" : "text-zinc-950 dark:text-zinc-100"}`}>
+          <span className={`font-normal text-[14.5px] ${isUser ? "text-white" : "text-zinc-800 dark:text-zinc-200"}`}>
             {title}:
           </span>
           {body ? (
@@ -1065,7 +1065,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
 
   return (
     <div className="max-w-none">
-      <div className={`flex flex-col gap-2.5 text-[15.5px] ${isUser ? "text-zinc-100" : "text-zinc-900 dark:text-zinc-100"}`}>
+      <div className={`flex flex-col gap-2 text-[14.5px] font-normal leading-relaxed ${isUser ? "text-zinc-100" : "text-zinc-800 dark:text-zinc-200"}`}>
         {blocks}
       </div>
 

@@ -56,72 +56,95 @@ const SPACING_WORDS = new Set(
     connected efficient accessible particularly environments where
     systems connectivity can fragmented
     yes no
+    monday tuesday wednesday thursday friday saturday sunday
+    january february march april june july august september october november december
+    today tomorrow yesterday official important updates announcements
+    calendar feel free details further specific
   `.trim().split(/\s+/),
 );
 
+const DATE_WORDS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+  "january",
+  "february",
+  "march",
+  "april",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+];
+
 const MAX_SPACING_WORD = Math.max(...[...SPACING_WORDS].map((word) => word.length));
+
+const FILE_EXT = "pdf|docx?|xlsx?|pptx?|txt|md|csv|png|jpe?g|gif|webp|zip";
 
 const KEEP_PATTERNS = [
   /\[[^\]]+\]\(https?:\/\/[^)\s]+\)/gi,
   /https?:\/\/[^\s<>"')\]]+/gi,
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+  new RegExp(`["“][^"”]+\\.(?:${FILE_EXT})["”]`, "gi"),
+  new RegExp(`\\b[\\w.-]+(?:\\s*\\(\\d+\\))?\\.(?:${FILE_EXT})\\b`, "gi"),
+  /\b(?!KEEP_)[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b/g,
   /\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/gi,
 ];
 
 function segmentRun(run: string): string {
   const lower = run.toLowerCase();
+  if (DATE_WORDS.includes(lower) || SPACING_WORDS.has(lower)) return run;
   const length = lower.length;
-  const parts: string[] = [];
-  let index = 0;
-  let dictHits = 0;
-
-  while (index < length) {
-    let match = 0;
-    const maxTry = Math.min(MAX_SPACING_WORD, length - index);
-    for (let wordLen = maxTry; wordLen >= 1; wordLen -= 1) {
-      if (SPACING_WORDS.has(lower.slice(index, index + wordLen))) {
-        match = wordLen;
-        break;
+  const best = Array<number>(length + 1).fill(-1);
+  const prev = Array<number>(length + 1).fill(-1);
+  best[0] = 0;
+  prev[0] = 0;
+  for (let end = 1; end <= length; end += 1) {
+    const maxLen = Math.min(MAX_SPACING_WORD, end);
+    for (let wordLen = 2; wordLen <= maxLen; wordLen += 1) {
+      const start = end - wordLen;
+      if (best[start] < 0 || !SPACING_WORDS.has(lower.slice(start, end))) continue;
+      const score = best[start] + wordLen * wordLen;
+      if (score > best[end]) {
+        best[end] = score;
+        prev[end] = start;
       }
     }
-    if (match) {
-      parts.push(run.slice(index, index + match));
-      index += match;
-      dictHits += 1;
-      continue;
-    }
-
-    let next = length;
-    for (let cursor = index + 1; cursor < length; cursor += 1) {
-      const tryLen = Math.min(MAX_SPACING_WORD, length - cursor);
-      let hit = false;
-      for (let wordLen = tryLen; wordLen >= 3; wordLen -= 1) {
-        if (SPACING_WORDS.has(lower.slice(cursor, cursor + wordLen))) {
-          hit = true;
-          break;
-        }
-      }
-      if (hit) {
-        next = cursor;
-        break;
-      }
-    }
-    if (next === index) return run;
-    parts.push(run.slice(index, next));
-    index = next;
   }
-
-  if (dictHits < 2) {
-    const leftoverBrand =
-      dictHits === 1
-      && parts.length === 2
-      && /^[A-Z][a-z]{3,}/.test(parts[0])
-      && !SPACING_WORDS.has(parts[0].toLowerCase());
-    if (!leftoverBrand) return run;
+  if (best[length] < 0) return run;
+  const parts: string[] = [];
+  let end = length;
+  while (end > 0) {
+    const start = prev[end];
+    parts.push(run.slice(start, end));
+    end = start;
+  }
+  parts.reverse();
+  if (parts.some((part) => part.length === 1 && part.toLowerCase() !== "a" && part.toLowerCase() !== "i")) {
+    return run;
   }
   const short = parts.filter((part) => part.length <= 2).length;
   if (short > Math.max(2, Math.floor(parts.length / 2))) return run;
   return parts.join(" ");
+}
+
+function rejoinSplitDates(text: string): string {
+  let out = text;
+  for (const word of DATE_WORDS) {
+    for (let split = 3; split <= word.length - 3; split += 1) {
+      const left = word.slice(0, split);
+      const right = word.slice(split);
+      out = out.replace(new RegExp(`\\b(${left})\\s+(${right})\\b`, "gi"), "$1$2");
+    }
+  }
+  return out;
 }
 
 function unstickJammedWords(text: string): string {
@@ -148,14 +171,20 @@ function protectKeepables(text: string): { text: string; held: string[] } {
   for (const pattern of KEEP_PATTERNS) {
     out = out.replace(pattern, (match) => {
       held.push(match);
-      return `@@KEEP${held.length - 1}@@`;
+      return `«${held.length - 1}»`;
     });
   }
   return { text: out, held };
 }
 
 function restoreKeepables(text: string, held: string[]): string {
-  return held.reduce((acc, value, index) => acc.replace(`@@KEEP${index}@@`, value), text);
+  return held.reduce((acc, value, index) => {
+    return acc
+      .replace(`«${index}»`, value)
+      .replace(`@@KEEP_${index}@@`, value)
+      .replace(`@@KEEP${index}@@`, value)
+      .replace(`@@KEEP ${index}@@`, value);
+  }, text);
 }
 
 function joinSplitDomains(text: string): string {
@@ -164,17 +193,31 @@ function joinSplitDomains(text: string): string {
   );
 }
 
+function joinSplitExtensions(text: string): string {
+  return text.replace(new RegExp(`\\.\\s+(${FILE_EXT})\\b`, "gi"), ".$1");
+}
+
 function repairLine(line: string): string {
   if (shouldLeaveAlone(line)) return line;
-  let out = joinSplitDomains(line);
+  let out = joinSplitExtensions(joinSplitDomains(line));
   const protectedText = protectKeepables(out);
   out = protectedText.text;
-  out = out.replace(/([.!?])(["“]?)([A-Za-z])/g, "$1$2 $3");
+  out = out.replace(/([.!?])(["“]?)([A-Za-z])/g, (full, punct: string, quote: string, letter: string, offset: number, source: string) => {
+    if (punct === "." && !quote) {
+      const rest = letter + source.slice(offset + full.length);
+      if (new RegExp(`^(?:${FILE_EXT})\\b`, "i").test(rest)) return `${punct}${quote}${letter}`;
+    }
+    return `${punct}${quote} ${letter}`;
+  });
   out = out.replace(/([,;:])([A-Za-z])/g, "$1 $2");
   out = out.replace(/([a-zA-Z]["”])([A-Za-z])/g, "$1 $2");
   out = out.replace(/([a-z])([A-Z][a-z])/g, "$1 $2");
+  out = out.replace(/([A-Za-z])(\d)/g, "$1 $2");
+  out = out.replace(/(\d)([A-Za-z])/g, "$1 $2");
+  out = out.replace(/,(\d{4})\b/g, ", $1");
   out = out.replace(/([.!?])[ \t]{2,}/g, "$1 ");
   out = unstickJammedWords(out);
+  out = rejoinSplitDates(out);
   return restoreKeepables(out, protectedText.held);
 }
 

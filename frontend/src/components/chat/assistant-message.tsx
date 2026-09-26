@@ -84,7 +84,7 @@ export function AssistantMessage({
       </div>
 
       {/* Message Body Container */}
-      <div className="w-full min-w-0 overflow-hidden rounded-2xl rounded-tl-sm border border-zinc-200/80 bg-white px-4 py-3.5 text-[15px] leading-7 text-zinc-800 shadow-xs sm:px-4.5 dark:border-zinc-800 dark:bg-[#1a1a1a] dark:text-zinc-200">
+      <div className="w-full min-w-0 overflow-hidden rounded-2xl rounded-tl-sm border border-zinc-200/80 bg-white px-4 py-3.5 text-[14.5px] font-normal leading-relaxed text-zinc-800 shadow-xs sm:px-4.5 dark:border-zinc-800 dark:bg-[#1a1a1a] dark:text-zinc-200">
         {/* Quoted message preview if responding to a specific query */}
         {quote && (
           <div className="mb-3 flex items-start gap-2 rounded-xl bg-zinc-50 px-3 py-2 text-xs border-l-[3px] border-blue-500 dark:bg-zinc-900/60">
