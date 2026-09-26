@@ -1,6 +1,8 @@
 "use client";
 
 import { ChatHeader } from "@/components/chat/chat-header";
+import { CircularLoader } from "@/components/ui/circular-loader";
+import { RemoveFileModal } from "@/components/vault/remove-file-modal";
 import { apiFetch, ApiError } from "@/lib/api/client";
 import { getApiBaseUrl } from "@/lib/api/config";
 import type { MemberVaultDocument } from "@/lib/api/types";
@@ -33,6 +35,49 @@ function fileKindLabel(kind: string | undefined): FileKindFilter | "PDF" | "Imag
   return "Text";
 }
 
+function FileActions({
+  downloading,
+  removeDisabled,
+  compact = false,
+  onDownload,
+  onRemove,
+}: {
+  downloading: boolean;
+  removeDisabled: boolean;
+  compact?: boolean;
+  onDownload: () => void;
+  onRemove: () => void;
+}) {
+  const pad = compact ? "px-2 text-[11px]" : "px-2.5 text-xs";
+  return (
+    <div className="flex h-8 flex-nowrap items-center gap-2">
+      <button
+        type="button"
+        disabled={downloading}
+        onClick={onDownload}
+        aria-busy={downloading}
+        className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white font-semibold text-zinc-700 shadow-2xs transition hover:bg-zinc-50 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-70 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer ${pad}`}
+      >
+        {downloading ? (
+          <CircularLoader size="xs" className="border-zinc-300/80 border-t-zinc-700 dark:border-zinc-600 dark:border-t-zinc-200" />
+        ) : (
+          <DownloadIcon />
+        )}
+        Download
+      </button>
+      <button
+        type="button"
+        disabled={removeDisabled}
+        onClick={onRemove}
+        className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent font-semibold text-zinc-500 transition hover:border-rose-200/80 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:border-rose-900/50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 cursor-pointer ${pad}`}
+      >
+        <TrashIcon />
+        Remove
+      </button>
+    </div>
+  );
+}
+
 export default function MyDocsPage() {
   const { memberPhone } = useWebChat();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -46,6 +91,8 @@ export default function MyDocsPage() {
   const [viewMode, setViewMode] = useState<FileViewMode>("grid");
   const [kindFilter, setKindFilter] = useState<FileKindFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<MemberVaultDocument | null>(null);
   const pageSize = usePageSize();
 
   const loadVault = useCallback(async () => {
@@ -129,16 +176,18 @@ export default function MyDocsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!memberPhone) return;
+  const handleDelete = async () => {
+    if (!memberPhone || !pendingRemove) return;
     setBusy(true);
     setError(null);
     try {
       const qs = new URLSearchParams({ phone: memberPhone });
-      await apiFetch(`/api/v1/web-chat/vault/documents/${id}?${qs.toString()}`, {
+      await apiFetch(`/api/v1/web-chat/vault/documents/${pendingRemove.id}?${qs.toString()}`, {
         method: "DELETE",
       });
-      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      const removedId = pendingRemove.id;
+      setDocuments((prev) => prev.filter((doc) => doc.id !== removedId));
+      setPendingRemove(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not remove that file.");
     } finally {
@@ -147,7 +196,9 @@ export default function MyDocsPage() {
   };
 
   const handleDownload = async (doc: MemberVaultDocument) => {
-    if (!memberPhone) return;
+    if (!memberPhone || downloadingId) return;
+    setDownloadingId(doc.id);
+    setError(null);
     try {
       const qs = new URLSearchParams({ phone: memberPhone });
       const res = await fetch(
@@ -164,6 +215,8 @@ export default function MyDocsPage() {
       URL.revokeObjectURL(url);
     } catch {
       setError("Could not download that file.");
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -376,24 +429,13 @@ export default function MyDocsPage() {
                         <p className="mt-1 line-clamp-2 text-xs text-zinc-500 dark:text-zinc-400">{doc.excerpt}</p>
                       ) : null}
                     </div>
-                      <div className="mt-3 flex items-center gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800/60">
-                        <button
-                          type="button"
-                          onClick={() => void handleDownload(doc)}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 shadow-2xs transition hover:bg-zinc-50 hover:text-zinc-950 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer"
-                        >
-                          <DownloadIcon />
-                          Download
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void handleDelete(doc.id)}
-                          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-500 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 cursor-pointer"
-                        >
-                          <TrashIcon />
-                          Remove
-                        </button>
+                      <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-zinc-800/60">
+                        <FileActions
+                          downloading={downloadingId === doc.id}
+                          removeDisabled={busy}
+                          onDownload={() => void handleDownload(doc)}
+                          onRemove={() => setPendingRemove(doc)}
+                        />
                       </div>
                   </li>
                 ))}
@@ -420,24 +462,14 @@ export default function MyDocsPage() {
                         <td className="px-4 py-3 text-zinc-500">{formatVaultBytes(doc.byte_size)}</td>
                         <td className="px-4 py-3 capitalize text-zinc-500">{doc.status}</td>
                         <td className="px-4 py-3 text-right">
-                          <div className="inline-flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => void handleDownload(doc)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer"
-                            >
-                              <DownloadIcon />
-                              Download
-                            </button>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void handleDelete(doc.id)}
-                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-zinc-500 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 cursor-pointer"
-                            >
-                              <TrashIcon />
-                              Remove
-                            </button>
+                          <div className="inline-flex justify-end">
+                            <FileActions
+                              compact
+                              downloading={downloadingId === doc.id}
+                              removeDisabled={busy}
+                              onDownload={() => void handleDownload(doc)}
+                              onRemove={() => setPendingRemove(doc)}
+                            />
                           </div>
                         </td>
                       </tr>
@@ -492,6 +524,14 @@ export default function MyDocsPage() {
           </section>
         </div>
       </div>
+      <RemoveFileModal
+        filename={pendingRemove?.filename ?? null}
+        busy={busy}
+        onClose={() => {
+          if (!busy) setPendingRemove(null);
+        }}
+        onConfirm={() => void handleDelete()}
+      />
     </div>
   );
 }

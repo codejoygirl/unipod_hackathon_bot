@@ -12,11 +12,10 @@ const sizeClass = {
 
 export function CircularLoader({ size = "md", className = "" }: CircularLoaderProps) {
   return (
-    <div className="flex items-center justify-center" role="status" aria-label="Loading">
-      <div
-        className={`${sizeClass[size]} animate-spin rounded-full border-zinc-200 border-t-zinc-800 ${className}`}
-        aria-hidden
-      />
-    </div>
+    <span
+      role="status"
+      aria-label="Loading"
+      className={`inline-block shrink-0 animate-spin rounded-full border-zinc-200 border-t-zinc-800 ${sizeClass[size]} ${className}`}
+    />
   );
 }

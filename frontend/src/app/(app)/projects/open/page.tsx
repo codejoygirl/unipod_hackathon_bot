@@ -5,7 +5,6 @@ import { FormattedMessage } from "@/components/chat/formatted-message";
 import { RenameProjectModal } from "@/components/projects/rename-project-modal";
 import { AssistantReplyToolbar } from "@/components/chat/assistant-reply-toolbar";
 import { PROJECT_PROMPT_EXAMPLES, useTypewriterPlaceholder } from "@/components/chat/typewriter-placeholder";
-import { restoreReadableSpacing } from "@/lib/web-chat/readable-text";
 import { GrokThinkingLoader } from "@/components/chat/grok-thinking-loader";
 import { CircularLoader } from "@/components/ui/circular-loader";
 import { DownloadIconButton } from "@/components/ui/download-icon-button";
@@ -551,7 +550,7 @@ function ProjectWorkspace() {
             message.role === "user" ? (
               <div key={message.id} className="group relative my-1.5 flex w-full max-w-[min(85%,36rem)] min-w-0 flex-col items-end self-end sm:max-w-[75%]">
                 <div className="min-w-0 max-w-full rounded-3xl rounded-br-md bg-zinc-900 px-4 py-3 text-zinc-100 shadow-xs dark:bg-[#183660] dark:text-white">
-                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[14.5px] leading-relaxed">{message.body}</p>
+                  <p className="whitespace-pre-wrap break-words text-[14.5px] font-normal leading-relaxed">{message.body}</p>
                 </div>
               </div>
             ) : message.role === "assistant" ? (
@@ -575,11 +574,11 @@ function ProjectWorkspace() {
                   {message.artefact?.title ? (
                     <div className="flex items-center justify-between gap-3 border-b border-zinc-200/80 px-4 py-2.5 dark:border-zinc-800">
                       <p className="min-w-0 truncate text-[13px] font-medium text-zinc-600 dark:text-zinc-300">
-                        {restoreReadableSpacing(message.artefact.title)}
+                        {message.artefact.title}
                       </p>
                     </div>
                   ) : null}
-                  <div className="px-4 py-3.5 text-[15.5px] leading-8 sm:px-5 sm:py-4">
+                  <div className="px-4 py-3.5 text-[14.5px] font-normal leading-relaxed sm:px-5 sm:py-4">
                     <FormattedMessage content={message.body} />
                   </div>
                 </div>

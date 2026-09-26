@@ -257,6 +257,24 @@ def test_clean_document_reply_keeps_research_urls_and_lists():
     assert "What problem are you addressing" in brief
     assert "Who is it for" in brief
     assert "How does your solution address the problem" in brief
+    dates = _clean_document_reply("Hereare updates for today,Saturday,September30,2023.")
+    assert "Saturday" in dates
+    assert "Satur day" not in dates
+    assert "September 30, 2023" in dates
+    assert "Here are" in dates
+    assert "today" in dates
+    assert "to day" not in dates.lower()
+    highlights = _clean_document_reply("## Highlights")
+    assert "Highlights" in highlights
+    assert "High lights" not in highlights
+    titled = _clean_document_reply(
+        'The file is titled "Balogun_Abdulsamad_Senior_Full_Stack_Software_Engineer_CV (1).pdf."'
+    )
+    assert "Software" in titled
+    assert "So ftw" not in titled
+    assert ".pdf" in titled
+    assert ". pdf" not in titled
+    assert "Balogun_Abdulsamad_Senior_Full_Stack_Software_Engineer_CV" in titled
 
 
 def test_parse_intent_label_accepts_plain_and_noisy():

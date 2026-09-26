@@ -50,7 +50,7 @@ export function AssistantReplyToolbar({
   }
 
   return (
-    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1 px-1 text-zinc-400">
+    <div className="mt-1.5 flex h-8 min-w-0 flex-nowrap items-center gap-0.5 overflow-x-auto px-1 text-zinc-400">
       <Tooltip content={copied ? "Copied!" : "Copy response"} position="bottom">
         <button
           type="button"
