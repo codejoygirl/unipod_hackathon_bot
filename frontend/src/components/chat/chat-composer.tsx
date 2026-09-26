@@ -13,6 +13,18 @@ import { CircularLoader } from "@/components/ui/circular-loader";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useTypewriterPlaceholder } from "./typewriter-placeholder";
 import { SlashCommandMenu } from "./slash-command-menu";
+import { VAULT_ACCEPT, VAULT_MAX_BATCH, formatVaultBytes, isVaultFile } from "@/lib/web-chat/vault";
+import {
+  speechRecognitionCtor,
+  type SpeechRecognitionEventLike,
+  type SpeechRecognitionInstance,
+} from "@/lib/speech/recognition";
+
+export type ChatVaultSend = {
+  files: File[];
+  documentIds: string[];
+  searchLibrary: boolean;
+};
 
 interface ChatComposerProps {
   disabled?: boolean;
@@ -21,50 +33,11 @@ interface ChatComposerProps {
   /** Shown on the send control while `sending` (e.g. "Asking Zak…") */
   sendingLabel?: string;
   isAdmin?: boolean;
-  onSend: (text: string, quote?: QuotedMessage, images?: ChatImagePayload[]) => void;
+  onSend: (text: string, quote?: QuotedMessage, images?: ChatImagePayload[], vault?: ChatVaultSend) => void;
   quotedMessage?: QuotedMessage | null;
   onClearQuote?: () => void;
   onFocus?: () => void;
   onTyping?: () => void;
-}
-
-// Global type augmentation for Web Speech API
-interface SpeechRecognitionResultItem {
-  transcript: string;
-}
-
-interface SpeechRecognitionResultList {
-  length: number;
-  [index: number]: {
-    [index: number]: SpeechRecognitionResultItem;
-  };
-}
-
-interface SpeechRecognitionEventLike {
-  results: SpeechRecognitionResultList;
-}
-
-interface SpeechRecognitionInstance {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onstart: (() => void) | null;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onerror: (() => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-}
-
-interface SpeechRecognitionConstructor {
-  new (): SpeechRecognitionInstance;
-}
-
-declare global {
-  interface Window {
-    SpeechRecognition?: SpeechRecognitionConstructor;
-    webkitSpeechRecognition?: SpeechRecognitionConstructor;
-  }
 }
 
 export function ChatComposer({
@@ -84,14 +57,21 @@ export function ChatComposer({
   const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
   const [pendingImages, setPendingImages] = useState<ChatImagePayload[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<File[]>([]);
   const [previewImage, setPreviewImage] = useState<ChatImagePayload | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
 
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setVoiceSupported(Boolean(speechRecognitionCtor()));
+  }, []);
 
   // Typewriter animated placeholder with programme question examples
   const isInputEmpty = value.length === 0;
@@ -162,11 +142,10 @@ export function ChatComposer({
   }, [isRecording]);
 
   function startVoiceRecording() {
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (disabled || sending || !voiceSupported) return;
+    const SpeechRecognition = speechRecognitionCtor();
 
     if (!SpeechRecognition) {
-      alert("Voice recognition is not supported in this browser. Please type your message.");
       return;
     }
 
@@ -237,6 +216,33 @@ export function ChatComposer({
     setImageError(null);
   }
 
+  function attachVaultFiles(incoming: FileList | File[] | null | undefined) {
+    if (!incoming || disabled || sending) return;
+    const files = Array.from(incoming).filter(isVaultFile);
+    if (files.length === 0) {
+      setImageError("Use a PDF, Word, text, markdown, CSV, or image file.");
+      return;
+    }
+    setPendingDocs((prev) => [...prev, ...files].slice(0, VAULT_MAX_BATCH));
+    setImageError(null);
+    if (docInputRef.current) docInputRef.current.value = "";
+  }
+
+  function vaultPayload(): ChatVaultSend | undefined {
+    if (pendingDocs.length === 0) {
+      return undefined;
+    }
+    return {
+      files: pendingDocs,
+      documentIds: [],
+      searchLibrary: false,
+    };
+  }
+
+  function canSend(trimmed: string): boolean {
+    return Boolean(trimmed || pendingImages.length > 0 || pendingDocs.length > 0);
+  }
+
   async function attachImageFiles(incoming: FileList | File[] | null | undefined) {
     if (!incoming || disabled || sending) {
       return;
@@ -284,10 +290,16 @@ export function ChatComposer({
   function handleSendVoice() {
     stopVoiceRecording();
     const trimmed = value.trim();
-    if (trimmed || pendingImages.length > 0) {
-      onSend(trimmed, quotedMessage ?? undefined, pendingImages.length ? pendingImages : undefined);
+    if (canSend(trimmed)) {
+      onSend(
+        trimmed,
+        quotedMessage ?? undefined,
+        pendingImages.length ? pendingImages : undefined,
+        vaultPayload(),
+      );
       setValue("");
       setPendingImages([]);
+      setPendingDocs([]);
       onClearQuote?.();
     }
   }
@@ -299,16 +311,25 @@ export function ChatComposer({
       return;
     }
     const trimmed = value.trim();
-    if (disabled || (!trimmed && pendingImages.length === 0)) {
+    if (disabled || !canSend(trimmed)) {
       return;
     }
-    onSend(trimmed, quotedMessage ?? undefined, pendingImages.length ? pendingImages : undefined);
+    onSend(
+      trimmed,
+      quotedMessage ?? undefined,
+      pendingImages.length ? pendingImages : undefined,
+      vaultPayload(),
+    );
     setValue("");
     setPendingImages([]);
+    setPendingDocs([]);
     setIsSlashMenuOpen(false);
     setImageError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+    if (docInputRef.current) {
+      docInputRef.current.value = "";
     }
     onClearQuote?.();
   }
@@ -343,7 +364,10 @@ export function ChatComposer({
   };
 
   return (
-    <div className="relative bg-gradient-to-t from-white via-white/95 to-transparent pt-2 pb-3 backdrop-blur-md dark:from-[#212121] dark:via-[#212121]/95">
+    <div
+      className="relative bg-gradient-to-t from-white from-55% via-white/80 to-transparent pt-6 pb-3 dark:from-[#212121] dark:via-[#212121]/80"
+      data-tour="composer"
+    >
       <form
         onSubmit={handleSubmit}
         onDragOver={(e) => {
@@ -352,21 +376,23 @@ export function ChatComposer({
           }
         }}
         onDrop={(e) => {
-          const file = e.dataTransfer.files?.[0];
-          if (!file || !file.type.startsWith("image/")) {
-            return;
-          }
+          const list = e.dataTransfer.files;
+          if (!list?.length) return;
+          const images = Array.from(list).filter((file) => file.type.startsWith("image/"));
+          const docs = Array.from(list).filter((file) => !file.type.startsWith("image/") && isVaultFile(file));
+          if (images.length === 0 && docs.length === 0) return;
           e.preventDefault();
-          void attachImageFiles(e.dataTransfer.files);
+          if (images.length > 0) void attachImageFiles(images);
+          if (docs.length > 0) attachVaultFiles(docs);
         }}
         className="mx-auto max-w-3xl px-3 sm:px-4"
       >
         {/* Reply preview banner */}
         {quotedMessage && (
           <div className="mb-2 flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-zinc-50/95 px-3.5 py-2 shadow-2xs dark:border-zinc-700/80 dark:bg-zinc-800/90">
-            <div className="flex items-center gap-2.5 min-w-0 border-l-[3px] border-emerald-500 pl-2.5">
+            <div className="flex items-center gap-2.5 min-w-0 border-l-[3px] border-blue-500 pl-2.5">
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-400">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M9 14L4 9l5-5" strokeLinecap="round" strokeLinejoin="round" />
                     <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v2" strokeLinecap="round" />
@@ -392,6 +418,31 @@ export function ChatComposer({
           </div>
         )}
 
+        {pendingDocs.length > 0 ? (
+          <div className="mb-2 rounded-2xl border border-zinc-200/90 bg-zinc-50/95 px-2.5 py-2 shadow-2xs dark:border-zinc-700/80 dark:bg-zinc-800/90">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {pendingDocs.map((file, index) => (
+                <span
+                  key={`${file.name}-${index}`}
+                  className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-white px-2 py-1 text-[11px] font-medium text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                >
+                  <span className="truncate">{file.name}</span>
+                  <span className="text-zinc-400">{formatVaultBytes(file.size)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDocs((prev) => prev.filter((_, i) => i !== index))}
+                    className="text-zinc-400 hover:text-zinc-700"
+                    aria-label={`Remove ${file.name}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <p className="mt-1.5 px-0.5 text-[11px] text-zinc-500">Saved to Library, then used for this question.</p>
+          </div>
+        ) : null}
+
         {pendingImages.length > 0 || imageError ? (
           <div className="mb-2 rounded-2xl border border-zinc-200/90 bg-zinc-50/95 px-2.5 py-2 shadow-2xs dark:border-zinc-700/80 dark:bg-zinc-800/90">
             {pendingImages.length > 0 ? (
@@ -404,7 +455,7 @@ export function ChatComposer({
                     <button
                       type="button"
                       onClick={() => setPreviewImage(img)}
-                      className="shrink-0 overflow-hidden rounded-lg ring-1 ring-zinc-200/80 transition hover:ring-emerald-500/60 dark:ring-zinc-600"
+                      className="shrink-0 overflow-hidden rounded-lg ring-1 ring-zinc-200/80 transition hover:ring-blue-500/60 dark:ring-zinc-600"
                       title={`Preview ${img.filename}`}
                       aria-label={`Preview ${img.filename}`}
                     >
@@ -486,11 +537,11 @@ export function ChatComposer({
             <div className="flex items-center gap-3 min-w-0">
               {/* Animated audio wave indicator */}
               <div className="flex items-center gap-0.5 h-6 px-1" aria-hidden="true">
-                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-1" />
-                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-2" />
-                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-3" />
-                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-4" />
-                <span className="w-1 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-voice-wave-5" />
+                <span className="w-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-voice-wave-1" />
+                <span className="w-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-voice-wave-2" />
+                <span className="w-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-voice-wave-3" />
+                <span className="w-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-voice-wave-4" />
+                <span className="w-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-voice-wave-5" />
               </div>
 
               {/* Timer */}
@@ -538,13 +589,14 @@ export function ChatComposer({
         ) : (
           /* ChatGPT Style Floating Pill Capsule Chatbox */
           <div
-            className={`relative flex ${
-              isMultiline ? "items-end pb-1.5" : "items-center"
-            } rounded-3xl border border-zinc-300/80 bg-white px-2.5 py-1.5 shadow-sm transition-all focus-within:border-zinc-400 focus-within:shadow-md dark:border-zinc-700 dark:bg-[#2f2f2f] dark:focus-within:border-zinc-500`}
+            className={`relative flex min-h-[58px] ${
+              isMultiline ? "items-end pb-2" : "items-center"
+            } rounded-3xl border border-zinc-300/80 bg-white px-3 py-2.5 shadow-sm transition-all focus-within:border-zinc-400 focus-within:shadow-md dark:border-zinc-700 dark:bg-[#2f2f2f] dark:focus-within:border-zinc-500`}
           >
             {/* Left: + (commands) and photo attach */}
             <div
               className={`flex shrink-0 items-center -space-x-0.5 ${isMultiline ? "self-end pb-0.5" : ""}`}
+              data-tour="composer-tools"
             >
               <input
                 ref={fileInputRef}
@@ -556,6 +608,15 @@ export function ChatComposer({
                 onChange={(e) => {
                   void attachImageFiles(e.target.files);
                 }}
+              />
+              <input
+                ref={docInputRef}
+                type="file"
+                accept={VAULT_ACCEPT}
+                multiple
+                className="sr-only"
+                tabIndex={-1}
+                onChange={(e) => attachVaultFiles(e.target.files)}
               />
               <Tooltip content="Tools & commands" position="top" shortcut="/">
                 <button
@@ -640,12 +701,12 @@ export function ChatComposer({
             {/* Right: mic and send */}
             <div className={`flex items-center gap-1 shrink-0 ${isMultiline ? "self-end pb-0.5" : ""}`}>
               {/* Voice / Mic Button */}
-              <Tooltip content="Voice dictation" position="top">
+              <Tooltip content={voiceSupported ? "Voice dictation" : "Voice input is not available here"} position="top">
                 <button
                   type="button"
                   onClick={startVoiceRecording}
-                  disabled={disabled}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 active:scale-95 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 cursor-pointer"
+                  disabled={disabled || sending || !voiceSupported}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 cursor-pointer"
                   aria-label="Voice input"
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

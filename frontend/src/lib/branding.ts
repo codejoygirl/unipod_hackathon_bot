@@ -18,8 +18,11 @@ export const KENYA_PHONE_PLACEHOLDER = "254712345678";
 export const APP_SIGN_IN_DESCRIPTION =
   "Use the same UniPod community assistant as on WhatsApp and Telegram: schedules, updates, links, and grounded answers from shared knowledge.";
 
+export type ReachChannelKind = "web" | "whatsapp" | "telegram";
+
 export type ReachChannel = {
-  id: "web" | "whatsapp" | "telegram";
+  id: string;
+  kind: ReachChannelKind;
   label: string;
   url: string | null;
   /** Shown on web sign-in when this is the current surface. */
@@ -35,13 +38,25 @@ export function reachChannelsForSignIn(): ReachChannel[] {
   const telegramLabel =
     process.env.NEXT_PUBLIC_ZAK_TELEGRAM_LABEL?.trim() || "Telegram";
 
-  const whatsappUrl = process.env.NEXT_PUBLIC_ZAK_WHATSAPP_URL?.trim() || "";
-  const telegramUrl = process.env.NEXT_PUBLIC_ZAK_TELEGRAM_URL?.trim() || "";
+  const whatsappUrl =
+    process.env.NEXT_PUBLIC_ZAK_WHATSAPP_URL?.trim() || "https://wa.me/2347041131371";
+  const telegramUrl =
+    process.env.NEXT_PUBLIC_ZAK_TELEGRAM_URL?.trim() || "https://t.me/zak_meti_26_bot";
 
   return [
-    { id: "web", label: webLabel, url: null, current: true },
-    { id: "whatsapp", label: whatsappLabel, url: whatsappUrl || null },
-    { id: "telegram", label: telegramLabel, url: telegramUrl || null },
+    { id: "web", kind: "web", label: webLabel, url: null, current: true },
+    {
+      id: "whatsapp",
+      kind: "whatsapp",
+      label: whatsappLabel,
+      url: whatsappUrl || null,
+    },
+    {
+      id: "telegram",
+      kind: "telegram",
+      label: telegramLabel,
+      url: telegramUrl || null,
+    },
   ];
 }
 

@@ -12,6 +12,9 @@ interface SidebarContextValue {
   isFeatureModalOpen: boolean;
   openFeatureModal: () => void;
   closeFeatureModal: () => void;
+  isProjectModalOpen: boolean;
+  openProjectModal: () => void;
+  closeProjectModal: () => void;
 }
 
 const SidebarContext = createContext<SidebarContextValue | undefined>(undefined);
@@ -30,6 +33,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   const [isCommandsModalOpen, setIsCommandsModalOpen] = useState(false);
   const [isFeatureModalOpen, setIsFeatureModalOpen] = useState(false);
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
 
   const setIsOpen = useCallback((open: boolean) => {
     setIsOpenState(open);
@@ -56,12 +60,20 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const closeCommandsModal = useCallback(() => setIsCommandsModalOpen(false), []);
   const openFeatureModal = useCallback(() => setIsFeatureModalOpen(true), []);
   const closeFeatureModal = useCallback(() => setIsFeatureModalOpen(false), []);
+  const openProjectModal = useCallback(() => setIsProjectModalOpen(true), []);
+  const closeProjectModal = useCallback(() => setIsProjectModalOpen(false), []);
 
   // Global event listener for open-feature-request
   useEffect(() => {
     const handleOpenFeature = () => setIsFeatureModalOpen(true);
     window.addEventListener("open-feature-request", handleOpenFeature);
     return () => window.removeEventListener("open-feature-request", handleOpenFeature);
+  }, []);
+
+  useEffect(() => {
+    const handleOpenProject = () => setIsProjectModalOpen(true);
+    window.addEventListener("open-new-project", handleOpenProject);
+    return () => window.removeEventListener("open-new-project", handleOpenProject);
   }, []);
 
   // Keyboard shortcut Ctrl+S / Cmd+S to toggle sidebar
@@ -88,6 +100,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         isFeatureModalOpen,
         openFeatureModal,
         closeFeatureModal,
+        isProjectModalOpen,
+        openProjectModal,
+        closeProjectModal,
       }}
     >
       {children}

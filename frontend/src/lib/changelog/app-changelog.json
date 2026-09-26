@@ -1,0 +1,145 @@
+[
+  {
+    "version": "v1.6.0",
+    "date": "September 2026",
+    "isLatest": true,
+    "title": "Projects & Personal Library",
+    "changes": [
+      {
+        "tag": "Feature",
+        "description": "Personal Library: upload, keep, and download your own files. They stay private and never mix with community knowledge."
+      },
+      {
+        "tag": "Feature",
+        "description": "Projects: each project has its own files and one ongoing chat. Ask, draft, and generate from those files."
+      },
+      {
+        "tag": "Improvement",
+        "description": "The assistant can see your full library and still tell selected project files apart—so “how many documents do I have?” is accurate."
+      },
+      {
+        "tag": "Feature",
+        "description": "Download generated drafts (PDF or markdown) from a project reply. A circular loader shows while the file is ready."
+      },
+      {
+        "tag": "UI",
+        "description": "Project replies use the same toolbar as community chat: copy, speak, thumbs, reply, and regenerate (replaces that answer and everything after it)."
+      }
+    ]
+  },
+  {
+    "version": "v1.5.0",
+    "date": "September 2026",
+    "title": "Web Push & Admin Desk",
+    "changes": [
+      {
+        "tag": "Feature",
+        "description": "Closed-app Web Push alerts when VAPID is configured; enable from the bell footer."
+      },
+      {
+        "tag": "Feature",
+        "description": "Admin desk: publish updates, Drive assets, meeting links, and knowledge drafts from the web (same pipelines as WhatsApp/Telegram)."
+      },
+      {
+        "tag": "UI",
+        "description": "Meetings hub loads live community meetings; admins can add sessions in one tap."
+      }
+    ]
+  },
+  {
+    "version": "v1.4.0",
+    "date": "September 2026",
+    "title": "Live Meetings Hub & Resilient Assistant Experience",
+    "changes": [
+      {
+        "tag": "Feature",
+        "description": "Live Meetings & Sessions Hub: Direct access to cohort syncs, mentor office hours, and masterclasses across Microsoft Teams, Google Meet, and Zoom."
+      },
+      {
+        "tag": "Feature",
+        "description": "In-App Feature Suggestions: Submit tool improvements with instant escalation to community coordinators via Telegram & WhatsApp bots."
+      },
+      {
+        "tag": "UI",
+        "description": "Smooth Modal & Dropdown Animations: Fluid ease-out transitions on opening and closing all dialogs, popovers, and drawers."
+      },
+      {
+        "tag": "Improvement",
+        "description": "Sanitized Error Shield: Replaced technical backend exception details with clean, reassuring, user-friendly guidance."
+      },
+      {
+        "tag": "UI",
+        "description": "Compact Modern Controls: Unified input and button heights, edge-aligned header actions, and visible Install App header pill."
+      },
+      {
+        "tag": "Improvement",
+        "description": "Animated Skeleton Loading: Instant visual feedback and shimmer placeholders during session discovery and resource lookups."
+      }
+    ]
+  },
+  {
+    "version": "v1.3.0",
+    "date": "September 2026",
+    "title": "ChatGPT Experience & Interactive Command Palette",
+    "changes": [
+      {
+        "tag": "UI",
+        "description": "Full ChatGPT aesthetic overhaul with dark/light themes, collapsible sidebar, and conversation history."
+      },
+      {
+        "tag": "Feature",
+        "description": "Clickable Quick Commands & Slash Menu: Auto-populate /ask, /share, /feature, /help directly into your composer."
+      },
+      {
+        "tag": "UI",
+        "description": "Refined notification dropdown anchored directly to header with zero scrollbar clutter."
+      },
+      {
+        "tag": "Improvement",
+        "description": "Guaranteed Smart Auto-Scroll: Sticks to bottom during live bot typing, streaming, and input focus."
+      },
+      {
+        "tag": "Feature",
+        "description": "Unified Notification & Changelog Dropdown: In-app release notes and community announcements from the API."
+      }
+    ]
+  },
+  {
+    "version": "v1.2.0",
+    "date": "August 2026",
+    "title": "Voice Dictation & Standalone PWA",
+    "changes": [
+      {
+        "tag": "Feature",
+        "description": "Hands-free voice recognition with live audio visualizer and speech-to-text querying."
+      },
+      {
+        "tag": "Improvement",
+        "description": "Progressive Web App support: Install as standalone mobile or desktop app with offline capability."
+      },
+      {
+        "tag": "Feature",
+        "description": "Rich interactive meeting cards with 1-click launch for Microsoft Teams, Zoom, and Google Meet."
+      }
+    ]
+  },
+  {
+    "version": "v1.1.0",
+    "date": "July 2026",
+    "title": "Knowledge Grounding & Admin Controls",
+    "changes": [
+      {
+        "tag": "Feature",
+        "description": "Direct Drive asset registration via /asset and WhatsApp/Telegram export ingestion via /import."
+      },
+      {
+        "tag": "Improvement",
+        "description": "Dual-layer permission validation ensuring community isolation."
+      },
+      {
+        "tag": "Fix",
+        "description": "Resolved citation revalidation timeouts on complex technical queries."
+      }
+    ]
+  }
+]

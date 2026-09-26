@@ -15,6 +15,16 @@ export const PROGRAMME_PROMPT_EXAMPLES = [
   "Type / for quick commands...",
 ];
 
+export const PROJECT_PROMPT_EXAMPLES = [
+  "Ask anything...",
+  "Summarize the key points in these files",
+  "What is missing or unclear?",
+  "Write a cover letter from my CV",
+  "Turn this into a pitch",
+  "Give practical next steps",
+  "Convert the last draft to a PDF",
+];
+
 interface TypewriterOptions {
   typingSpeed?: number;
   deletingSpeed?: number;
@@ -35,10 +45,10 @@ export function useTypewriterPlaceholder(
     paused = false,
   } = options;
 
-  const [displayedText, setDisplayedText] = useState(examples[0] ?? "Ask anything...");
+  const [displayedText, setDisplayedText] = useState("");
   const stateRef = useRef({
     exampleIndex: 0,
-    charIndex: examples[0]?.length ?? 0,
+    charIndex: 0,
     isDeleting: false,
   });
 

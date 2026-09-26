@@ -35,7 +35,7 @@ trait EnsuresAssistantDemoScope
         $community = Community::query()->firstOrCreate(
             ['tenant_id' => $tenant->id, 'slug' => 'demo-community'],
             [
-                'name' => 'Demo Community',
+                'name' => 'UniPods METI AI Program 2026',
                 'description' => $this->defaultProgrammeCommunityDescription(),
             ],
         );

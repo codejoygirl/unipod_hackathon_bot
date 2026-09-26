@@ -158,7 +158,7 @@ export function SlashCommandMenu({
               }`}
             >
               <div className="flex items-center gap-2.5 min-w-0">
-                <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
+                <span className="font-mono text-xs font-bold text-blue-600 dark:text-blue-400 shrink-0">
                   {item.command}
                 </span>
                 <span className="truncate text-xs text-zinc-600 dark:text-zinc-300">

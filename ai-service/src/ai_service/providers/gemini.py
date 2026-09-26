@@ -112,11 +112,19 @@ class GeminiProvider(ChatModel, EmbeddingModel):
                     if parts:
                         contents.append(types.Content(role=role, parts=parts))
 
+        tools = None
+        if request.extra_params.get("web_search"):
+            try:
+                tools = [types.Tool(google_search=types.GoogleSearch())]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Gemini google_search tool unavailable: %s", exc)
+
         config = types.GenerateContentConfig(
             temperature=request.temperature,
             system_instruction=system_instruction,
             max_output_tokens=request.max_tokens,
             stop_sequences=list(request.stop_sequences) if request.stop_sequences else None,
+            tools=tools,
         )
 
         async def _call():

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- In-app Updates tab reads `frontend/src/lib/changelog/app-changelog.json` (member-facing release notes)
+- Personal Library and Projects on web/PWA: private vault files, one chat per project, generate/export artefacts (PDF/markdown), reply toolbar (copy, speak, react, reply, regenerate)
+- Document-reply now sends the full library inventory plus selected-file flags so the model can distinguish “this project chip” from “everything in Library”
 - Phase 4T Telegram Bot spike (DEV ONLY): official Bot API sidecar under `infrastructure/telegram-spike/`, Laravel `TelegramSpikeAdapter` gated by `TELEGRAM_SPIKE`
 - Phase 4W WhatsApp Web automation spike (DEV ONLY): whatsapp-web.js sidecar under `infrastructure/whatsapp-web-spike/`, Laravel `WhatsAppWebSpikeAdapter` + internal webhook gated by `WHATSAPP_WEB_SPIKE`
 - Phase 2 knowledge/RAG: Laravel knowledge lifecycle (draft → review → publish), WhatsApp export drafts, assistant ask with citation revalidation, AI community_id columns + multilingual query expansion, HMAC restored

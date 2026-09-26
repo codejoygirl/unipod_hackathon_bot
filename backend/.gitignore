@@ -29,6 +29,9 @@
 /public/resources/
 /public/tasks/
 /public/more/
+/public/integrations/
+/public/my-docs/
+/public/projects/
 /public/*.svg
 !/public/unipod-assistant-logo.png
 /public/*.txt

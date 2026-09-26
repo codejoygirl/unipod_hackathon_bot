@@ -21,8 +21,11 @@ use App\Services\Channels\ImageNoteNormalizer;
 use App\Services\Channels\ProgramAssetRegistrar;
 use App\Services\Channels\SpikeEscalationNotifier;
 use App\Services\Knowledge\KnowledgeLifecycleService;
+use App\Services\WebChat\CommunityMeetingService;
+use App\Services\WebChat\CommunityNotificationService;
 use App\Services\WebChat\WebChatAccessService;
 use App\Services\WebChat\WebChatMemberPhone;
+use App\Services\WebChat\WebPushService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -45,6 +48,9 @@ final class WebChatController extends Controller
         private readonly ProgramAssetRegistrar $assetRegistrar,
         private readonly ImageNoteNormalizer $imageNormalizer,
         private readonly ChannelListenGate $listenGate,
+        private readonly CommunityNotificationService $notifications,
+        private readonly CommunityMeetingService $meetings,
+        private readonly WebPushService $webPush,
     ) {}
 
     public function bootstrap(Request $request): JsonResponse
@@ -494,17 +500,75 @@ final class WebChatController extends Controller
             }
         }
 
-        // 2. Purely social greetings
-        if ($this->conversation->isPurelySocial($query)) {
+        $targetLanguage = $queryValidated['target_language'] ?? null;
+        $timezone = $queryValidated['timezone'] ?? null;
+        $scope = $this->conversation->communityModelContext($community->name, $community->description);
+
+        // 2. Classify (same as WhatsApp/Telegram) so unintelligible asks get a clarify, not a search.
+        $resolved = $this->conversation->resolveInbound($query, [], $community->description);
+        $classified = null;
+        if ($this->conversation->needsModelRouting((string) ($resolved['query'] ?? $query))) {
+            $classified = $this->aiClient->classifyConversationIntent(
+                message: (string) ($resolved['query'] ?? $query),
+                communityName: $scope['name'],
+                communityScope: $scope['scope'],
+            );
+        }
+        $resolved = $this->conversation->mergeModelClassification(
+            $resolved,
+            $classified,
+            $community->description,
+        );
+        $intent = (string) ($resolved['intent'] ?? ChannelConversationService::INTENT_KNOWLEDGE);
+        $effectiveQuery = (string) ($resolved['query'] ?? $query);
+
+        if ($intent === 'clarify'
+            || $intent === ChannelConversationService::INTENT_CONVERSATIONAL
+            || $this->conversation->isPurelySocial($query)) {
             $reply = $this->aiClient->conversationalReply(
                 message: $query,
                 mode: 'social',
-                communityName: $community->name,
-                communityScope: 'UniPods community support',
-                targetLanguage: $queryValidated['target_language'] ?? null,
+                communityName: $scope['name'],
+                communityScope: $scope['scope'],
+                targetLanguage: $targetLanguage,
+                timezone: $timezone,
             );
             if ($reply === '') {
-                $reply = "Hello! I'm your {$community->name} Assistant. How can I help you today?";
+                $reply = $intent === 'clarify'
+                    ? $this->conversation->clarificationReply()
+                    : "Hello! I'm your {$community->name} Assistant. How can I help you today?";
+            }
+
+            return $this->directAnswerResponse($reply, $community, $communityId);
+        }
+
+        if ($intent === ChannelConversationService::INTENT_OUT_OF_SCOPE) {
+            $reply = $this->aiClient->conversationalReply(
+                message: $query,
+                mode: 'out_of_scope',
+                communityName: $scope['name'],
+                communityScope: $scope['scope'],
+                targetLanguage: $targetLanguage,
+                timezone: $timezone,
+            );
+            if ($reply === '') {
+                $reply = $this->conversation->outOfScopeReply('whatsapp');
+            }
+
+            return $this->directAnswerResponse($reply, $community, $communityId);
+        }
+
+        if ($intent === ChannelConversationService::INTENT_PERSONAL_HELP) {
+            $reply = $this->aiClient->conversationalReply(
+                message: $query,
+                mode: 'personal_help',
+                communityName: $scope['name'],
+                communityScope: $scope['scope'],
+                targetLanguage: $targetLanguage,
+                timezone: $timezone,
+            );
+            if ($reply === '') {
+                $reply = $this->conversation->clarificationReply();
             }
 
             return $this->directAnswerResponse($reply, $community, $communityId);
@@ -513,22 +577,25 @@ final class WebChatController extends Controller
         // 3. Grounded retrieval
         $payload = $this->groundedAsk->ask(
             user: $user,
-            query: $query,
+            query: $effectiveQuery,
             communityIds: [$communityId],
-            targetLanguage: $queryValidated['target_language'] ?? null,
-            timezone: $queryValidated['timezone'] ?? null,
+            targetLanguage: $targetLanguage,
+            timezone: $timezone,
         );
 
         $answer = trim((string) ($payload['data']['answer'] ?? ''));
         $state = (string) ($payload['data']['state'] ?? '');
         $needsEscalation = (bool) ($payload['data']['needs_escalation'] ?? false);
 
-        // 4. If answer is empty or insufficient evidence, notify admins & match WhatsApp/Telegram reassuring response
+        // 4. Real community gaps notify admins. Nonsense / unclear asks just get a clarify.
         if ($answer === '' || $state === 'INSUFFICIENT_EVIDENCE' || $needsEscalation) {
-            $shouldEscalate = $this->conversation->shouldEscalateKnowledgeGap($query, $community->description);
+            $shouldEscalate = $this->conversation->shouldEscalateKnowledgeGap(
+                $effectiveQuery,
+                $community->description,
+            );
             if ($shouldEscalate) {
                 $this->escalationNotifier->escalate([
-                    'question' => $query,
+                    'question' => $effectiveQuery,
                     'from' => $memberPhone,
                     'from_name' => '+'.$memberPhone,
                     'from_phone' => $memberPhone,
@@ -541,18 +608,34 @@ final class WebChatController extends Controller
                     'channel' => 'web_chat',
                 ]);
 
-                $payload['data']['answer'] = "I don't have a solid answer for that yet.\n\n"
-                    ."I've passed it along, and I'll follow up once I have one. "
-                    ."No need to keep checking or asking again.";
+                $handoff = $this->aiClient->conversationalReply(
+                    message: $effectiveQuery,
+                    mode: 'escalated',
+                    communityName: $scope['name'],
+                    communityScope: $scope['scope'],
+                    targetLanguage: $targetLanguage,
+                    timezone: $timezone,
+                );
+                $payload['data']['answer'] = $handoff !== ''
+                    ? $handoff
+                    : $this->conversation->knowledgeGapHandoffFallback();
                 $payload['data']['needs_escalation'] = true;
             } else {
+                $payload['data']['needs_escalation'] = false;
                 if ($this->conversation->isClearlyOutOfScope($query)) {
                     $payload['data']['answer'] = $this->conversation->outOfScopeReply('whatsapp');
-                    $payload['data']['needs_escalation'] = false;
-                } elseif ($answer === '') {
-                    $payload['data']['answer'] = "I don't have a solid answer for that yet.\n\n"
-                        ."I've passed it along, and I'll follow up once I have one. "
-                        ."No need to keep checking or asking again.";
+                } else {
+                    $reply = $this->aiClient->conversationalReply(
+                        message: $query,
+                        mode: 'social',
+                        communityName: $scope['name'],
+                        communityScope: $scope['scope'],
+                        targetLanguage: $targetLanguage,
+                        timezone: $timezone,
+                    );
+                    $payload['data']['answer'] = $reply !== ''
+                        ? $reply
+                        : $this->conversation->clarificationReply();
                 }
             }
         }
@@ -580,6 +663,342 @@ final class WebChatController extends Controller
                 'community_ids' => [$communityId],
             ],
         ]);
+    }
+
+    public function notifications(Request $request): JsonResponse
+    {
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+        $this->rememberSession($communityId, $sessionId, $memberPhone);
+
+        $payload = $this->notifications->listForMember($communityId, $memberPhone);
+
+        return response()->json([
+            'data' => [
+                'community_id' => $communityId,
+                'unread_count' => $payload['unread_count'],
+                'notifications' => $payload['notifications'],
+            ],
+        ]);
+    }
+
+    public function markNotificationRead(Request $request, string $notification): JsonResponse
+    {
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+        $this->rememberSession($communityId, $sessionId, $memberPhone);
+
+        $ok = $this->notifications->markRead($communityId, $notification, $memberPhone);
+        if (! $ok) {
+            abort(404, 'Notification not found.');
+        }
+
+        $payload = $this->notifications->listForMember($communityId, $memberPhone);
+
+        return response()->json([
+            'data' => [
+                'unread_count' => $payload['unread_count'],
+                'notifications' => $payload['notifications'],
+            ],
+        ]);
+    }
+
+    public function markAllNotificationsRead(Request $request): JsonResponse
+    {
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+        $this->rememberSession($communityId, $sessionId, $memberPhone);
+
+        $this->notifications->markAllRead($communityId, $memberPhone);
+        $payload = $this->notifications->listForMember($communityId, $memberPhone);
+
+        return response()->json([
+            'data' => [
+                'unread_count' => $payload['unread_count'],
+                'notifications' => $payload['notifications'],
+            ],
+        ]);
+    }
+
+    public function publishNotification(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'phone' => ['required', 'string', 'max:32'],
+            'admin_token' => ['nullable', 'string', 'max:128'],
+            'title' => ['required', 'string', 'max:255'],
+            'message' => ['required', 'string', 'max:4000'],
+            'category' => ['nullable', 'string', 'in:Announcement,Live Session,Deadline,System'],
+            'action_query' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+
+        if (! $this->adminCredentials->isAdminPhone($memberPhone)) {
+            abort(403, 'Only community admins can publish notifications.');
+        }
+
+        $adminToken = trim((string) ($request->header('X-Admin-Token') ?: ($validated['admin_token'] ?? '')));
+        if ($adminToken === '' || ! $this->adminCredentials->verifyAdminToken($memberPhone, $adminToken)) {
+            abort(403, 'Valid admin session required to publish notifications.');
+        }
+
+        $this->rememberSession($communityId, $sessionId, $memberPhone);
+
+        $created = $this->notifications->publish(
+            $communityId,
+            [
+                'title' => $validated['title'],
+                'message' => $validated['message'],
+                'category' => $validated['category'] ?? 'Announcement',
+                'action_query' => $validated['action_query'] ?? null,
+            ],
+            $memberPhone,
+        );
+
+        $this->webPush->notifyCommunity($communityId, [
+            'title' => $created->title,
+            'body' => $created->message,
+            'url' => '/?notifications=1',
+            'tag' => 'notif-'.$created->id,
+            'unread' => 1,
+        ]);
+
+        return response()->json([
+            'data' => [
+                'id' => $created->id,
+                'title' => $created->title,
+                'category' => $created->category,
+                'published_at' => $created->published_at?->toIso8601String(),
+            ],
+        ], 201);
+    }
+
+    public function pushPublicKey(): JsonResponse
+    {
+        return response()->json([
+            'data' => [
+                'configured' => $this->webPush->isConfigured(),
+                'public_key' => $this->webPush->publicKey(),
+            ],
+        ]);
+    }
+
+    public function pushSubscribe(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'phone' => ['required', 'string', 'max:32'],
+            'endpoint' => ['required', 'string', 'max:2000'],
+            'keys' => ['required', 'array'],
+            'keys.p256dh' => ['required', 'string', 'max:255'],
+            'keys.auth' => ['required', 'string', 'max:255'],
+            'contentEncoding' => ['nullable', 'string', 'max:32'],
+        ]);
+
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+        $this->rememberSession($communityId, $sessionId, $memberPhone);
+
+        $sub = $this->webPush->upsertSubscription(
+            $communityId,
+            $memberPhone,
+            [
+                'endpoint' => $validated['endpoint'],
+                'keys' => $validated['keys'],
+                'contentEncoding' => $validated['contentEncoding'] ?? 'aes128gcm',
+            ],
+            $request->userAgent(),
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $sub->id,
+                'subscribed' => true,
+            ],
+        ], 201);
+    }
+
+    public function pushUnsubscribe(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'phone' => ['required', 'string', 'max:32'],
+            'endpoint' => ['required', 'string', 'max:2000'],
+        ]);
+
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+        $this->rememberSession($communityId, $sessionId, $memberPhone);
+
+        $this->webPush->removeByEndpoint($validated['endpoint']);
+
+        return response()->json(['data' => ['subscribed' => false]]);
+    }
+
+    public function meetings(Request $request): JsonResponse
+    {
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+        $this->rememberSession($communityId, $sessionId, $memberPhone);
+
+        return response()->json([
+            'data' => [
+                'community_id' => $communityId,
+                'meetings' => $this->meetings->listForCommunity($communityId),
+            ],
+        ]);
+    }
+
+    public function publishMeeting(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'phone' => ['required', 'string', 'max:32'],
+            'admin_token' => ['nullable', 'string', 'max:128'],
+            'title' => ['required', 'string', 'max:255'],
+            'url' => ['required', 'url', 'max:2000'],
+            'platform' => ['nullable', 'string', 'in:teams,meet,zoom'],
+            'category' => ['nullable', 'string', 'in:weekly_sync,office_hours,workshop,hackathon,recap'],
+            'schedule' => ['nullable', 'string', 'max:255'],
+            'time_context' => ['nullable', 'string', 'max:255'],
+            'host' => ['nullable', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:2000'],
+            'meeting_code' => ['nullable', 'string', 'max:128'],
+            'passcode' => ['nullable', 'string', 'max:128'],
+        ]);
+
+        [$communityId, , $memberPhone] = $this->assertAdminWebSession($request, $validated);
+
+        $meeting = $this->meetings->publish($communityId, $validated, $memberPhone);
+
+        $this->webPush->notifyCommunity($communityId, [
+            'title' => 'New meeting: '.$meeting->title,
+            'body' => $meeting->schedule ?: $meeting->description ?: 'Open the Meetings hub to join.',
+            'url' => '/meetings',
+            'tag' => 'meeting-'.$meeting->id,
+        ]);
+
+        return response()->json([
+            'data' => $this->meetings->toArray($meeting),
+        ], 201);
+    }
+
+    public function registerAsset(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'phone' => ['required', 'string', 'max:32'],
+            'admin_token' => ['nullable', 'string', 'max:128'],
+            'kind' => ['required', 'string', 'in:handbook,form,slides,other'],
+            'title' => ['required', 'string', 'max:255'],
+            'url' => ['required', 'url', 'max:2000'],
+        ]);
+
+        [$communityId, , $memberPhone] = $this->assertAdminWebSession($request, $validated);
+        $user = $this->access->actorUser();
+        $community = $this->access->community($communityId);
+
+        $result = $this->assetRegistrar->registerStructured(
+            'web_chat',
+            $user,
+            $community,
+            $validated['kind'],
+            $validated['title'],
+            $validated['url'],
+            'whatsapp',
+        );
+
+        if (! ($result['ok'] ?? false)) {
+            return response()->json([
+                'message' => (string) ($result['reply'] ?? 'Could not register asset.'),
+                'data' => ['ok' => false, 'reply' => $result['reply'] ?? null],
+            ], 422);
+        }
+
+        $this->webPush->notifyCommunity($communityId, [
+            'title' => 'New resource: '.$validated['title'],
+            'body' => 'A '.$validated['kind'].' was added for the community.',
+            'url' => '/resources',
+            'tag' => 'asset-'.($result['identity'] ?? Str::ulid()),
+        ]);
+
+        return response()->json([
+            'data' => [
+                'ok' => true,
+                'reply' => $result['reply'] ?? 'Published.',
+                'identity' => $result['identity'] ?? null,
+            ],
+        ], 201);
+    }
+
+    public function importKnowledge(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'phone' => ['required', 'string', 'max:32'],
+            'admin_token' => ['nullable', 'string', 'max:128'],
+            'content' => ['required', 'string', 'max:500000'],
+            'name' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        [$communityId, , $memberPhone] = $this->assertAdminWebSession($request, $validated);
+        $user = $this->access->actorUser();
+        $community = $this->access->community($communityId);
+        $body = trim($validated['content']);
+
+        $source = $this->lifecycle->import($user, [
+            'tenant_id' => $community->tenant_id,
+            'community_id' => $community->id,
+            'name' => trim((string) ($validated['name'] ?? '')) !== ''
+                ? trim((string) $validated['name'])
+                : $this->knowledgeDesk->suggestImportTitle($body),
+            'uri' => 'web-chat://import/'.Str::ulid(),
+            'source_type' => 'web_chat',
+            'content' => $body,
+            'metadata' => [
+                'channel' => 'web_chat',
+                'from' => $memberPhone,
+                'origin' => 'admin_import_web',
+            ],
+        ]);
+
+        $reply = $this->knowledgeDesk->draftCreatedReply($source, 'whatsapp');
+
+        return response()->json([
+            'data' => [
+                'id' => $source->id,
+                'name' => $source->name,
+                'reply' => $reply,
+                'hint' => 'Use /publish '.$source->id.' in chat (or Knowledge desk) to make it live for members.',
+            ],
+        ], 201);
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{0: string, 1: string, 2: string}
+     */
+    private function assertAdminWebSession(Request $request, array $validated): array
+    {
+        [$communityId, $sessionId, $memberPhone] = $this->validatedSession($request);
+        $user = $this->access->actorUser();
+        $this->access->assertActorCanAccessCommunity($user, $communityId);
+
+        if (! $this->adminCredentials->isAdminPhone($memberPhone)) {
+            abort(403, 'Only community admins can do that.');
+        }
+
+        $adminToken = trim((string) ($request->header('X-Admin-Token') ?: ($validated['admin_token'] ?? '')));
+        if ($adminToken === '' || ! $this->adminCredentials->verifyAdminToken($memberPhone, $adminToken)) {
+            abort(403, 'Valid admin session required.');
+        }
+
+        $this->rememberSession($communityId, $sessionId, $memberPhone);
+
+        return [$communityId, $sessionId, $memberPhone];
     }
 
     public function featureRequest(Request $request): JsonResponse

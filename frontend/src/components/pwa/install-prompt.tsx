@@ -137,6 +137,7 @@ export function InstallHeaderButton() {
         type="button"
         onClick={() => void promptInstall()}
         className={INSTALL_APP_BUTTON_CLASS}
+        data-tour="install-app"
         aria-label="Install app"
       >
         <svg
@@ -148,7 +149,7 @@ export function InstallHeaderButton() {
           strokeWidth="2.2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="shrink-0 text-emerald-300 dark:text-emerald-600"
+          className="shrink-0 text-blue-300 dark:text-blue-600"
         >
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="7 10 12 15 17 10" />

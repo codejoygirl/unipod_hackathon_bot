@@ -153,7 +153,7 @@ final class ChannelConversationService
     public function clarificationReply(): string
     {
         return "Hmm, I didn't catch a clear question there 🙂 "
-            .'What do you need from the community — a person, session, link, or deadline? '
+            .'What do you need from the community? A person, session, link, or deadline? '
             ."Once I know, I'll look it up.";
     }
 
@@ -1215,11 +1215,8 @@ final class ChannelConversationService
             return true;
         }
 
-        // Model soft-clarified a swipe continuation — keep the prior topic.
-        if ($modelIntent === 'clarify') {
-            return true;
-        }
-
+        // Unintelligible / no recoverable ask: honor clarify. Real continuations
+        // already set follow_up or match the thin English offline heuristic.
         return false;
     }
 
@@ -1583,6 +1580,20 @@ final class ChannelConversationService
             ."Something the community should know? Send:\n"
             ."/share Clinic closed Friday afternoon\n"
             ."(An admin reviews it before {$this->botDisplayName()} can use it in answers.)";
+    }
+
+    /**
+     * Offline-only member copy after a real knowledge-gap handoff.
+     */
+    public function knowledgeGapHandoffFallback(bool $pluralWe = false): string
+    {
+        $follow = $pluralWe
+            ? "I've passed it along, and we'll follow up once we have one. "
+            : "I've passed it along, and I'll follow up once I have one. ";
+
+        return "I don't have a solid answer for that yet.\n\n"
+            .$follow
+            .'No need to keep checking or asking again.';
     }
 
     /**

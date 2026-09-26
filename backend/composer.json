@@ -10,7 +10,9 @@
         "dedoc/scramble": "^0.13.43",
         "laravel/framework": "^13.17",
         "laravel/sanctum": "^4.0",
-        "laravel/tinker": "^3.0"
+        "laravel/tinker": "^3.0",
+        "minishlink/web-push": "^11.0",
+        "smalot/pdfparser": "^2.12"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

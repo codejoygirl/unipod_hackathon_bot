@@ -22,7 +22,7 @@ export function stateLabel(state: AnswerState): string {
 export function stateTone(state: AnswerState): string {
   switch (state) {
     case "VERIFIED":
-      return "text-emerald-700 bg-emerald-50 ring-emerald-200";
+      return "text-blue-700 bg-blue-50 ring-blue-200";
     case "POSSIBLE":
       return "text-amber-800 bg-amber-50 ring-amber-200";
     case "CONFLICT":

@@ -129,7 +129,7 @@ class AiServiceClient
         ?string $targetLanguage = null,
         ?string $timezone = null,
     ): string {
-        $allowedModes = ['social', 'out_of_scope', 'take_private', 'personal_help'];
+        $allowedModes = ['social', 'out_of_scope', 'take_private', 'personal_help', 'escalated'];
         if (! in_array($mode, $allowedModes, true)) {
             $mode = 'social';
         }
@@ -180,6 +180,168 @@ class AiServiceClient
             ]);
 
             return '';
+        }
+    }
+
+    /**
+     * Full assistant reply, with optional member files as extra context.
+     * Empty string on hard failure.
+     *
+     * @param  list<array{filename: string, text: string, selected?: bool}>  $files
+     * @param  list<array{role?: string, text?: string}>  $thread
+     * @param  list<array{filename: string, selected?: bool, readable?: bool}>  $library
+     */
+    public function documentReply(
+        string $question,
+        array $files,
+        ?string $task = null,
+        ?string $priorQuestion = null,
+        ?string $priorAnswerExcerpt = null,
+        array $thread = [],
+        bool $lastTurnWasQuestion = false,
+        array $library = [],
+    ): string {
+        return $this->documentReplyResult(
+            $question,
+            $files,
+            $task,
+            $priorQuestion,
+            $priorAnswerExcerpt,
+            $thread,
+            $lastTurnWasQuestion,
+            $library,
+        )['reply'];
+    }
+
+    /**
+     * @param  list<array{filename: string, text: string, selected?: bool}>  $files
+     * @param  list<array{role?: string, text?: string}>  $thread
+     * @param  list<array{filename: string, selected?: bool, readable?: bool}>  $library
+     * @return array{reply: string, export: string}
+     */
+    public function documentReplyResult(
+        string $question,
+        array $files,
+        ?string $task = null,
+        ?string $priorQuestion = null,
+        ?string $priorAnswerExcerpt = null,
+        array $thread = [],
+        bool $lastTurnWasQuestion = false,
+        array $library = [],
+    ): array {
+        $payloadFiles = [];
+        foreach ($files as $file) {
+            $name = trim((string) ($file['filename'] ?? ''));
+            $text = $this->sanitizeDocumentText((string) ($file['text'] ?? ''));
+            if ($name === '' || $text === '') {
+                continue;
+            }
+            $payloadFiles[] = [
+                'filename' => mb_substr($name, 0, 200),
+                'text' => mb_substr($text, 0, 8000),
+                'selected' => (bool) ($file['selected'] ?? false),
+            ];
+        }
+
+        $payloadLibrary = [];
+        foreach ($library as $item) {
+            $name = trim((string) ($item['filename'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $payloadLibrary[] = [
+                'filename' => mb_substr($name, 0, 200),
+                'selected' => (bool) ($item['selected'] ?? false),
+                'readable' => (bool) ($item['readable'] ?? true),
+            ];
+        }
+
+        $payloadArray = [
+            'question' => trim($question),
+            'files' => $payloadFiles,
+            'timezone' => (string) config('app.timezone', 'UTC'),
+            'reference_time' => now()->toIso8601String(),
+        ];
+        if ($payloadLibrary !== []) {
+            $payloadArray['library'] = $payloadLibrary;
+        }
+        $kind = is_string($task) ? strtolower(trim($task)) : '';
+        if ($kind !== '') {
+            $payloadArray['task'] = $kind;
+        }
+        $priorQ = trim((string) $priorQuestion);
+        if ($priorQ !== '') {
+            $payloadArray['prior_question'] = mb_substr($priorQ, 0, 1000);
+        }
+        $priorA = trim((string) $priorAnswerExcerpt);
+        if ($priorA !== '') {
+            $payloadArray['prior_answer_excerpt'] = mb_substr($priorA, 0, 12000);
+        }
+        $turns = [];
+        foreach ($thread as $turn) {
+            $role = strtolower(trim((string) ($turn['role'] ?? '')));
+            $text = trim((string) ($turn['text'] ?? ''));
+            if (! in_array($role, ['user', 'assistant'], true) || $text === '') {
+                continue;
+            }
+            $turns[] = [
+                'role' => $role,
+                'text' => mb_substr($text, 0, 10000),
+            ];
+            if (count($turns) >= 8) {
+                break;
+            }
+        }
+        if ($turns !== []) {
+            $payloadArray['thread'] = $turns;
+        }
+        if ($lastTurnWasQuestion) {
+            $payloadArray['last_turn_was_question'] = true;
+        }
+
+        try {
+            $rawBody = json_encode($payloadArray, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            Log::warning('AI Service /conversation/document-reply payload invalid', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return ['reply' => '', 'export' => 'none'];
+        }
+        $headers = $this->generateAuthHeaders($rawBody);
+
+        try {
+            $response = $this->http
+                ->timeout(max($this->timeout, 90.0))
+                ->connectTimeout($this->connectTimeout)
+                ->withHeaders($headers)
+                ->withBody($rawBody, 'application/json')
+                ->post("{$this->baseUrl}/conversation/document-reply");
+
+            if ($response->failed()) {
+                Log::warning('AI Service /conversation/document-reply failed', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return ['reply' => '', 'export' => 'none'];
+            }
+
+            $export = strtolower(trim((string) ($response->json('export') ?? 'none')));
+            if (! in_array($export, ['pdf', 'markdown'], true)) {
+                $export = 'none';
+            }
+
+            return [
+                'reply' => trim((string) ($response->json('reply') ?? '')),
+                'export' => $export,
+            ];
+        } catch (Throwable $e) {
+            Log::warning('AI Service /conversation/document-reply unreachable', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return ['reply' => '', 'export' => 'none'];
         }
     }
 
@@ -253,7 +415,12 @@ class AiServiceClient
                 $linkFocus = 'na';
             }
 
-            if ($followUp) {
+            if ($intent === 'clarify') {
+                $followUp = false;
+                $linkMode = 'none';
+                $linkFocus = 'na';
+                $needsTemporal = false;
+            } elseif ($followUp) {
                 $intent = 'knowledge';
                 $linkMode = 'none';
                 $linkFocus = 'na';
@@ -1023,5 +1190,22 @@ class AiServiceClient
             "index_status={$indexStatus}",
             "content_sha256={$contentSha256}",
         ]);
+    }
+
+    private function sanitizeDocumentText(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+        if (function_exists('iconv')) {
+            $converted = @iconv('UTF-8', 'UTF-8//IGNORE', $text);
+            if (is_string($converted)) {
+                $text = $converted;
+            }
+        }
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $text) ?? $text;
+
+        return trim($text);
     }
 }
