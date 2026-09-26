@@ -890,7 +890,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
                     <div key={`step-kid-${idx}`} className="flex items-start gap-2.5">
                       <span
                         className={`mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                          isUser ? "bg-zinc-400" : "bg-sky-500 dark:bg-sky-400"
+                          isUser ? "bg-zinc-400" : "bg-zinc-400 dark:bg-zinc-500"
                         }`}
                         aria-hidden
                       />
@@ -1003,7 +1003,7 @@ export function FormattedMessage({ content, isUser = false }: FormattedMessagePr
         <div key={`bullet-${i}`} className="flex items-start gap-2.5 my-1 pl-0.5">
           <span
             className={`mt-2.5 h-1.5 w-1.5 rounded-full shrink-0 ${
-              isUser ? "bg-zinc-400" : "bg-sky-500 dark:bg-sky-400"
+              isUser ? "bg-zinc-400" : "bg-zinc-400 dark:bg-zinc-500"
             }`}
             aria-hidden
           />

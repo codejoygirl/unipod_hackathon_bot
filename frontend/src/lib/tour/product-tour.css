@@ -127,9 +127,12 @@
 .unipod-tour-popover .driver-popover-done-btn,
 .unipod-tour-popover .driver-popover-prev-btn {
   display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
   align-items: center !important;
   justify-content: center !important;
   flex: 0 0 auto !important;
+  gap: 6px !important;
   height: 32px !important;
   min-height: 32px !important;
   max-height: 32px !important;
@@ -172,6 +175,28 @@
 .dark .unipod-tour-popover .driver-popover-prev-btn {
   color: #e4e4e7 !important;
   border-color: #3f3f46 !important;
+}
+
+.unipod-tour-popover .driver-popover-prev-btn::before,
+.unipod-tour-popover .driver-popover-next-btn::after {
+  content: "";
+  display: block;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  background: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+
+.unipod-tour-popover .driver-popover-prev-btn::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 18l-6-6 6-6'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 18l-6-6 6-6'/%3E%3C/svg%3E");
+}
+
+.unipod-tour-popover .driver-popover-next-btn::after {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18l6-6-6-6'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18l6-6-6-6'/%3E%3C/svg%3E");
 }
 
 .unipod-tour-popover .driver-popover-close-btn {

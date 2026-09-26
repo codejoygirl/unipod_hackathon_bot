@@ -151,10 +151,10 @@ export function HeaderMoreMenu() {
           aria-haspopup="menu"
           aria-expanded={open}
         >
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <circle cx="12" cy="5" r="1" fill="currentColor" />
-            <circle cx="12" cy="12" r="1" fill="currentColor" />
-            <circle cx="12" cy="19" r="1" fill="currentColor" />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <circle cx="12" cy="5.5" r="1.85" />
+            <circle cx="12" cy="12" r="1.85" />
+            <circle cx="12" cy="18.5" r="1.85" />
           </svg>
         </button>
       </Tooltip>

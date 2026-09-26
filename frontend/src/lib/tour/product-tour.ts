@@ -18,7 +18,7 @@ const STEP_DEFS: TourStepDef[] = [
   {
     title: "Welcome to UniPod AI Assistant",
     description:
-      "A short walkthrough of chat, projects, Library, resources, meetings, and alerts. Replay this anytime from the ⋯ menu.",
+      "A short walkthrough of chat, projects, Library, resources, meetings, and alerts. Replay this anytime from the ⋮ menu in the top bar.",
   },
   {
     element: '[data-tour="community"]',
@@ -93,7 +93,7 @@ const STEP_DEFS: TourStepDef[] = [
   {
     element: '[data-tour="request-feature"]',
     title: "Request a feature",
-    description: "Tell the team what would help. You can also open this from the ⋯ menu.",
+    description: "Tell the team what would help. You can also open this from the ⋮ menu.",
     side: "right",
     align: "start",
   },
@@ -135,7 +135,7 @@ const STEP_DEFS: TourStepDef[] = [
   {
     element: '[data-tour="more-menu"]',
     title: "Replay anytime",
-    description: "Open this ⋯ menu whenever you want the product tour again, What’s new, or Request a feature.",
+    description: "Open this ⋮ menu whenever you want the product tour again, What’s new, or Request a feature.",
     side: "bottom",
     align: "end",
   },
