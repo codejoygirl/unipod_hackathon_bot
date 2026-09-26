@@ -41,14 +41,14 @@ export function UserMessage({
   }
 
   return (
-    <div className="group relative flex flex-col items-end self-end max-w-[85%] sm:max-w-[75%] my-1.5 animate-fade-in">
+    <div className="group relative flex w-full min-w-0 max-w-[min(85%,36rem)] flex-col items-end self-end my-1.5 animate-fade-in sm:max-w-[75%]">
       {/* Message Bubble - ChatGPT style */}
-      <div className="rounded-3xl rounded-br-md bg-zinc-900 px-4.5 py-3 text-zinc-100 shadow-xs transition-all selection:bg-zinc-700 dark:bg-[#183660] dark:text-white dark:selection:bg-blue-900">
+      <div className="min-w-0 max-w-full rounded-3xl rounded-br-md bg-zinc-900 px-4 py-3 text-zinc-100 shadow-xs transition-all selection:bg-zinc-700 sm:px-4.5 dark:bg-[#183660] dark:text-white dark:selection:bg-blue-900">
         {/* Quoted message preview */}
         {quote && (
-          <div className="mb-2.5 flex items-start gap-2 rounded-xl bg-black/25 px-3 py-2 text-xs border-l-[3px] border-emerald-400">
+          <div className="mb-2.5 flex items-start gap-2 rounded-xl bg-black/25 px-3 py-2 text-xs border-l-[3px] border-blue-400">
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 font-semibold text-[11px] text-emerald-400">
+              <div className="flex items-center gap-1.5 font-semibold text-[11px] text-blue-400">
                 <svg
                   width="11"
                   height="11"
@@ -142,7 +142,7 @@ export function UserMessage({
             aria-label="Copy message"
           >
             {copied ? (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-emerald-500">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-blue-500">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             ) : (

@@ -518,6 +518,19 @@ class ChannelConversationServiceTest extends TestCase
         $this->assertStringContainsString($priorAnswer, $forced['query']);
         $this->assertStringNotContainsString('Could you clarify', $forced['query']);
 
+        $smash = 'jdjdjdjdjndjdijdjdjsjddrfjfijhddhdjjfhdhdhdhh';
+        $this->assertFalse($svc->shouldForceSessionFollowUp($smash, 'clarify', false));
+        $unclear = $svc->mergeModelClassification(
+            ['intent' => ChannelConversationService::INTENT_KNOWLEDGE, 'query' => $smash],
+            ['intent' => 'clarify', 'link_mode' => 'none', 'follow_up' => false],
+            $scope,
+            $turns,
+            replyToBot: true,
+        );
+        $this->assertSame('clarify', $unclear['intent']);
+        $this->assertSame($smash, $unclear['query']);
+        $this->assertFalse($svc->shouldEscalateKnowledgeGap($smash, $scope));
+
         $this->assertSame(
             'How many bots are currently being tested in the group?',
             $svc->userTurnTextToRemember('Tu es sûr ?', $merged['query']),

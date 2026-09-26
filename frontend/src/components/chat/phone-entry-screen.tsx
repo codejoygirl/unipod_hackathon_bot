@@ -75,7 +75,7 @@ export function PhoneEntryScreen() {
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="shrink-0 text-emerald-300 dark:text-emerald-600"
+              className="shrink-0 text-blue-300 dark:text-blue-600"
             >
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
@@ -87,7 +87,7 @@ export function PhoneEntryScreen() {
       </div>
 
       {/* Main ChatGPT-style centered card container */}
-      <main className="w-full max-w-[380px] sm:max-w-[400px] flex flex-col items-center my-auto animate-fade-in">
+      <main className="w-full max-w-[380px] sm:max-w-[440px] flex flex-col items-center my-auto animate-fade-in">
         {/* Brand Icon */}
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl overflow-hidden shadow-sm mb-6">
           <Image

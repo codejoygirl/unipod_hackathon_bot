@@ -1,0 +1,238 @@
+/* UniPod product tour. Soft card, radii matched to nav (rounded-xl = 12px). */
+.unipod-tour-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 999990;
+  pointer-events: auto;
+  background: rgba(6, 6, 10, 0.66);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.unipod-tour-popover.driver-popover {
+  box-sizing: border-box !important;
+  min-width: min(280px, calc(100vw - 24px)) !important;
+  width: min(340px, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 24px) !important;
+  max-height: min(70dvh, 460px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  background: #ffffff;
+  color: #18181b;
+  border: 1px solid rgba(228, 228, 231, 0.95);
+  border-radius: 20px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 10px 28px rgba(15, 23, 42, 0.1),
+    0 28px 64px rgba(15, 23, 42, 0.14);
+  padding: 18px 18px 14px;
+}
+
+.dark .unipod-tour-popover.driver-popover {
+  background: #1c1c1f;
+  color: #fafafa;
+  border-color: rgba(82, 82, 91, 0.55);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 10px 28px rgba(0, 0, 0, 0.32),
+    0 28px 64px rgba(0, 0, 0, 0.42);
+}
+
+.unipod-tour-popover .driver-popover-title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
+  margin: 0 36px 8px 0;
+  padding-right: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.unipod-tour-popover .driver-popover-description {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #52525b;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.dark .unipod-tour-popover .driver-popover-description {
+  color: #a1a1aa;
+}
+
+.unipod-tour-popover .driver-popover-footer,
+.unipod-tour-popover .driver-popover-footer * {
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  white-space: nowrap !important;
+}
+
+.unipod-tour-popover .driver-popover-footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f4f4f5;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.dark .unipod-tour-popover .driver-popover-footer {
+  border-top-color: #2a2a2e;
+}
+
+.unipod-tour-popover .driver-popover-progress-text {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 auto !important;
+  height: 32px !important;
+  padding: 0 10px !important;
+  border-radius: 10px !important;
+  background: #f4f4f5;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em;
+  line-height: 32px !important;
+  color: #71717a;
+}
+
+.dark .unipod-tour-popover .driver-popover-progress-text {
+  background: #27272a;
+  color: #a1a1aa;
+}
+
+.unipod-tour-popover .driver-popover-navigation-btns {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+}
+
+.unipod-tour-popover .driver-popover-navigation-btns button + button {
+  margin-left: 0 !important;
+}
+
+.unipod-tour-popover .driver-popover-next-btn,
+.unipod-tour-popover .driver-popover-done-btn,
+.unipod-tour-popover .driver-popover-prev-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 auto !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  line-height: 1 !important;
+}
+
+.unipod-tour-popover .driver-popover-next-btn,
+.unipod-tour-popover .driver-popover-done-btn {
+  background: #18181b !important;
+  color: #ffffff !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  text-shadow: none !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  padding: 0 14px !important;
+  box-shadow: none !important;
+}
+
+.dark .unipod-tour-popover .driver-popover-next-btn,
+.dark .unipod-tour-popover .driver-popover-done-btn {
+  background: #f4f4f5 !important;
+  color: #18181b !important;
+}
+
+.unipod-tour-popover .driver-popover-prev-btn {
+  background: transparent !important;
+  color: #3f3f46 !important;
+  border: 1px solid #e4e4e7 !important;
+  border-radius: 12px !important;
+  text-shadow: none !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  padding: 0 12px !important;
+  text-decoration: none !important;
+}
+
+.dark .unipod-tour-popover .driver-popover-prev-btn {
+  color: #e4e4e7 !important;
+  border-color: #3f3f46 !important;
+}
+
+.unipod-tour-popover .driver-popover-close-btn {
+  top: 12px !important;
+  right: 12px !important;
+  width: 28px !important;
+  height: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 999px !important;
+  color: #71717a !important;
+  background: #f4f4f5 !important;
+}
+
+.unipod-tour-popover .driver-popover-close-btn:hover {
+  color: #18181b !important;
+  background: #e4e4e7 !important;
+}
+
+.dark .unipod-tour-popover .driver-popover-close-btn {
+  color: #a1a1aa !important;
+  background: #27272a !important;
+}
+
+.dark .unipod-tour-popover .driver-popover-close-btn:hover {
+  color: #fafafa !important;
+  background: #3f3f46 !important;
+}
+
+.unipod-tour-popover .driver-popover-arrow {
+  display: none;
+}
+
+.driver-overlay,
+#driver-dummy-element,
+.driver-stage {
+  border-radius: 12px;
+}
+
+@media (max-width: 767px) {
+  .unipod-tour-popover.driver-popover {
+    width: calc(100vw - 20px) !important;
+    max-width: calc(100vw - 20px) !important;
+    max-height: min(64dvh, 400px);
+    padding: 16px 14px 12px;
+    border-radius: 18px;
+  }
+
+  .unipod-tour-popover .driver-popover-title {
+    font-size: 15px;
+    margin-right: 32px;
+  }
+
+  .unipod-tour-popover .driver-popover-description {
+    font-size: 13px;
+  }
+
+  .driver-overlay,
+  #driver-dummy-element,
+  .driver-stage {
+    border-radius: 10px;
+  }
+}

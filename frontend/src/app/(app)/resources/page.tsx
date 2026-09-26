@@ -3,6 +3,7 @@
 import { ChatHeader } from "@/components/chat/chat-header";
 import { apiFetch } from "@/lib/api/client";
 import type { CommunityResource, CommunityResourcesResponse } from "@/lib/api/types";
+import { usePageSize } from "@/lib/ui/use-page-size";
 import { useWebChat } from "@/lib/web-chat/web-chat-context";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -100,7 +101,7 @@ export default function ResourcesPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
-  const ITEMS_PER_PAGE = 8;
+  const pageSize = usePageSize();
 
   const handleSearchChange = (val: string) => {
     setSearchQuery(val);
@@ -111,14 +112,6 @@ export default function ResourcesPage() {
     setActiveCategory(cat);
     setCurrentPage(1);
   };
-
-  // Admin Quick Add state
-  const [showAdminAdd, setShowAdminAdd] = useState(false);
-  const [addKind, setAddKind] = useState("other");
-  const [addTitle, setAddTitle] = useState("");
-  const [addUrl, setAddUrl] = useState("");
-  const [addSubmitting, setAddSubmitting] = useState(false);
-  const [addFeedback, setAddFeedback] = useState<string | null>(null);
 
   const fetchResources = useCallback(async () => {
     if (!memberPhone) return;
@@ -188,32 +181,6 @@ export default function ResourcesPage() {
     }
   };
 
-  const handleAdminRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!memberPhone || !addTitle.trim() || !addUrl.trim()) return;
-    setAddSubmitting(true);
-    setAddFeedback(null);
-    try {
-      const command = `/asset ${addKind} ${addTitle.trim()} ${addUrl.trim()}`;
-      await apiFetch<{ data: { answer: string } }>("/api/v1/web-chat/ask", {
-        method: "POST",
-        body: JSON.stringify({
-          phone: memberPhone,
-          query: command,
-        }),
-      });
-      setAddFeedback("Resource registered and published successfully!");
-      setAddTitle("");
-      setAddUrl("");
-      await fetchResources();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to register resource.";
-      setAddFeedback(`Error: ${msg}`);
-    } finally {
-      setAddSubmitting(false);
-    }
-  };
-
   // Filter & Search logic
   const filteredResources = useMemo(() => {
     return resources.filter((item) => {
@@ -275,11 +242,15 @@ export default function ResourcesPage() {
     return FALLBACK_RESOURCES[0];
   }, [resources]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredResources.length / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(filteredResources.length / pageSize));
   const paginatedResources = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredResources.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredResources, currentPage]);
+    const start = (currentPage - 1) * pageSize;
+    return filteredResources.slice(start, start + pageSize);
+  }, [filteredResources, currentPage, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   return (
     <div className="flex flex-1 flex-col h-full min-w-0 overflow-y-auto no-scrollbar bg-white dark:bg-[#0d0d0d] text-zinc-900 dark:text-zinc-100">
@@ -287,27 +258,44 @@ export default function ResourcesPage() {
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-6 pb-28 sm:px-6">
         {/* Banner Section */}
-        <div className="mb-6 flex flex-col gap-1.5">
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 sm:text-3xl">
-            Community Resources
-          </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400 max-w-3xl leading-relaxed">
-            Official Google Drive links, programme handbooks, slide decks, and documents for{" "}
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{community?.name ?? "UniPod Community"}</span>.
-          </p>
+        <div className="mb-6 flex items-start sm:items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 sm:text-3xl">
+              Community Resources
+            </h1>
+            <p className="mt-1.5 text-sm text-zinc-600 dark:text-zinc-400 max-w-3xl leading-relaxed">
+              Official Google Drive links, programme handbooks, slide decks, and documents for{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{community?.name ?? "UniPod Community"}</span>.
+            </p>
+          </div>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent("open-admin-desk", { detail: { tab: "asset" } }))
+              }
+              className="inline-flex shrink-0 items-center gap-1.5 self-start sm:self-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-500 cursor-pointer"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Add resource
+            </button>
+          )}
         </div>
 
         {/* Spotlight Hero Card (Drive Folder) */}
         {primaryHub && primaryHub.url && (
-          <div className="mb-6 relative overflow-hidden rounded-2xl border border-emerald-200/90 bg-gradient-to-br from-emerald-50/90 via-emerald-50/40 to-white dark:border-emerald-800/60 dark:bg-gradient-to-br dark:from-[#1b2a22] dark:via-[#161f1a] dark:to-[#121212] p-5 shadow-xs transition-all hover:shadow-sm">
+          <div className="mb-6 relative overflow-hidden rounded-2xl border border-blue-200/90 bg-gradient-to-br from-blue-50/90 via-blue-50/40 to-white dark:border-blue-800/50 dark:from-blue-950/50 dark:via-[#0f172a] dark:to-[#0d0d0d] p-5 shadow-xs transition-all hover:shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-start gap-3.5 min-w-0">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-xs">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-xs">
                   <FolderIcon />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="rounded bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
+                    <span className="rounded bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wider">
                       Primary Drive Hub
                     </span>
                   </div>
@@ -325,7 +313,7 @@ export default function ResourcesPage() {
                   href={primaryHub.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-emerald-500 active:scale-98 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-blue-500 active:scale-98 cursor-pointer"
                 >
                   <span>Open Drive</span>
                   <ExternalLinkIcon />
@@ -337,7 +325,7 @@ export default function ResourcesPage() {
                   title="Copy link to clipboard"
                 >
                   {copiedId === primaryHub.id ? (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                    <span className="text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1">
                       <CheckIcon /> Copied
                     </span>
                   ) : (
@@ -360,7 +348,7 @@ export default function ResourcesPage() {
                 value={searchQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
                 placeholder="Search resources, folders, guides, slides..."
-                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#181818] px-4 py-2.5 pl-10 text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 shadow-2xs focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#181818] px-4 py-2.5 pl-10 text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 shadow-2xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-zinc-400">
                 <SearchIcon />
@@ -518,8 +506,8 @@ export default function ResourcesPage() {
             {totalPages > 1 && (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-zinc-200/80 dark:border-zinc-800/80">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                  Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
-                  {Math.min(currentPage * ITEMS_PER_PAGE, filteredResources.length)} of{" "}
+                  Showing {(currentPage - 1) * pageSize + 1}–
+                  {Math.min(currentPage * pageSize, filteredResources.length)} of{" "}
                   {filteredResources.length} resources
                 </span>
 
@@ -558,102 +546,6 @@ export default function ResourcesPage() {
                   </button>
                 </div>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* Coordinator Tools: Add Resource (Admin only) */}
-        {isAdmin && (
-          <div className="mt-8 rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-[#181818] p-5 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-xs font-bold">
-                  ★
-                </span>
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  Coordinator Tool: Add Resource
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAdminAdd(!showAdminAdd)}
-                className="text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 cursor-pointer"
-              >
-                {showAdminAdd ? "Hide form" : "+ Register link"}
-              </button>
-            </div>
-
-            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-              Register a Google Drive folder, document, or slide deck directly into the knowledge base.
-            </p>
-
-            {showAdminAdd && (
-              <form onSubmit={handleAdminRegister} className="mt-4 space-y-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 uppercase mb-1">
-                      Resource Type
-                    </label>
-                    <select
-                      value={addKind}
-                      onChange={(e) => setAddKind(e.target.value)}
-                      className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-[#202020] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:border-emerald-500 focus:outline-none"
-                    >
-                      <option value="other">Folder / Resource Hub</option>
-                      <option value="handbook">Handbook / Guide</option>
-                      <option value="slides">Slides / Presentation</option>
-                      <option value="form">Form / Signup</option>
-                    </select>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 uppercase mb-1">
-                      Resource Title
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. UniPod Community Resources"
-                      value={addTitle}
-                      onChange={(e) => setAddTitle(e.target.value)}
-                      className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-[#202020] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 uppercase mb-1">
-                    Google Drive or Web URL
-                  </label>
-                  <input
-                    type="url"
-                    required
-                    placeholder="https://drive.google.com/drive/folders/..."
-                    value={addUrl}
-                    onChange={(e) => setAddUrl(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-[#202020] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
-
-                {addFeedback && (
-                  <p
-                    className={`text-xs ${
-                      addFeedback.startsWith("Error") ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"
-                    }`}
-                  >
-                    {addFeedback}
-                  </p>
-                )}
-
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="submit"
-                    disabled={addSubmitting}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-emerald-500 disabled:opacity-50 cursor-pointer"
-                  >
-                    {addSubmitting ? "Registering & Indexing..." : "Publish to Knowledge Base"}
-                  </button>
-                </div>
-              </form>
             )}
           </div>
         )}
@@ -725,7 +617,7 @@ function ResourceTable({
               const isForm = item.kind === "form";
 
               const typeBadge = isFolder
-                ? { label: "Folder", color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300" }
+                ? { label: "Folder", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300" }
                 : isHandbook
                   ? { label: "Handbook", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300" }
                   : isSlides
@@ -761,7 +653,7 @@ function ResourceTable({
                           </span>
                           {item.authority_tier === "verified_resource" && (
                             <span
-                              className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5 shrink-0"
+                              className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
                               title="Official Verified Resource"
                             >
                               <CheckBadgeIcon />
@@ -803,7 +695,7 @@ function ResourceTable({
                             title="Copy link"
                           >
                             {copiedId === item.id ? (
-                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5">
+                              <span className="text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-0.5">
                                 <CheckIcon />
                               </span>
                             ) : (
@@ -841,8 +733,8 @@ function ResourceCard({
 
   const colorStyles = isFolder
     ? {
-        bg: "bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/60",
-        badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300",
+        bg: "bg-blue-50 text-blue-700 border-blue-200/80 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800/60",
+        badge: "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300",
         label: "Drive Folder",
       }
     : isHandbook
@@ -900,7 +792,7 @@ function ResourceCard({
 
           {resource.authority_tier === "verified_resource" && (
             <span
-              className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5 shrink-0"
+              className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
               title="Official Verified Resource"
             >
               <CheckBadgeIcon />
@@ -940,7 +832,7 @@ function ResourceCard({
               title="Copy share link"
             >
               {copied ? (
-                <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5">
+                <span className="text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-0.5">
                   <CheckIcon /> Copied
                 </span>
               ) : (

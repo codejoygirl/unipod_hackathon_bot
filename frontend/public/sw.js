@@ -1,5 +1,5 @@
 // UniPod Community Assistant — Progressive Web App Service Worker
-const CACHE_NAME = "unipod-pwa-v1";
+const CACHE_NAME = "unipod-pwa-v2";
 
 const PRECACHE_ASSETS = [
   "/",
@@ -107,4 +107,78 @@ self.addEventListener("fetch", (event) => {
       }),
     );
   }
+});
+
+self.addEventListener("push", (event) => {
+  let data = {
+    title: "UniPod update",
+    body: "Something new for your cohort.",
+    url: "/?notifications=1",
+    tag: "zak-update",
+    unread: 1,
+  };
+
+  try {
+    if (event.data) {
+      const parsed = event.data.json();
+      data = { ...data, ...parsed };
+    }
+  } catch {
+    try {
+      const text = event.data && event.data.text();
+      if (text) data.body = text;
+    } catch {
+      // keep defaults
+    }
+  }
+
+  const unread = typeof data.unread === "number" ? data.unread : 1;
+
+  event.waitUntil(
+    (async () => {
+      if (typeof self.registration.setAppBadge === "function" && unread > 0) {
+        try {
+          await self.registration.setAppBadge(unread);
+        } catch {
+          // Badging API unsupported
+        }
+      }
+
+      await self.registration.showNotification(data.title || "UniPod update", {
+        body: data.body || "",
+        icon: "/icon-192.png",
+        badge: "/icon-192.png",
+        tag: data.tag || "zak-update",
+        renotify: true,
+        data: { url: data.url || "/?notifications=1" },
+      });
+    })(),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || "/?notifications=1";
+
+  event.waitUntil(
+    (async () => {
+      const allClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of allClients) {
+        if ("focus" in client) {
+          await client.focus();
+          if ("navigate" in client) {
+            try {
+              await client.navigate(targetUrl);
+            } catch {
+              // older browsers
+            }
+          }
+          return;
+        }
+      }
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(targetUrl);
+      }
+    })(),
+  );
 });

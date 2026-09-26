@@ -15,13 +15,18 @@ import { useWebChat } from "@/lib/web-chat/web-chat-context";
 import { useSidebar } from "@/lib/sidebar/sidebar-context";
 import { insertChatCommand } from "@/lib/chat/commands-data";
 import { AssistantMessage } from "./assistant-message";
-import { ChatComposer } from "./chat-composer";
+import { ChatComposer, type ChatVaultSend } from "./chat-composer";
 import { ChatHeader } from "./chat-header";
 import { GrokThinkingLoader } from "./grok-thinking-loader";
 import { UserMessage } from "./user-message";
 import { Tooltip } from "@/components/ui/tooltip";
 import { chatSendingLabel } from "@/lib/ui/outbound-status";
 import type { ChatImagePayload } from "@/lib/web-chat/image";
+import {
+  askVault,
+  uploadVaultFiles,
+  vaultAnswerAsAssistant,
+} from "@/lib/web-chat/vault";
 
 function formatTime(date: Date = new Date()): string {
   try {
@@ -99,6 +104,7 @@ export function ChatView() {
     setTimeout(performScroll, 120);
     setTimeout(performScroll, 280);
     setTimeout(performScroll, 520);
+    setTimeout(performScroll, 800);
   }, []);
 
   const handleNewChat = useCallback(() => {
@@ -179,6 +185,24 @@ export function ChatView() {
     return () => ro.disconnect();
   }, [pending, scrollToBottom]);
 
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return;
+    }
+    const pin = () => {
+      if (pinToBottomRef.current || pending) {
+        scrollToBottom(false);
+      }
+    };
+    viewport.addEventListener("resize", pin);
+    viewport.addEventListener("scroll", pin);
+    return () => {
+      viewport.removeEventListener("resize", pin);
+      viewport.removeEventListener("scroll", pin);
+    };
+  }, [pending, scrollToBottom]);
+
   // Hydrate chat entries for community & session
   useEffect(() => {
     if (!community || !sessionId) {
@@ -227,13 +251,23 @@ export function ChatView() {
   );
 
   const sendMessage = useCallback(
-    async (text: string, quote?: QuotedMessage, images?: ChatImagePayload[]) => {
+    async (text: string, quote?: QuotedMessage, images?: ChatImagePayload[], vault?: ChatVaultSend, regenerate = false) => {
       if (!community) return;
 
       const imageCount = images?.length ?? 0;
+      const vaultFileCount = vault?.files.length ?? 0;
+      const useVault = Boolean(vault && (vault.files.length > 0 || vault.documentIds.length > 0 || vault.searchLibrary));
       const displayText =
         text.trim() ||
-        (imageCount === 1 ? images![0].filename : imageCount > 1 ? `${imageCount} photos` : "");
+        (vaultFileCount === 1
+          ? vault!.files[0].name
+          : vaultFileCount > 1
+            ? `${vaultFileCount} files`
+            : imageCount === 1
+              ? images![0].filename
+              : imageCount > 1
+                ? `${imageCount} photos`
+                : "");
       const userEntry: StoredChatEntry = {
         id: crypto.randomUUID(),
         role: "user",
@@ -246,8 +280,10 @@ export function ChatView() {
 
       pinToBottomRef.current = true;
       setShowScrollBottomButton(false);
-      setEntries((prev) => [...prev, userEntry]);
-      setPendingStatusLabel(chatSendingLabel(isAdmin, text, imageCount > 0));
+      if (!regenerate) {
+        setEntries((prev) => [...prev, userEntry]);
+      }
+      setPendingStatusLabel(chatSendingLabel(isAdmin, text, imageCount > 0 || vaultFileCount > 0));
       setPending(true);
 
       scrollToBottom(false);
@@ -257,37 +293,49 @@ export function ChatView() {
           ? `[Replying to: "${quote.text}"]\n${text}`
           : text;
 
-        const payload: Record<string, unknown> = {
-          query: queryText,
-          phone: memberPhone ?? undefined,
-          session_id: sessionId ?? undefined,
-        };
-        if (images && images.length > 0) {
-          payload.images = images.map((img) => ({
-            image_base64: img.base64,
-            mime: img.mime,
-            filename: img.filename,
-          }));
-          if (images.length === 1) {
-            payload.image_base64 = images[0].base64;
-            payload.image_mime = images[0].mime;
-            payload.image_filename = images[0].filename;
+        let res: AssistantAskResponse;
+        if (useVault && memberPhone) {
+          const uploaded = vault!.files.length > 0 ? await uploadVaultFiles(memberPhone, vault!.files) : [];
+          const documentIds = [...vault!.documentIds, ...uploaded.map((doc) => doc.id)];
+          const vaultRes = await askVault(
+            memberPhone,
+            queryText.trim() || "Summarize the attached files.",
+            documentIds,
+          );
+          res = vaultAnswerAsAssistant(vaultRes);
+        } else {
+          const payload: Record<string, unknown> = {
+            query: queryText,
+            phone: memberPhone ?? undefined,
+            session_id: sessionId ?? undefined,
+          };
+          if (images && images.length > 0) {
+            payload.images = images.map((img) => ({
+              image_base64: img.base64,
+              mime: img.mime,
+              filename: img.filename,
+            }));
+            if (images.length === 1) {
+              payload.image_base64 = images[0].base64;
+              payload.image_mime = images[0].mime;
+              payload.image_filename = images[0].filename;
+            }
           }
-        }
 
-        const headers: Record<string, string> = {};
-        if (adminToken) {
-          headers.Authorization = `Bearer ${adminToken}`;
-        }
-
-        const res = await apiFetch<AssistantAskResponse>(
-          "/api/v1/web-chat/ask",
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify(payload),
+          const headers: Record<string, string> = {};
+          if (adminToken) {
+            headers.Authorization = `Bearer ${adminToken}`;
           }
-        );
+
+          res = await apiFetch<AssistantAskResponse>(
+            "/api/v1/web-chat/ask",
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify(payload),
+            }
+          );
+        }
 
         const assistantEntry: StoredChatEntry = {
           id: crypto.randomUUID(),
@@ -413,6 +461,25 @@ export function ChatView() {
                 onQuote={(q) => setReplyingTo(q)}
                 onReact={handleReaction}
                 onSuggestionClick={handlePopulateQuery}
+                onRegenerate={() => {
+                  if (pending) return;
+                  const idx = entries.findIndex((item) => item.id === entry.id);
+                  let keepThrough = -1;
+                  let prior = "";
+                  let quote: QuotedMessage | undefined;
+                  for (let i = idx - 1; i >= 0; i--) {
+                    const item = entries[i];
+                    if (item.role === "user") {
+                      keepThrough = i;
+                      prior = item.text;
+                      quote = item.quote;
+                      break;
+                    }
+                  }
+                  if (keepThrough < 0 || !prior.trim()) return;
+                  setEntries((prev) => prev.slice(0, keepThrough + 1));
+                  void sendMessage(prior, quote, undefined, undefined, true);
+                }}
               />
             );
           }
@@ -439,7 +506,7 @@ export function ChatView() {
 
       {/* Floating "Scroll to Bottom" Button (ChatGPT Style) */}
       {showScrollBottomButton && (
-        <div className="absolute bottom-24 right-6 z-20 animate-fade-in">
+        <div className="absolute bottom-36 right-6 z-40 animate-fade-in">
           <Tooltip content="Scroll to bottom" position="left">
             <button
               type="button"
@@ -463,11 +530,17 @@ export function ChatView() {
           sending={pending}
           sendingLabel={pendingStatusLabel}
           isAdmin={isAdmin}
-          onSend={(text, quote, image) => void sendMessage(text, quote, image)}
+          onSend={(text, quote, image, vault) => void sendMessage(text, quote, image, vault)}
           quotedMessage={replyingTo}
           onClearQuote={() => setReplyingTo(null)}
-          onFocus={() => scrollToBottom(true)}
-          onTyping={() => scrollToBottom(true)}
+          onFocus={() => {
+            pinToBottomRef.current = true;
+            scrollToBottom(true);
+          }}
+          onTyping={() => {
+            pinToBottomRef.current = true;
+            scrollToBottom(true);
+          }}
         />
       </div>
     </div>

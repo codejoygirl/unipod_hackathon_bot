@@ -97,6 +97,99 @@ final class WebChatTest extends TestCase
             ->assertJsonPath('data.state', 'VERIFIED');
     }
 
+    public function test_unintelligible_query_asks_for_clarification_instead_of_handoff(): void
+    {
+        Http::fake([
+            '*/conversation/classify' => Http::response([
+                'intent' => 'clarify',
+                'link_mode' => 'none',
+                'follow_up' => false,
+                'link_focus' => 'na',
+                'needs_temporal_resolution' => false,
+            ], 200),
+            '*/conversation/reply' => Http::response([
+                'reply' => 'I did not catch a clear question. Could you retype what you meant?',
+            ], 200),
+            '*/retrieval/grounded-answer' => Http::response(['error' => 'should not retrieve'], 500),
+        ]);
+
+        [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
+
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        $response = $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $phone,
+            'query' => 'jdjdjdjdjndjdijdjdjsjddrfjfijhddhdjjfhdhdhdhh',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.state', 'VERIFIED')
+            ->assertJsonPath('data.needs_escalation', false);
+
+        $answer = strtolower((string) $response->json('data.answer'));
+        $this->assertStringContainsString('retype', $answer);
+        $this->assertStringNotContainsString('passed it along', $answer);
+    }
+
+    public function test_knowledge_gap_uses_model_handoff_after_real_escalation(): void
+    {
+        Http::fake([
+            '*/conversation/classify' => Http::response([
+                'intent' => 'knowledge',
+                'link_mode' => 'none',
+                'follow_up' => false,
+                'link_focus' => 'na',
+                'needs_temporal_resolution' => false,
+            ], 200),
+            '*/conversation/reply' => Http::response([
+                'reply' => 'No birthday in the notes yet. I passed this to the team and I will follow up.',
+            ], 200),
+            '*/retrieval/grounded-answer' => Http::response([
+                'query' => "When is Diane's birthday?",
+                'detected_language' => 'en',
+                'execution_time_ms' => 5.0,
+                'total_chunks_retrieved' => 0,
+                'validated_payload' => [
+                    'state' => 'INSUFFICIENT_EVIDENCE',
+                    'answer' => '',
+                    'confidence_score' => 0.1,
+                    'needs_escalation' => true,
+                    'escalation_reason' => 'insufficient_evidence',
+                    'citations' => [],
+                    'conflicts' => [],
+                ],
+            ], 200),
+        ]);
+
+        [$user, $community] = $this->seedMember();
+        $phone = '2347041131371';
+
+        Config::set('zak_web_chat.default_community_id', $community->id);
+        Config::set('zak_web_chat.actor_user_email', $user->email);
+
+        $this->postJson('/api/v1/web-chat/ask', [
+            'phone' => $phone,
+            'query' => "/ask When is Diane's birthday?",
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.needs_escalation', true)
+            ->assertJsonPath(
+                'data.answer',
+                'No birthday in the notes yet. I passed this to the team and I will follow up.',
+            );
+
+        Http::assertSent(function (\Illuminate\Http\Client\Request $request): bool {
+            if (! str_contains($request->url(), '/conversation/reply')) {
+                return false;
+            }
+            $body = json_decode($request->body(), true) ?: [];
+
+            return ($body['mode'] ?? null) === 'escalated'
+                && str_contains((string) ($body['message'] ?? ''), 'Diane');
+        });
+    }
+
     public function test_help_command_returns_channel_help(): void
     {
         [$user, $community] = $this->seedMember();

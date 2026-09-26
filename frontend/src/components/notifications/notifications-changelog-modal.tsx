@@ -3,179 +3,14 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Tooltip } from "@/components/ui/tooltip";
+import { apiFetch } from "@/lib/api/client";
+import type { CommunityNotificationItem, CommunityNotificationsResponse } from "@/lib/api/types";
+import { syncAppBadge } from "@/lib/pwa/app-badge";
+import { CHANGELOG_ENTRIES, LATEST_CHANGELOG, type ChangelogEntry } from "@/lib/changelog";
+import { useWebChat } from "@/lib/web-chat/web-chat-context";
 
-export interface CommunityNotification {
-  id: string;
-  title: string;
-  message: string;
-  timestamp: string;
-  category: "Announcement" | "Live Session" | "Deadline" | "System";
-  read: boolean;
-  actionQuery?: string;
-}
-
-export interface ChangelogEntry {
-  version: string;
-  date: string;
-  isLatest?: boolean;
-  title: string;
-  changes: {
-    tag: "Feature" | "Improvement" | "Fix" | "UI";
-    description: string;
-  }[];
-}
-
-const INITIAL_NOTIFICATIONS: CommunityNotification[] = [
-  {
-    id: "notif-0",
-    title: "New Meetings Hub & Live Sessions Active",
-    message: "Browse weekly cohort syncs, mentor office hours, and open sessions with direct Teams, Zoom & Meet links.",
-    timestamp: "Just now",
-    category: "Live Session",
-    read: false,
-    actionQuery: "What meetings and live sessions are scheduled for this week?",
-  },
-  {
-    id: "notif-1",
-    title: "UniPods METI AI Hackathon Kickoff",
-    message: "Initial project registration and team roster submission closes this Friday. Review the criteria in the handbook.",
-    timestamp: "2 hours ago",
-    category: "Deadline",
-    read: false,
-    actionQuery: "When is the hackathon deadline and submission requirements?",
-  },
-  {
-    id: "notif-2",
-    title: "Live Mentorship Q&A on Microsoft Teams",
-    message: "Mentors host a live office hour tomorrow at 4:00 PM to review project ideas and next steps.",
-    timestamp: "Yesterday",
-    category: "Live Session",
-    read: false,
-    actionQuery: "When is the next live session and how do I join?",
-  },
-  {
-    id: "notif-3",
-    title: "Wadhwani Resource Pack Updated",
-    message: "New reference materials on generative models and training notebooks have been added to the knowledge hub.",
-    timestamp: "3 days ago",
-    category: "Announcement",
-    read: true,
-    actionQuery: "Where can I find the UniPods handbook and Wadhwani resource pack?",
-  },
-  {
-    id: "notif-4",
-    title: "Community Share Approved",
-    message: "Your submitted tip regarding prompt optimization has been approved and published to member drafts.",
-    timestamp: "5 days ago",
-    category: "System",
-    read: true,
-  },
-];
-
-const CHANGELOG_ENTRIES: ChangelogEntry[] = [
-  {
-    version: "v1.4.0",
-    date: "September 2026",
-    isLatest: true,
-    title: "Live Meetings Hub & Resilient Assistant Experience",
-    changes: [
-      {
-        tag: "Feature",
-        description: "Live Meetings & Sessions Hub: Direct access to cohort syncs, mentor office hours, and masterclasses across Microsoft Teams, Google Meet, and Zoom.",
-      },
-      {
-        tag: "Feature",
-        description: "In-App Feature Suggestions: Submit tool improvements with instant escalation to community coordinators via Telegram & WhatsApp bots.",
-      },
-      {
-        tag: "UI",
-        description: "Smooth Modal & Dropdown Animations: Fluid ease-out transitions on opening and closing all dialogs, popovers, and drawers.",
-      },
-      {
-        tag: "Improvement",
-        description: "Sanitized Error Shield: Replaced technical backend exception details with clean, reassuring, user-friendly guidance.",
-      },
-      {
-        tag: "UI",
-        description: "Compact Modern Controls: Unified input and button heights, edge-aligned header actions, and visible Install App header pill.",
-      },
-      {
-        tag: "Improvement",
-        description: "Animated Skeleton Loading: Instant visual feedback and shimmer placeholders during session discovery and resource lookups.",
-      },
-    ],
-  },
-  {
-    version: "v1.3.0",
-    date: "September 2026",
-    isLatest: false,
-    title: "ChatGPT Experience & Interactive Command Palette",
-    changes: [
-      {
-        tag: "UI",
-        description: "Full ChatGPT aesthetic overhaul with dark/light themes, collapsible sidebar, and conversation history.",
-      },
-      {
-        tag: "Feature",
-        description: "Clickable Quick Commands & Slash Menu: Auto-populate /ask, /share, /feature, /help directly into your composer.",
-      },
-      {
-        tag: "UI",
-        description: "Refined notification dropdown anchored directly to header with zero scrollbar clutter.",
-      },
-      {
-        tag: "Improvement",
-        description: "Guaranteed Smart Auto-Scroll: Sticks to bottom during live bot typing, streaming, and input focus.",
-      },
-      {
-        tag: "Feature",
-        description: "Unified Notification & Changelog Dropdown: In-app release notes and real-time community announcements.",
-      },
-    ],
-  },
-  {
-    version: "v1.2.0",
-    date: "August 2026",
-    title: "Voice Dictation & Standalone PWA",
-    changes: [
-      {
-        tag: "Feature",
-        description: "Hands-free voice recognition with live audio visualizer and speech-to-text querying.",
-      },
-      {
-        tag: "Improvement",
-        description: "Progressive Web App support: Install as standalone mobile or desktop app with offline capability.",
-      },
-      {
-        tag: "Feature",
-        description: "Rich interactive meeting cards with 1-click launch for Microsoft Teams, Zoom, and Google Meet.",
-      },
-    ],
-  },
-  {
-    version: "v1.1.0",
-    date: "July 2026",
-    title: "Knowledge Grounding & Admin Controls",
-    changes: [
-      {
-        tag: "Feature",
-        description: "Direct Drive asset registration via /asset and WhatsApp/Telegram export ingestion via /import.",
-      },
-      {
-        tag: "Improvement",
-        description: "Dual-layer permission validation ensuring community isolation.",
-      },
-      {
-        tag: "Fix",
-        description: "Resolved citation revalidation timeouts on complex technical queries.",
-      },
-    ],
-  },
-];
-
-const STORAGE_KEY_NOTIFS = "unipod_notifications_state_v1";
-
-const LATEST_CHANGELOG = CHANGELOG_ENTRIES.find((entry) => entry.isLatest) ?? CHANGELOG_ENTRIES[0];
+export type CommunityNotification = CommunityNotificationItem;
+export type { ChangelogEntry };
 
 interface NotificationsChangelogModalProps {
   onInsertQuery?: (query: string) => void;
@@ -188,6 +23,7 @@ export function openNotificationsModal(tab: "notifications" | "changelog" = "not
 }
 
 export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChangelogModalProps) {
+  const { memberPhone, adminToken } = useWebChat();
   const [isOpen, setIsOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [activeTab, setActiveTab] = useState<"notifications" | "changelog">("notifications");
@@ -196,10 +32,73 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
   const [portalReady, setPortalReady] = useState(false);
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const [showMobileOverlay, setShowMobileOverlay] = useState(false);
+  const [notifications, setNotifications] = useState<CommunityNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     setPortalReady(true);
   }, []);
+
+  const applyNotificationPayload = useCallback((payload: CommunityNotificationsResponse["data"]) => {
+    setNotifications(payload.notifications);
+    setUnreadCount(payload.unread_count);
+    void syncAppBadge(payload.unread_count);
+  }, []);
+
+  const fetchNotifications = useCallback(async () => {
+    if (!memberPhone) {
+      setNotifications([]);
+      setUnreadCount(0);
+      void syncAppBadge(0);
+      return;
+    }
+
+    setLoadingNotifications(true);
+    setLoadError(null);
+    try {
+      const qs = new URLSearchParams({ phone: memberPhone });
+      const headers: Record<string, string> = {};
+      if (adminToken) {
+        headers.Authorization = `Bearer ${adminToken}`;
+        headers["X-Admin-Token"] = adminToken;
+      }
+      const res = await apiFetch<CommunityNotificationsResponse>(
+        `/api/v1/web-chat/notifications?${qs.toString()}`,
+        { headers },
+      );
+      applyNotificationPayload(res.data);
+    } catch {
+      setLoadError("Could not load updates right now.");
+    } finally {
+      setLoadingNotifications(false);
+    }
+  }, [memberPhone, adminToken, applyNotificationPayload]);
+
+  // Load on mount / phone change, and when panel opens; light poll while open.
+  useEffect(() => {
+    void fetchNotifications();
+  }, [fetchNotifications]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== "notifications") {
+      return;
+    }
+    void fetchNotifications();
+    const id = window.setInterval(() => {
+      void fetchNotifications();
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [isOpen, activeTab, fetchNotifications]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      void fetchNotifications();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchNotifications]);
 
   useLayoutEffect(() => {
     if (!isOpen || !buttonRef.current) {
@@ -299,41 +198,35 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
     return () => window.clearTimeout(t);
   }, [openPanel]);
 
-  const [notifications, setNotifications] = useState<CommunityNotification[]>(() => {
-    if (typeof window === "undefined") return INITIAL_NOTIFICATIONS;
+  const markAllAsRead = async () => {
+    if (!memberPhone) return;
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_NOTIFS);
-      if (stored) {
-        return JSON.parse(stored);
-      }
+      const qs = new URLSearchParams({ phone: memberPhone });
+      const res = await apiFetch<CommunityNotificationsResponse>(
+        `/api/v1/web-chat/notifications/read-all?${qs.toString()}`,
+        { method: "POST" },
+      );
+      applyNotificationPayload(res.data);
     } catch {
-      // ignore
-    }
-    return INITIAL_NOTIFICATIONS;
-  });
-
-  const saveNotifications = (updated: CommunityNotification[]) => {
-    setNotifications(updated);
-    try {
-      localStorage.setItem(STORAGE_KEY_NOTIFS, JSON.stringify(updated));
-    } catch {
-      // ignore
+      setLoadError("Could not mark updates as read.");
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
-
-  const markAllAsRead = () => {
-    const updated = notifications.map((n) => ({ ...n, read: true }));
-    saveNotifications(updated);
+  const markAsRead = async (id: string) => {
+    if (!memberPhone) return;
+    try {
+      const qs = new URLSearchParams({ phone: memberPhone });
+      const res = await apiFetch<CommunityNotificationsResponse>(
+        `/api/v1/web-chat/notifications/${id}/read?${qs.toString()}`,
+        { method: "POST" },
+      );
+      applyNotificationPayload(res.data);
+    } catch {
+      // keep list; user can still ask Zak
+    }
   };
 
-  const markAsRead = (id: string) => {
-    const updated = notifications.map((n) => (n.id === id ? { ...n, read: true } : n));
-    saveNotifications(updated);
-  };
-
-  const handleActionClick = (query?: string) => {
+  const handleActionClick = (query?: string | null) => {
     if (query && onInsertQuery) {
       onInsertQuery(query);
       handleClose();
@@ -370,7 +263,7 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
   }, [isOpen]);
 
   return (
-    <div className="relative">
+    <div className="relative flex h-8 w-8 items-center justify-center">
       {/* Bell Trigger Button */}
       <Tooltip content="Notifications & Updates" position="bottom">
         <button
@@ -450,7 +343,7 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
             {/* Popover Header */}
             <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 max-sm:px-4 dark:border-zinc-800/80">
               <div className="flex items-center gap-2">
-                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                     <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
                     <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
@@ -515,7 +408,7 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                 >
                   <span>What&apos;s new</span>
                   {LATEST_CHANGELOG.isLatest && (
-                    <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                    <span className="shrink-0 whitespace-nowrap rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
                       Latest
                     </span>
                   )}
@@ -525,8 +418,8 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
               {activeTab === "notifications" && unreadCount > 0 && (
                 <button
                   type="button"
-                  onClick={markAllAsRead}
-                  className="self-start text-[11px] font-medium text-emerald-600 hover:underline sm:self-auto dark:text-emerald-400 cursor-pointer"
+                  onClick={() => void markAllAsRead()}
+                  className="self-start text-[11px] font-medium text-blue-600 hover:underline sm:self-auto dark:text-blue-400 cursor-pointer"
                 >
                   Mark all as read
                 </button>
@@ -537,14 +430,36 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain no-scrollbar px-4 py-3.5 sm:max-h-[380px]">
               {activeTab === "notifications" ? (
                 <div className="space-y-2.5">
+                  {loadingNotifications && notifications.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
+                      Loading updates…
+                    </p>
+                  ) : null}
+                  {loadError && notifications.length === 0 ? (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-4 text-center dark:border-rose-900/50 dark:bg-rose-950/30">
+                      <p className="text-xs text-rose-700 dark:text-rose-300">{loadError}</p>
+                      <button
+                        type="button"
+                        onClick={() => void fetchNotifications()}
+                        className="mt-2 text-[11px] font-medium text-blue-700 underline dark:text-blue-400 cursor-pointer"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ) : null}
+                  {!loadingNotifications && !loadError && notifications.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
+                      No community updates yet.
+                    </p>
+                  ) : null}
                   {notifications.map((item) => (
                     <div
                       key={item.id}
-                      onClick={() => markAsRead(item.id)}
+                      onClick={() => void markAsRead(item.id)}
                       className={`group relative rounded-xl border p-3 transition-all cursor-pointer ${
                         item.read
                           ? "border-zinc-200/80 bg-zinc-50/50 hover:bg-zinc-50 dark:border-zinc-800/80 dark:bg-zinc-900/30 dark:hover:bg-zinc-900/50"
-                          : "border-emerald-200/90 bg-emerald-50/30 hover:bg-emerald-50/50 shadow-2xs dark:border-emerald-800/50 dark:bg-emerald-950/20"
+                          : "border-blue-200/90 bg-blue-50/30 hover:bg-blue-50/50 shadow-2xs dark:border-blue-800/50 dark:bg-blue-950/20"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -556,14 +471,14 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                                 : item.category === "Live Session"
                                 ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"
                                 : item.category === "Announcement"
-                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                                ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
                                 : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
                             }`}
                           >
                             {item.category}
                           </span>
                           {!item.read && (
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" title="Unread" />
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />
                           )}
                         </div>
                         <time className="text-[10px] text-zinc-400">{item.timestamp}</time>
@@ -576,13 +491,14 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                         {item.message}
                       </p>
 
-                      {item.actionQuery && (
+                      {item.action_query && (
                         <div className="mt-2.5 flex items-center gap-2">
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleActionClick(item.actionQuery);
+                              void markAsRead(item.id);
+                              handleActionClick(item.action_query);
                             }}
                             className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-[11px] font-medium text-zinc-800 shadow-2xs hover:bg-zinc-50 active:scale-95 transition dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer"
                           >
@@ -604,7 +520,7 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                       Recent improvements
                     </p>
                     <p className="mt-0.5 leading-relaxed">
-                      New features and fixes in UniPod Assistant—easier chat, meetings, and programme answers.
+                      New features and fixes in UniPod Assistant—projects, your library, chat, meetings, and programme answers.
                     </p>
                   </div>
 
@@ -613,14 +529,14 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                       key={entry.version}
                       className="border-l-2 border-zinc-200 pl-3 relative dark:border-zinc-800"
                     >
-                      <div className="absolute -left-[5px] top-1 h-2 w-2 rounded-full border border-white bg-emerald-500 dark:border-zinc-900" />
+                      <div className="absolute -left-[5px] top-1 h-2 w-2 rounded-full border border-white bg-blue-500 dark:border-zinc-900" />
                       
                       <div className="flex items-center gap-1.5">
                         <span className="font-mono text-xs font-bold text-zinc-900 dark:text-zinc-100">
                           {entry.version}
                         </span>
                         {entry.isLatest && (
-                          <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          <span className="shrink-0 whitespace-nowrap rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
                             Latest
                           </span>
                         )}
@@ -637,7 +553,7 @@ export function NotificationsChangelogModal({ onInsertQuery }: NotificationsChan
                             <span
                               className={`mt-0.5 rounded px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider shrink-0 whitespace-nowrap ${
                                 change.tag === "Feature"
-                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                  ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
                                   : change.tag === "UI"
                                   ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
                                   : change.tag === "Improvement"

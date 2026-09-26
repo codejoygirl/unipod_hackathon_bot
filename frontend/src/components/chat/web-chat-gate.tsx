@@ -1,13 +1,12 @@
 "use client";
 
-import { APP_DISPLAY_NAME, APP_LOGO_SRC } from "@/lib/branding";
 import { useWebChat } from "@/lib/web-chat/web-chat-context";
-import Image from "next/image";
 import type { ReactNode } from "react";
 import { PhoneEntryScreen } from "./phone-entry-screen";
+import { SplashLoader } from "./splash-loader";
 
 export function WebChatGate({ children }: { children: ReactNode }) {
-  const { phase, error, retry } = useWebChat();
+  const { phase, error, retry, logOut } = useWebChat();
 
   if (phase === "needs-phone" || phase === "needs-password") {
     return <PhoneEntryScreen />;
@@ -15,32 +14,8 @@ export function WebChatGate({ children }: { children: ReactNode }) {
 
   if (phase === "loading") {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center bg-white dark:bg-[#0d0d0d] px-6 select-none transition-colors duration-200">
-        <div className="flex flex-col items-center text-center animate-fade-in max-w-sm">
-          {/* Brand Icon */}
-          <div className="relative mb-5 flex h-14 w-14 items-center justify-center rounded-2xl overflow-hidden shadow-sm">
-            <Image
-              src={APP_LOGO_SRC}
-              alt="UniPod Logo"
-              width={56}
-              height={56}
-              className="h-full w-full object-contain rounded-2xl"
-              priority
-            />
-          </div>
-
-          <h2 className="text-base sm:text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-            {APP_DISPLAY_NAME}
-          </h2>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Preparing workspace & community knowledge...
-          </p>
-
-          {/* Sleek Minimalist Loading Bar (ChatGPT style) */}
-          <div className="mt-6 h-1 w-36 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800/80">
-            <div className="h-full w-1/2 rounded-full bg-emerald-500 animate-[indeterminate_1.4s_infinite_ease-in-out]" />
-          </div>
-        </div>
+      <div className="bg-white transition-colors duration-200 dark:bg-[#0d0d0d]">
+        <SplashLoader caption="Preparing workspace & community knowledge..." />
       </div>
     );
   }
@@ -64,13 +39,22 @@ export function WebChatGate({ children }: { children: ReactNode }) {
             {error || "We're having trouble connecting right now. Please try again in a moment."}
           </p>
 
-          <button
-            type="button"
-            onClick={retry}
-            className="mt-6 w-full cursor-pointer rounded-xl bg-zinc-900 py-3 text-xs font-semibold text-white transition hover:bg-zinc-800 active:scale-[0.99] dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 shadow-xs"
-          >
-            Try again
-          </button>
+          <div className="mt-6 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={retry}
+              className="w-full cursor-pointer rounded-xl bg-zinc-900 py-3 text-xs font-semibold text-white transition hover:bg-zinc-800 active:scale-[0.99] dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 shadow-xs"
+            >
+              Try again
+            </button>
+            <button
+              type="button"
+              onClick={logOut}
+              className="w-full cursor-pointer rounded-xl border border-zinc-200 bg-white py-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              Log out
+            </button>
+          </div>
         </div>
       </div>
     );

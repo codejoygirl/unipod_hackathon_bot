@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect } from "react";
 import { ChatSidebar } from "./chat-sidebar";
 import { useSidebar } from "@/lib/sidebar/sidebar-context";
 import { useRouter, usePathname } from "next/navigation";
@@ -9,19 +9,47 @@ import { useWebChat } from "@/lib/web-chat/web-chat-context";
 import { withPhoneQuery } from "@/lib/web-chat/url-params";
 import { QuickCommandsModal } from "./quick-commands-modal";
 import { RequestFeatureModal } from "@/components/features/request-feature-modal";
+import { NewProjectModal } from "@/components/projects/new-project-modal";
+import { AdminDeskModal } from "@/components/admin/admin-desk-modal";
+import { ensureWebPushSubscription } from "@/lib/pwa/web-push";
+import { maybeStartFirstVisitTour } from "@/lib/tour/product-tour";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const {
     isOpen,
+    setIsOpen,
     toggleSidebar,
     isCommandsModalOpen,
     openCommandsModal,
     isFeatureModalOpen,
     closeFeatureModal,
+    isProjectModalOpen,
+    closeProjectModal,
   } = useSidebar();
-  const { memberPhone, isAdmin } = useWebChat();
+  const { memberPhone, isAdmin, phase } = useWebChat();
   const router = useRouter();
   const pathname = usePathname();
+
+  useEffect(() => {
+    if (phase !== "ready" || !memberPhone) return;
+    // Enable closed-app alerts by default (browser may still prompt once).
+    ensureWebPushSubscription(memberPhone).catch(() => {});
+  }, [phase, memberPhone]);
+
+  useEffect(() => {
+    if (phase !== "ready" || !memberPhone) return;
+    maybeStartFirstVisitTour({
+      openSidebar: () => setIsOpen(true),
+      ensureHome: () => {
+        const alreadyHome = pathname === "/" || pathname === "";
+        if (!alreadyHome) {
+          router.push(withPhoneQuery("/", memberPhone));
+          return true;
+        }
+        return false;
+      },
+    });
+  }, [phase, memberPhone, pathname, router, setIsOpen]);
 
   const handleNewChat = useCallback(() => {
     if (pathname !== "/") {
@@ -72,6 +100,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         isOpen={isFeatureModalOpen}
         onClose={closeFeatureModal}
       />
+
+      <NewProjectModal
+        isOpen={isProjectModalOpen}
+        onClose={closeProjectModal}
+      />
+
+      <AdminDeskModal />
     </div>
   );
 }

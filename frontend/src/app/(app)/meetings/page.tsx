@@ -2,7 +2,9 @@
 
 import { ChatHeader } from "@/components/chat/chat-header";
 import { useWebChat } from "@/lib/web-chat/web-chat-context";
-import { useMemo, useState, useEffect } from "react";
+import { apiFetch } from "@/lib/api/client";
+import { usePageSize } from "@/lib/ui/use-page-size";
+import { useMemo, useState, useEffect, useCallback } from "react";
 
 export interface CommunityMeeting {
   id: string;
@@ -20,7 +22,7 @@ export interface CommunityMeeting {
   isLiveNow?: boolean;
 }
 
-const COMMUNITY_MEETINGS: CommunityMeeting[] = [
+const FALLBACK_MEETINGS: CommunityMeeting[] = [
   {
     id: "meti-teams-open-hour",
     title: "METI Open Hour: 'Ask Us Anything'",
@@ -34,121 +36,83 @@ const COMMUNITY_MEETINGS: CommunityMeeting[] = [
     description: "Weekly open office hour to ask anything about your venture, technical bottlenecks, prototype feedback, and cohort progress.",
     isLiveNow: false,
   },
-  {
-    id: "weekly-cohort-sync",
-    title: "Weekly Cohort Sync & Demo Standup",
-    category: "weekly_sync",
-    platform: "meet",
-    platformName: "Google Meet",
-    url: "https://meet.google.com/unipod-cohort-sync",
-    schedule: "Tuesdays & Thursdays at 2:00 PM GMT",
-    timeContext: "3:00 PM WAT / 4:00 PM CAT / 5:00 PM EAT",
-    host: "Programme Coordinators & Leads",
-    description: "Live demonstration of sprint deliverables, peer feedback, milestone tracking, and cross-team collaboration.",
-    isLiveNow: false,
-  },
-  {
-    id: "mentor-tech-office-hours",
-    title: "Mentor Technical Office Hours: AI Architecture & Systems",
-    category: "office_hours",
-    platform: "zoom",
-    platformName: "Zoom",
-    url: "https://zoom.us/j/92485710294",
-    schedule: "Wednesdays at 11:00 AM GMT",
-    timeContext: "12:00 PM WAT / 1:00 PM CAT / 2:00 PM EAT",
-    host: "Technical Lead Mentors",
-    description: "One-on-one and breakout architectural reviews: LLM integration, RAG pipelines, API scalability, and cloud deployments.",
-    meetingId: "924 8571 0294",
-    passcode: "UNIPOD2026",
-    isLiveNow: false,
-  },
-  {
-    id: "wadhwani-masterclass",
-    title: "Wadhwani AI & Entrepreneurship Masterclass",
-    category: "workshop",
-    platform: "teams",
-    platformName: "Microsoft Teams",
-    url: "https://teams.microsoft.com/l/meetup-join/19%3ameeting_ZjI1YWZjNGMtNmFmNy00NTFlLWE4MGYtNTBjOGU4NmYyMmZi%40thread.v2/0?context=%7b%22Tid%22%3a%22b3e5db5e-2944-4837-99f5-7488ace54319%22%2c%22Oid%22%3a%22d853f98a-ba60-4bfb-9368-8960661d364c%22%7d",
-    schedule: "Bi-weekly Mondays at 12:00 PM GMT",
-    timeContext: "1:00 PM WAT / 2:00 PM CAT / 3:00 PM EAT",
-    host: "Wadhwani Ignite Faculty",
-    description: "Deep-dive workshops into customer discovery, value proposition design, unit economics, and market validation.",
-    isLiveNow: false,
-  },
-  {
-    id: "hackathon-pitch-clinic",
-    title: "Hackathon Pitch Clinic & Rehearsal",
-    category: "hackathon",
-    platform: "meet",
-    platformName: "Google Meet",
-    url: "https://meet.google.com/unipod-pitch-clinic",
-    schedule: "Fridays before deadlines at 4:00 PM GMT",
-    timeContext: "5:00 PM WAT / 6:00 PM CAT / 7:00 PM EAT",
-    host: "Pitch Coaches & Venture Leads",
-    description: "3-minute pitch rehearsals, judge rubrics, slide deck feedback, and live Q&A preparation.",
-    isLiveNow: false,
-  },
-  {
-    id: "onboarding-call-recap",
-    title: "Cohort Onboarding & Orientation Call (Recording & Recap)",
-    category: "recap",
-    platform: "teams",
-    platformName: "Microsoft Teams Recording",
-    url: "https://teams.microsoft.com/l/meetingrecap?driveId=b!iplkOk-dvkG7vyuOBdx8vLVOz3cMsFpEnyRP0GRcQyvzewveGMTPRKYE4O9F5hn3&driveItemId=01TOJP4VA2L5YYQHQVMREZCT27V3WYIGJ2&sitePath=https://undp-my.sharepoint.com/:v:/g/personal/munira_umugwaneza_undp_org/IQAaX3GIHhVkSZFPX67thBk6AUp7P_OnFnwhNrWzl9Q0Efs&fileUrl=https://undp-my.sharepoint.com/personal/munira_umugwaneza_undp_org/Documents/Recordings/MIT+Universal+AI+Welcome+and+onboarding+Call-20260916_140218-Meeting+Recording.mp4?web=1",
-    schedule: "On-demand Recording",
-    timeContext: "Available 24/7 for all cohort members",
-    host: "Munira Umugwaneza (UNDP / UniPod)",
-    description: "Official welcome, programme roadmap, expectations, and mentorship guidelines for Cohort 4.",
-    isLiveNow: false,
-  },
-  {
-    id: "design-sprint-workshop",
-    title: "Design Sprint & Rapid Prototyping Workshop",
-    category: "workshop",
-    platform: "meet",
-    platformName: "Google Meet",
-    url: "https://meet.google.com/unipod-prototyping",
-    schedule: "Thursdays at 11:00 AM GMT",
-    timeContext: "12:00 PM WAT / 1:00 PM CAT / 2:00 PM EAT",
-    host: "UniPod Technical Innovation Leads",
-    description: "Hands-on engineering workshops covering Figma to code, hardware-software integration, and rapid MVP testing.",
-    isLiveNow: false,
-  },
-  {
-    id: "founder-fireside-scaling",
-    title: "Founder Fireside: Scaling AI Ventures in Africa",
-    category: "office_hours",
-    platform: "zoom",
-    platformName: "Zoom",
-    url: "https://zoom.us/j/93821094821",
-    schedule: "First Tuesday of the Month at 3:00 PM GMT",
-    timeContext: "4:00 PM WAT / 5:00 PM CAT / 6:00 PM EAT",
-    host: "Guest Venture Capitalists & AI Founders",
-    description: "Candid founder conversations on navigating regional regulation, enterprise sales, fundraising, and talent acquisition.",
-    meetingId: "938 2109 4821",
-    passcode: "UNIPOD2026",
-    isLiveNow: false,
-  },
 ];
+
+type MeetingsResponse = {
+  data: {
+    community_id: string;
+    meetings: Array<{
+      id: string;
+      title: string;
+      category: CommunityMeeting["category"];
+      platform: CommunityMeeting["platform"];
+      platformName: string;
+      url: string;
+      schedule?: string | null;
+      timeContext?: string | null;
+      host?: string | null;
+      description?: string | null;
+      meetingId?: string | null;
+      passcode?: string | null;
+      isLiveNow?: boolean;
+    }>;
+  };
+};
+
+function normalizeMeeting(raw: MeetingsResponse["data"]["meetings"][number]): CommunityMeeting {
+  return {
+    id: raw.id,
+    title: raw.title,
+    category: raw.category,
+    platform: raw.platform,
+    platformName: raw.platformName || raw.platform,
+    url: raw.url,
+    schedule: raw.schedule || "",
+    timeContext: raw.timeContext || "",
+    host: raw.host || "",
+    description: raw.description || "",
+    meetingId: raw.meetingId || undefined,
+    passcode: raw.passcode || undefined,
+    isLiveNow: Boolean(raw.isLiveNow),
+  };
+}
 
 type MeetingCategoryFilter = "all" | "weekly_sync" | "office_hours" | "workshop" | "hackathon" | "recap";
 
 export default function MeetingsPage() {
-  const { community } = useWebChat();
+  const { community, memberPhone, isAdmin } = useWebChat();
+  const [meetings, setMeetings] = useState<CommunityMeeting[]>(FALLBACK_MEETINGS);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<MeetingCategoryFilter>("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
-  const ITEMS_PER_PAGE = 4;
+  const pageSize = usePageSize();
+
+  const loadMeetings = useCallback(async () => {
+    if (!memberPhone) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams({ phone: memberPhone });
+      const res = await apiFetch<MeetingsResponse>(`/api/v1/web-chat/meetings?${qs.toString()}`);
+      const list = (res.data.meetings || []).map(normalizeMeeting);
+      if (list.length > 0) {
+        setMeetings(list);
+      }
+    } catch {
+      // keep fallback
+    } finally {
+      setLoading(false);
+    }
+  }, [memberPhone]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 280);
-    return () => clearTimeout(timer);
-  }, []);
+    void loadMeetings();
+  }, [loadMeetings]);
 
   const handleSearchChange = (val: string) => {
     setSearchQuery(val);
@@ -161,7 +125,7 @@ export default function MeetingsPage() {
   };
 
   const filteredMeetings = useMemo(() => {
-    return COMMUNITY_MEETINGS.filter((m) => {
+    return meetings.filter((m) => {
       const matchesCategory = activeCategory === "all" || m.category === activeCategory;
       if (!matchesCategory) return false;
 
@@ -175,13 +139,17 @@ export default function MeetingsPage() {
         m.schedule.toLowerCase().includes(q)
       );
     });
-  }, [activeCategory, searchQuery]);
+  }, [meetings, activeCategory, searchQuery]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredMeetings.length / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(filteredMeetings.length / pageSize));
   const paginatedMeetings = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredMeetings.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredMeetings, currentPage]);
+    const start = (currentPage - 1) * pageSize;
+    return filteredMeetings.slice(start, start + pageSize);
+  }, [filteredMeetings, currentPage, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   const handleCopyLink = async (meeting: CommunityMeeting) => {
     try {
@@ -194,31 +162,31 @@ export default function MeetingsPage() {
   };
 
   const categories: { label: string; value: MeetingCategoryFilter; count: number }[] = [
-    { label: "All Sessions", value: "all", count: COMMUNITY_MEETINGS.length },
+    { label: "All Sessions", value: "all", count: meetings.length },
     {
       label: "Weekly Syncs",
       value: "weekly_sync",
-      count: COMMUNITY_MEETINGS.filter((m) => m.category === "weekly_sync").length,
+      count: meetings.filter((m) => m.category === "weekly_sync").length,
     },
     {
       label: "Office Hours",
       value: "office_hours",
-      count: COMMUNITY_MEETINGS.filter((m) => m.category === "office_hours").length,
+      count: meetings.filter((m) => m.category === "office_hours").length,
     },
     {
       label: "Workshops",
       value: "workshop",
-      count: COMMUNITY_MEETINGS.filter((m) => m.category === "workshop").length,
+      count: meetings.filter((m) => m.category === "workshop").length,
     },
     {
       label: "Hackathon",
       value: "hackathon",
-      count: COMMUNITY_MEETINGS.filter((m) => m.category === "hackathon").length,
+      count: meetings.filter((m) => m.category === "hackathon").length,
     },
     {
       label: "Replays & Recaps",
       value: "recap",
-      count: COMMUNITY_MEETINGS.filter((m) => m.category === "recap").length,
+      count: meetings.filter((m) => m.category === "recap").length,
     },
   ];
 
@@ -231,29 +199,31 @@ export default function MeetingsPage() {
       <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8">
         <div className="mx-auto max-w-5xl space-y-6">
           {/* Page Banner & Headline */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-200/80 pb-5 dark:border-zinc-800/80">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-                  {community?.name ? `${community.name} Meetings` : "Meetings & Live Sessions"}
-                </h1>
-                <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
-                  Active
-                </span>
-              </div>
+          <div className="flex items-start sm:items-center justify-between gap-3 border-b border-zinc-200/80 pb-5 dark:border-zinc-800/80">
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+                {community?.name ? `${community.name} Meetings` : "Meetings & Live Sessions"}
+              </h1>
               <p className="mt-1 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
                 Join live cohort standups, mentor office hours, masterclasses, and catch up on recorded sessions.
               </p>
             </div>
 
-            {/* Quick timezone reminder pill */}
-            <div className="flex items-center gap-1.5 self-start sm:self-auto rounded-lg border border-zinc-200/70 bg-white px-3 py-1.5 text-xs text-zinc-600 shadow-2xs dark:border-zinc-800 dark:bg-[#1a1a1a] dark:text-zinc-300">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              <span>Times listed in GMT (WAT: +1h, CAT: +2h, EAT: +3h)</span>
-            </div>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent("open-admin-desk", { detail: { tab: "meeting" } }))
+                }
+                className="inline-flex shrink-0 items-center gap-1.5 self-start sm:self-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-500 cursor-pointer"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Add meeting
+              </button>
+            )}
           </div>
 
           {/* Search, Filter & View Controls */}
@@ -449,8 +419,8 @@ export default function MeetingsPage() {
               {totalPages > 1 && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-zinc-200/80 dark:border-zinc-800/80">
                   <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                    Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
-                    {Math.min(currentPage * ITEMS_PER_PAGE, filteredMeetings.length)} of{" "}
+                    Showing {(currentPage - 1) * pageSize + 1}–
+                    {Math.min(currentPage * pageSize, filteredMeetings.length)} of{" "}
                     {filteredMeetings.length} sessions
                   </span>
 
@@ -524,7 +494,7 @@ function PlatformBadge({ platform }: { platform: "teams" | "meet" | "zoom" }) {
       );
     case "meet":
       return (
-        <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+        <span className="inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
           </svg>
@@ -627,7 +597,7 @@ function MeetingTable({
                         title="Copy session link"
                       >
                         {copiedId === meeting.id ? (
-                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                          <span className="text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                               <polyline points="20 6 9 17 4 12" />
                             </svg>
