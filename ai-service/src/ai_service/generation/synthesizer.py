@@ -468,6 +468,46 @@ class AnswerSynthesizer:
         return False
 
     @classmethod
+    def _is_placeholder_url(cls, url: str) -> bool:
+        host = (urlsplit(url or "").hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host in {"example.com", "example.org", "example.net"} or host.endswith(".example.com")
+
+    @classmethod
+    def drop_ungrounded_urls(cls, answer: str, chunks: Sequence[EvidenceChunk] | None) -> str:
+        """Drop placeholder hosts and any URL that does not appear in evidence."""
+        allowed: set[str] = set()
+        for chunk in chunks or []:
+            for raw in _URL_RE.findall(chunk.content or ""):
+                url = cls._normalize_url_text(raw.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
+                if url.lower().startswith(("http://", "https://")) and not cls._is_invalid_or_internal_url(url):
+                    allowed.add(cls._url_dedupe_key(url))
+            media = getattr(getattr(chunk, "locator", None), "media_url", None)
+            if media:
+                allowed.add(cls._url_dedupe_key(str(media)))
+
+        def keep(url: str) -> bool:
+            cleaned = cls._normalize_url_text(url.rstrip(".,);]}>'\"")).rstrip(".,);]}>'\"")
+            if cls._is_placeholder_url(cleaned):
+                return False
+            if not allowed:
+                return False
+            return cls._url_dedupe_key(cleaned) in allowed
+
+        def sub_md(match: re.Match[str]) -> str:
+            return match.group(1) if not keep(match.group(2)) else match.group(0)
+
+        def sub_bare(match: re.Match[str]) -> str:
+            return match.group(0) if keep(match.group(0)) else ""
+
+        text = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", sub_md, answer or "")
+        text = _URL_RE.sub(sub_bare, text)
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    @classmethod
     def restore_urls_in_answer(cls, answer: str) -> str:
         """Decode HTML entities inside http(s) URLs so members get the original link."""
 
@@ -1458,6 +1498,7 @@ class AnswerSynthesizer:
         cleaned_answer = self._ensure_section_spacing(cleaned_answer)
         # Evidence XML escapes & as &amp;; never leave that in member-facing URLs.
         cleaned_answer = self.restore_urls_in_answer(cleaned_answer)
+        cleaned_answer = self.drop_ungrounded_urls(cleaned_answer, evidence_chunks)
 
         # 6. Deterministic 4-State Resolution
         return AnswerVerifier.resolve_state(

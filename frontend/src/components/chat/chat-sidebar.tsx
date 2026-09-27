@@ -18,7 +18,6 @@ import type { MemberProjectSummary } from "@/lib/api/types";
 interface ChatSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
-  onNewChat?: () => void;
   onSelectPrompt?: (prompt: string) => void;
   onOpenCommands?: () => void;
 }
@@ -26,7 +25,6 @@ interface ChatSidebarProps {
 export function ChatSidebar({
   isOpen,
   onToggle,
-  onNewChat,
 }: ChatSidebarProps) {
   const { community, memberLabel, memberPhone, isAdmin, adminName, logOut } = useWebChat();
   const { openFeatureModal, openProjectModal } = useSidebar();
@@ -96,9 +94,6 @@ export function ChatSidebar({
         ? "bg-zinc-200/90 text-zinc-950 shadow-2xs ring-1 ring-inset ring-zinc-300/70 dark:bg-[#252525] dark:text-white dark:ring-zinc-600/60"
         : "text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
     }`;
-
-  const pillActionClass =
-    "flex w-full items-center justify-start gap-2.5 rounded-full bg-zinc-100/95 px-3 py-2 text-xs font-semibold text-zinc-800 shadow-2xs ring-1 ring-inset ring-zinc-200/80 hover:bg-zinc-200/90 hover:text-zinc-950 dark:bg-zinc-800/90 dark:text-zinc-200 dark:ring-zinc-700/70 dark:hover:bg-zinc-800 transition active:scale-[0.99] cursor-pointer disabled:opacity-50";
 
   const startProject = () => {
     if (!memberPhone) return;
@@ -221,31 +216,6 @@ export function ChatSidebar({
                 </Tooltip>
               </div>
             </div>
-
-            {/* Community Chat only — projects keep a single thread */}
-            {!isProjectsActive ? (
-              <Tooltip
-                content="Start a new chat conversation"
-                position="bottom"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleNavClick();
-                    onNewChat?.();
-                  }}
-                  className={`${pillActionClass} mb-2`}
-                  data-tour="new-chat"
-                  aria-label="New chat"
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="text-blue-600 dark:text-blue-400 shrink-0">
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                  <span>New chat</span>
-                </button>
-              </Tooltip>
-            ) : null}
 
             {/* Navigation Links - Shifted comfortably down from top */}
             <nav className="mt-1 space-y-1.5 flex-1 overflow-y-auto no-scrollbar" aria-label="Sidebar navigation" data-tour="nav">
@@ -683,22 +653,6 @@ export function ChatSidebar({
                 />
               </Link>
             </Tooltip>
-
-            {!isProjectsActive ? (
-              <Tooltip content="New chat" position="right">
-                <button
-                  type="button"
-                  onClick={onNewChat}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900 active:scale-95 transition dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
-                  aria-label="New chat"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                </button>
-              </Tooltip>
-            ) : null}
 
             <div className="w-8 h-px bg-zinc-200 dark:bg-zinc-800 my-0.5" />
 
